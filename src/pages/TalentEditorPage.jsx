@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Save, RotateCcw, GitBranch } from 'lucide-react';
+import { Save, RotateCcw, GitBranch, X, Search } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
@@ -29,6 +29,7 @@ export default function TalentEditorPage() {
 	const [talents, setTalents] = useState([]);
 	const [spellNames, setSpellNames] = useState({});
 	const [spellIcons, setSpellIcons] = useState({});
+	const [iconToSpellId, setIconToSpellId] = useState({}); // reverse index: iconId → spellId
 	const [selected, setSelected] = useState(null);
 	const [form, setForm] = useState({});
 	const [dirty, setDirty] = useState(false);
@@ -36,6 +37,10 @@ export default function TalentEditorPage() {
 	const [committing, setCommitting] = useState(false);
 	const [msg, setMsg] = useState(null);
 	const [loadError, setLoadError] = useState(null);
+	const [showSpellPicker, setShowSpellPicker] = useState(false);
+	const [pickingRank, setPickingRank] = useState(null);
+	const [spellSearchTerm, setSpellSearchTerm] = useState('');
+	const [primarySpellIconId, setPrimarySpellIconId] = useState(null);
 
 	const loadTabs = useCallback(async (cls) => {
 		setLoadError(null);
@@ -94,6 +99,7 @@ export default function TalentEditorPage() {
 				// Extract spell names for display
 				const names = {};
 				const iconIds = new Set();
+				const iconIndex = {}; // reverse index: iconId → spellId
 				for (const spellId of uniqueIds) {
 					const spell = spellsResult.data?.[spellId];
 					if (spell) {
@@ -101,10 +107,15 @@ export default function TalentEditorPage() {
 						console.log(`  Spell ${spellId}: "${spell.name}" iconId=${spell.spellIconId}`);
 						if (spell.spellIconId) {
 							iconIds.add(spell.spellIconId);
+							// Build reverse index (only first spell per icon for now)
+							if (!iconIndex[spell.spellIconId]) {
+								iconIndex[spell.spellIconId] = spellId;
+							}
 						}
 					}
 				}
 				setSpellNames(names);
+				setIconToSpellId(iconIndex);
 
 				// Load spell icon filenames
 				if (iconIds.size > 0) {
@@ -199,6 +210,134 @@ export default function TalentEditorPage() {
 	const maxCol = talents.reduce((m, t) => Math.max(m, t.ColumnIndex || 0), 3);
 	const treeW = (maxCol + 1) * (CELL + GAP) - GAP;
 	const treeH = (maxRow + 1) * (CELL + GAP) - GAP;
+
+	// Get available spells for picker (all spellNames with icons)
+	const availableSpells = Object.entries(spellNames)
+		.map(([spellId, name]) => ({
+			spellId: parseInt(spellId),
+			name,
+			icon: spellIcons[parseInt(spellId)],
+		}))
+		.filter(s => s.name.toLowerCase().includes(spellSearchTerm.toLowerCase()) || s.spellId.toString().includes(spellSearchTerm))
+		.sort((a, b) => a.spellId - b.spellId);
+
+	const handleSelectSpell = (spellId) => {
+		if (pickingRank) {
+			handleChange(`SpellRank_${pickingRank}`, spellId);
+			setShowSpellPicker(false);
+			setSpellSearchTerm('');
+			setPickingRank(null);
+		}
+	};
+
+	// Get primary spell (first filled rank)
+	const primarySpellId = [1, 2, 3, 4, 5, 6, 7, 8, 9].find(i => form[`SpellRank_${i}`] > 0)
+		? form.SpellRank_1
+		: null;
+
+	// Get all ranks that have the primary spell
+	const ranksWithPrimarySpell = primarySpellId
+		? [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(i => form[`SpellRank_${i}`] === primarySpellId)
+		: [];
+
+	// Handle primary spell change — update all ranks with that spell
+	const handleChangePrimarySpell = (newSpellId) => {
+		if (ranksWithPrimarySpell.length > 0) {
+			ranksWithPrimarySpell.forEach(rank => {
+				handleChange(`SpellRank_${rank}`, newSpellId);
+			});
+			// Update selected talent preview for live tree update
+			if (selected) {
+				setSelected(prev => ({
+					...prev,
+					SpellRank_1: newSpellId,
+					SpellRank_2: prev.SpellRank_2 === primarySpellId ? newSpellId : prev.SpellRank_2,
+					SpellRank_3: prev.SpellRank_3 === primarySpellId ? newSpellId : prev.SpellRank_3,
+					SpellRank_4: prev.SpellRank_4 === primarySpellId ? newSpellId : prev.SpellRank_4,
+					SpellRank_5: prev.SpellRank_5 === primarySpellId ? newSpellId : prev.SpellRank_5,
+					SpellRank_6: prev.SpellRank_6 === primarySpellId ? newSpellId : prev.SpellRank_6,
+					SpellRank_7: prev.SpellRank_7 === primarySpellId ? newSpellId : prev.SpellRank_7,
+					SpellRank_8: prev.SpellRank_8 === primarySpellId ? newSpellId : prev.SpellRank_8,
+					SpellRank_9: prev.SpellRank_9 === primarySpellId ? newSpellId : prev.SpellRank_9,
+				}));
+			}
+		}
+	};
+
+	// Handle spell icon ID change — reverse lookup to find spell with this icon
+	const handleChangeSpellIconId = (newIconId) => {
+		setPrimarySpellIconId(newIconId);
+		setDirty(true);
+
+		// Load icon preview for this iconID
+		readSpellIcons([newIconId]).then(result => {
+			if (result.success) {
+				const iconFilename = result.data?.[newIconId];
+				if (iconFilename) {
+					getIcon(iconFilename).then(iconUrl => {
+						if (iconUrl) {
+							setSpellIcons(prev => ({ ...prev, [newIconId]: iconUrl }));
+						}
+					});
+				}
+			}
+		});
+
+		// Reverse lookup: use iconToSpellId index to find a spell with this iconID
+		const spellIdWithIcon = iconToSpellId[newIconId];
+		if (spellIdWithIcon && ranksWithPrimarySpell.length > 0) {
+			// Update all ranks that have primarySpellId to use this new spell
+			ranksWithPrimarySpell.forEach(rank => {
+				handleChange(`SpellRank_${rank}`, spellIdWithIcon);
+			});
+			// Update selected talent preview for live tree update
+			if (selected) {
+				setSelected(prev => ({
+					...prev,
+					SpellRank_1: spellIdWithIcon,
+					SpellRank_2: prev.SpellRank_2 === primarySpellId ? spellIdWithIcon : prev.SpellRank_2,
+					SpellRank_3: prev.SpellRank_3 === primarySpellId ? spellIdWithIcon : prev.SpellRank_3,
+					SpellRank_4: prev.SpellRank_4 === primarySpellId ? spellIdWithIcon : prev.SpellRank_4,
+					SpellRank_5: prev.SpellRank_5 === primarySpellId ? spellIdWithIcon : prev.SpellRank_5,
+					SpellRank_6: prev.SpellRank_6 === primarySpellId ? spellIdWithIcon : prev.SpellRank_6,
+					SpellRank_7: prev.SpellRank_7 === primarySpellId ? spellIdWithIcon : prev.SpellRank_7,
+					SpellRank_8: prev.SpellRank_8 === primarySpellId ? spellIdWithIcon : prev.SpellRank_8,
+					SpellRank_9: prev.SpellRank_9 === primarySpellId ? spellIdWithIcon : prev.SpellRank_9,
+				}));
+			}
+		}
+	};
+
+	// Auto-load spell icon ID and icon preview when primary spell changes
+	useEffect(() => {
+		if (primarySpellId) {
+			// Fetch spell data to get spellIconId
+			readSpells([primarySpellId]).then(result => {
+				if (result.success) {
+					const spellData = result.data?.[primarySpellId];
+					if (spellData?.spellIconId) {
+						setPrimarySpellIconId(spellData.spellIconId);
+
+						// Load icon if not already cached
+						if (!spellIcons[primarySpellId]) {
+							readSpellIcons([spellData.spellIconId]).then(iconResult => {
+								if (iconResult.success) {
+									const iconFilename = iconResult.data?.[spellData.spellIconId];
+									if (iconFilename) {
+										getIcon(iconFilename).then(iconUrl => {
+											if (iconUrl) {
+												setSpellIcons(prev => ({ ...prev, [primarySpellId]: iconUrl }));
+											}
+										});
+									}
+								}
+							});
+						}
+					}
+				}
+			});
+		}
+	}, [primarySpellId, readSpells, readSpellIcons, getIcon, spellIcons]);
 
 	return (
 		<div className="talent-layout fade-in">
@@ -321,6 +460,35 @@ export default function TalentEditorPage() {
 						{msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
 
 						<div className="talent-edit-fields">
+							{primarySpellId && (
+								<>
+									<div className="talent-edit-section">Spell Icon</div>
+									<div className="field-group spell-icon-master">
+										<label>
+											Spell Icon ID
+											{spellNames[primarySpellId] && <span className="field-spell-hint"> — {spellNames[primarySpellId]}</span>}
+											<span className="spell-icon-ranks"> ({ranksWithPrimarySpell.length} rank{ranksWithPrimarySpell.length !== 1 ? 's' : ''})</span>
+										</label>
+										<div className="spell-icon-input-group">
+											{(spellIcons[primarySpellIconId] || spellIcons[primarySpellId]) &&
+												<img
+													src={spellIcons[primarySpellIconId] || spellIcons[primarySpellId]}
+													alt="icon"
+													className="spell-icon-master-preview"
+												/>
+											}
+											<input
+												type="number"
+												value={primarySpellIconId ?? 0}
+												onChange={e => handleChangeSpellIconId(+e.target.value)}
+												placeholder="Icon ID"
+												title="Wijzig icon ID → laadt preview en updatet alle ranks"
+											/>
+										</div>
+									</div>
+								</>
+							)}
+
 							<div className="talent-edit-section">Positie</div>
 							<div className="field-group">
 								<label>Tier (Rij)</label>
@@ -355,6 +523,7 @@ export default function TalentEditorPage() {
 											type="number"
 											value={spellId ?? 0}
 											onChange={e => handleChange(`SpellRank_${i}`, +e.target.value)}
+											placeholder="Spell ID"
 										/>
 									</div>
 								);
@@ -363,6 +532,52 @@ export default function TalentEditorPage() {
 					</>
 				)}
 			</div>
+
+			{/* ── Spell Icon Picker Modal ── */}
+			{showSpellPicker && (
+				<div className="spell-picker-modal">
+					<div className="spell-picker-overlay" onClick={() => setShowSpellPicker(false)} />
+					<div className="spell-picker-panel">
+						<div className="spell-picker-header">
+							<h3>Selecteer Spell voor Rank {pickingRank}</h3>
+							<button className="spell-picker-close" onClick={() => setShowSpellPicker(false)}>
+								<X size={16} />
+							</button>
+						</div>
+
+						<div className="spell-picker-search">
+							<Search size={14} />
+							<input
+								type="text"
+								placeholder="Zoek op naam of spell ID..."
+								value={spellSearchTerm}
+								onChange={e => setSpellSearchTerm(e.target.value)}
+								autoFocus
+							/>
+						</div>
+
+						<div className="spell-picker-list">
+							{availableSpells.map(spell => (
+								<div
+									key={spell.spellId}
+									className="spell-picker-item"
+									onClick={() => handleSelectSpell(spell.spellId)}
+									title={`Spell ID: ${spell.spellId}`}
+								>
+									{spell.icon && <img src={spell.icon} alt={spell.name} className="spell-picker-icon" />}
+									<div className="spell-picker-info">
+										<div className="spell-picker-name">{spell.name}</div>
+										<div className="spell-picker-id">#{spell.spellId}</div>
+									</div>
+								</div>
+							))}
+							{availableSpells.length === 0 && (
+								<div className="spell-picker-empty">Geen spells gevonden</div>
+							)}
+						</div>
+					</div>
+				</div>
+			)}
 		</div>
 	);
 }

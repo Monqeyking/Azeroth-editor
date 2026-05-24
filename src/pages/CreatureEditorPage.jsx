@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight } from 'lucide-react';
+import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight, MousePointerClick } from 'lucide-react';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
 
@@ -137,11 +137,29 @@ export default function CreatureEditorPage() {
     setDirty(false);
   };
 
+  // Group fields into sections for better organization
+  const getFieldSections = () => [
+    { title: 'Basis Info', keys: ['entry', 'name', 'subname'] },
+    { title: 'Levels', keys: ['minlevel', 'maxlevel'] },
+    { title: 'Speeds', keys: ['speed_walk', 'speed_run', 'speed_swim', 'speed_flight'] },
+    { title: 'Combat', keys: ['BaseAttackTime', 'RangeAttackTime', 'unit_class'] },
+    { title: 'Appearance', keys: ['faction', 'type', 'family', 'scale', 'HoverHeight'] },
+    { title: 'Modifiers', keys: ['HealthModifier', 'ManaModifier', 'ArmorModifier', 'DamageModifier', 'ExperienceModifier'] },
+    { title: 'Loot & Gold', keys: ['lootid', 'pickpocketloot', 'skinloot', 'mingold', 'maxgold'] },
+    { title: 'Flags', keys: ['npcflag', 'unit_flags', 'unit_flags2', 'dynamicflags', 'flags_extra'] },
+    { title: 'Behavior', keys: ['AIName', 'MovementType', 'RegenHealth', 'detection_range', 'ScriptName'] },
+  ];
+
   return (
-    <div className="editor-layout">
-      {/* List panel */}
-      <div className="editor-list">
-        <div className="editor-list-header">
+    <>
+      <div className="editor-page-header">
+        <h2 className="editor-page-title">Creature Editor</h2>
+        <p className="editor-page-subtitle">Manage creature templates and properties</p>
+      </div>
+      <div className="editor-layout">
+        {/* List panel */}
+        <div className="editor-list">
+          <div className="editor-list-header">
           <div className="search-box">
             <Search size={13} />
             <input
@@ -153,35 +171,36 @@ export default function CreatureEditorPage() {
           <button className="btn-primary icon-btn" onClick={handleCreate} title="New Creature">
             <Plus size={14} />
           </button>
+          </div>
+
+          <div className="list-items">
+            {loading && <div className="loading-text">Searching...</div>}
+            {!loading && creatures.map(c => (
+              <div
+                key={c.entry}
+                className={`list-item ${selected?.entry === c.entry ? 'active' : ''}`}
+                onClick={() => selectCreature(c.entry)}
+              >
+                <div className="list-item-main">
+                  <span className="list-item-name">{c.name}</span>
+                  <ChevronRight size={12} className="list-item-arrow" />
+                </div>
+                <div className="list-item-meta">
+                  <span className="mono">#{c.entry}</span>
+                  <span>Lv {c.minlevel === c.maxlevel ? c.minlevel : `${c.minlevel}-${c.maxlevel}`}</span>
+                  <RankTag rank={c.rank} />
+                </div>
+              </div>
+            ))}
+            {!loading && creatures.length === 0 && <div className="loading-text">No results</div>}
+          </div>
         </div>
 
-        <div className="list-items">
-          {loading && <div className="loading-text">Searching...</div>}
-          {!loading && creatures.map(c => (
-            <div
-              key={c.entry}
-              className={`list-item ${selected?.entry === c.entry ? 'active' : ''}`}
-              onClick={() => selectCreature(c.entry)}
-            >
-              <div className="list-item-main">
-                <span className="list-item-name">{c.name}</span>
-                <ChevronRight size={12} className="list-item-arrow" />
-              </div>
-              <div className="list-item-meta">
-                <span className="mono">#{c.entry}</span>
-                <span>Lv {c.minlevel === c.maxlevel ? c.minlevel : `${c.minlevel}-${c.maxlevel}`}</span>
-                <RankTag rank={c.rank} />
-              </div>
-            </div>
-          ))}
-          {!loading && creatures.length === 0 && <div className="loading-text">No results</div>}
-        </div>
-      </div>
-
-      {/* Edit panel */}
+        {/* Edit panel */}
       <div className="editor-form">
         {!selected ? (
           <div className="editor-empty">
+            <MousePointerClick />
             <p>Select a creature to edit</p>
           </div>
         ) : (
@@ -210,32 +229,42 @@ export default function CreatureEditorPage() {
             )}
 
             <div className="form-fields">
-              {CREATURE_FIELDS.map(f => (
-                <div key={f.key} className="field-group">
-                  <label>{f.label}</label>
-                  {f.type === 'select' ? (
-                    <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} disabled={f.readonly}>
-                      {f.options.map(o => {
-                        const [val, lbl] = o.split(':');
-                        return <option key={val} value={val}>{lbl}</option>;
-                      })}
-                    </select>
-                  ) : (
-                    <input
-                      type={f.type === 'decimal' ? 'number' : f.type}
-                      step={f.type === 'decimal' ? '0.01' : undefined}
-                      value={form[f.key] ?? ''}
-                      onChange={e => handleChange(f.key, e.target.value)}
-                      readOnly={f.readonly}
-                    />
-                  )}
+              {getFieldSections().map((section, idx) => (
+                <div key={idx}>
+                  <h4 className="field-section-title">{section.title}</h4>
+                  {section.keys.map(key => {
+                    const f = CREATURE_FIELDS.find(fld => fld.key === key);
+                    if (!f) return null;
+                    return (
+                      <div key={f.key} className="field-group">
+                        <label>{f.label}</label>
+                        {f.type === 'select' ? (
+                          <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} disabled={f.readonly}>
+                            {f.options.map(o => {
+                              const [val, lbl] = o.split(':');
+                              return <option key={val} value={val}>{lbl}</option>;
+                            })}
+                          </select>
+                        ) : (
+                          <input
+                            type={f.type === 'decimal' ? 'number' : f.type}
+                            step={f.type === 'decimal' ? '0.01' : undefined}
+                            value={form[f.key] ?? ''}
+                            onChange={e => handleChange(f.key, e.target.value)}
+                            readOnly={f.readonly}
+                          />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
             </div>
           </>
-        )}
+          )}
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 

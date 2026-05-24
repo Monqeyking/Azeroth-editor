@@ -1,7 +1,27 @@
+/* ── Editor page header ──────────────────────────────────────── */
+.editor-page-header {
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+}
+
+.editor-page-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--gold-bright);
+  margin: 0;
+}
+
+.editor-page-subtitle {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 4px 0 0 0;
+}
+
 /* ── Editor split layout ─────────────────────────────────────── */
 .editor-layout {
   display: flex;
-  height: 100vh;
+  height: calc(100vh - 60px);
   overflow: hidden;
 }
 
@@ -61,7 +81,7 @@
 }
 
 .list-item:hover { background: var(--bg-hover); }
-.list-item.active { background: rgba(200,169,110,0.08); border-left: 2px solid var(--gold-dim); }
+.list-item.active { background: rgba(200,169,110,0.14); border-left: 3px solid var(--gold); }
 
 .list-item-main {
   display: flex;
@@ -100,10 +120,24 @@
 .editor-empty {
   height: 100%;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   color: var(--text-muted);
+}
+
+.editor-empty svg {
+  width: 48px;
+  height: 48px;
+  color: var(--gold-dim);
+  opacity: 0.6;
+}
+
+.editor-empty p {
+  margin: 0;
   font-size: 14px;
+  font-weight: 500;
 }
 
 .header-actions {
@@ -156,4 +190,28 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: var(--text-secondary);
+}
+
+/* Field sections */
+.field-section {
+  grid-column: 1 / -1;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.field-section:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: none;
+}
+
+.field-section-title {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+  margin-top: 0;
 }

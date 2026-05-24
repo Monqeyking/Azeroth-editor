@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -128,74 +128,105 @@ export default function QuestEditorPage() {
     setSaving(false);
   };
 
+  const getFieldSections = () => [
+    { title: 'Basis Info', keys: ['ID', 'LogTitle', 'LogDescription', 'QuestDescription', 'AreaDescription', 'QuestCompletionLog'] },
+    { title: 'Objectives', keys: ['ObjectiveText1', 'ObjectiveText2', 'ObjectiveText3', 'ObjectiveText4'] },
+    { title: 'Classification', keys: ['QuestLevel', 'MinLevel', 'QuestType', 'QuestSortID', 'QuestInfoID'] },
+    { title: 'Configuration', keys: ['SuggestedGroupNum', 'TimeAllowed', 'AllowableRaces', 'Flags'] },
+    { title: 'Rewards', keys: ['RewardXPDifficulty', 'RewardMoney', 'RewardDisplaySpell', 'RewardHonor', 'RewardTitle', 'RewardTalents', 'RewardArenaPoints'] },
+    { title: 'Reward Items', keys: ['RewardItem1', 'RewardAmount1', 'RewardItem2', 'RewardAmount2'] },
+    { title: 'Reward Choices', keys: ['RewardChoiceItemID1', 'RewardChoiceItemQuantity1', 'RewardChoiceItemID2', 'RewardChoiceItemQuantity2'] },
+    { title: 'Requirements', keys: ['RequiredNpcOrGo1', 'RequiredNpcOrGoCount1', 'RequiredNpcOrGo2', 'RequiredNpcOrGoCount2', 'RequiredItemId1', 'RequiredItemCount1', 'RequiredItemId2', 'RequiredItemCount2'] },
+    { title: 'Quest Chain', keys: ['RewardNextQuest', 'StartItem'] },
+    { title: 'Waypoint', keys: ['POIContinent', 'POIx', 'POIy'] },
+  ];
+
   return (
-    <div className="editor-layout">
-      <div className="editor-list">
-        <div className="editor-list-header">
-          <div className="search-box">
-            <Search size={13} />
-            <input
-              placeholder="Search title or entry..."
-              value={search}
-              onChange={e => { setSearch(e.target.value); searchQuests(e.target.value); }}
-            />
+    <>
+      <div className="editor-page-header">
+        <h2 className="editor-page-title">Quest Editor</h2>
+        <p className="editor-page-subtitle">Manage quest templates and properties</p>
+      </div>
+      <div className="editor-layout">
+        <div className="editor-list">
+          <div className="editor-list-header">
+            <div className="search-box">
+              <Search size={13} />
+              <input
+                placeholder="Search title or entry..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); searchQuests(e.target.value); }}
+              />
+            </div>
+          </div>
+          <div className="list-items">
+            {loading && <div className="loading-text">Searching...</div>}
+            {!loading && quests.map(q => (
+              <div
+                key={q.ID}
+                className={`list-item ${selected?.ID === q.ID ? 'active' : ''}`}
+                onClick={() => selectQuest(q.ID)}
+              >
+                <div className="list-item-main">
+                  <span className="list-item-name">{q.LogTitle || '(untitled)'}</span>
+                  <ChevronRight size={12} className="list-item-arrow" />
+                </div>
+                <div className="list-item-meta">
+                  <span className="mono">#{q.ID}</span>
+                  <span>Lv {q.QuestLevel}</span>
+                </div>
+              </div>
+            ))}
+            {!loading && quests.length === 0 && <div className="loading-text">No results</div>}
           </div>
         </div>
-        <div className="list-items">
-          {loading && <div className="loading-text">Searching...</div>}
-          {!loading && quests.map(q => (
-            <div
-              key={q.ID}
-              className={`list-item ${selected?.ID === q.ID ? 'active' : ''}`}
-              onClick={() => selectQuest(q.ID)}
-            >
-              <div className="list-item-main">
-                <span className="list-item-name">{q.LogTitle || '(untitled)'}</span>
-                <ChevronRight size={12} className="list-item-arrow" />
-              </div>
-              <div className="list-item-meta">
-                <span className="mono">#{q.ID}</span>
-                <span>Lv {q.QuestLevel}</span>
-              </div>
+
+        <div className="editor-form">
+          {!selected ? (
+            <div className="editor-empty">
+              <MousePointerClick />
+              <p>Select a quest to edit</p>
             </div>
-          ))}
-          {!loading && quests.length === 0 && <div className="loading-text">No results</div>}
+          ) : (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">{selected.LogTitle || '(untitled)'}</h1>
+                  <p className="page-sub">Entry #{selected.ID} · quest_template</p>
+                </div>
+                <div className="header-actions">
+                  {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
+                  <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
+                    <Save size={13}/> {saving ? 'Saving...' : 'Save & Reload'}
+                  </button>
+                </div>
+              </div>
+              {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
+              <div className="form-fields">
+                {getFieldSections().map((section, idx) => (
+                  <div key={idx}>
+                    <h4 className="field-section-title">{section.title}</h4>
+                    {section.keys.map(key => {
+                      const f = QUEST_FIELDS.find(fld => fld.key === key);
+                      if (!f) return null;
+                      return (
+                        <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
+                          <label>{f.label}</label>
+                          {f.type === 'textarea' ? (
+                            <textarea rows={3} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} />
+                          ) : (
+                            <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
-
-      <div className="editor-form">
-        {!selected ? (
-          <div className="editor-empty"><p>Select a quest to edit</p></div>
-        ) : (
-          <>
-            <div className="page-header">
-              <div>
-                <h1 className="page-title">{selected.LogTitle || '(untitled)'}</h1>
-                <p className="page-sub">Entry #{selected.ID} · quest_template</p>
-              </div>
-              <div className="header-actions">
-                {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
-                <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
-                  <Save size={13}/> {saving ? 'Saving...' : 'Save & Reload'}
-                </button>
-              </div>
-            </div>
-            {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
-            <div className="form-fields quest-fields">
-              {QUEST_FIELDS.map(f => (
-                <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
-                  <label>{f.label}</label>
-                  {f.type === 'textarea' ? (
-                    <textarea rows={3} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} />
-                  ) : (
-                    <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
