@@ -1,0 +1,30 @@
+/* textarea in form fields */
+textarea {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  resize: vertical;
+  min-height: 60px;
+}
+
+textarea:focus {
+  border-color: var(--gold-dim);
+  box-shadow: 0 0 0 2px rgba(200,169,110,0.08);
+}
+
+/* Wide fields spanning full row */
+.quest-fields .field-wide,
+.form-fields .field-wide {
+  grid-column: 1 / -1;
+}
+
+code {
+  font-family: 'Courier New', monospace;
+}
