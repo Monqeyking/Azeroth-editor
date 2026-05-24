@@ -1,0 +1,192 @@
+/* ── Talent Editor Layout ─────────────────────────────────────────────── */
+.talent-layout {
+  display: flex;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ── Class sidebar ─────────────────────────────────────────────────────── */
+.talent-class-list {
+  width: 158px;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+}
+
+.talent-section-label {
+  padding: 12px 14px 8px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.talent-class-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-secondary);
+  transition: background 0.12s, color 0.12s;
+}
+.talent-class-item:hover  { background: var(--bg-hover); color: var(--text-primary); }
+.talent-class-item.active { background: var(--bg-active); color: var(--text-white); }
+
+.talent-class-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--cls-color, var(--gold));
+  flex-shrink: 0;
+  box-shadow: 0 0 5px var(--cls-color, var(--gold));
+}
+
+/* ── Tree area ─────────────────────────────────────────────────────────── */
+.talent-tree-area {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-void);
+}
+
+.talent-tabs {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-panel);
+}
+
+.talent-tab-btn {
+  padding: 5px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.talent-tab-btn:hover  { background: var(--bg-hover); color: var(--text-primary); border-color: var(--border-glow); }
+.talent-tab-btn.active {
+  background: linear-gradient(135deg, #2a1f0a, #3d2d10);
+  color: var(--gold-bright);
+  border-color: var(--border-gold);
+  font-weight: 600;
+  box-shadow: var(--glow-gold);
+}
+
+.talent-no-tabs {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.talent-tree-scroll {
+  flex: 1;
+  overflow: auto;
+  padding: 32px 40px;
+}
+
+/* ── Tree canvas ───────────────────────────────────────────────────────── */
+.talent-tree {
+  position: relative;
+}
+
+.talent-arrows {
+  position: absolute;
+  top: 0;
+  left: 0;
+  pointer-events: none;
+}
+
+/* ── Talent node ───────────────────────────────────────────────────────── */
+.talent-node {
+  position: absolute;
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border);
+  background: var(--bg-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  padding: 4px 3px;
+  transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
+  overflow: hidden;
+}
+.talent-node:hover {
+  border-color: var(--gold-dim);
+  transform: scale(1.06);
+  z-index: 2;
+  box-shadow: 0 0 12px rgba(200,169,110,0.2);
+}
+.talent-node.selected {
+  border-color: var(--gold);
+  box-shadow: 0 0 0 2px rgba(200,169,110,0.25), 0 0 14px rgba(200,169,110,0.2);
+  background: var(--bg-active);
+  z-index: 3;
+}
+
+.talent-node-rank {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.talent-node-name {
+  font-size: 9px;
+  color: var(--text-secondary);
+  text-align: center;
+  line-height: 1.25;
+  padding: 0 2px;
+}
+
+/* ── Edit panel ────────────────────────────────────────────────────────── */
+.talent-edit-panel {
+  width: 272px;
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  padding: 0 0 24px;
+}
+
+.talent-edit-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.talent-edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+}
+
+.talent-edit-section {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding-top: 6px;
+}
+
+.field-spell-hint {
+  font-weight: 400;
+  font-size: 11px;
+  color: var(--gold-dim);
+}

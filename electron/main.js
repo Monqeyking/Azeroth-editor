@@ -1,0 +1,469 @@
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const fs = require('fs');
+const mysql = require('mysql2/promise');
+const { createClient } = require('node-soap');
+const AdmZip = require('adm-zip');
+
+const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+
+// Force custom taskbar icon in dev mode (Windows)
+app.setAppUserModelId('com.azeroth.editor');
+
+let mainWindow;
+let dbConnection = null;
+let iconsZip = null;
+let iconCache = {};
+
+// ─── Config persistence ──────────────────────────────────────────────────────
+function getConfigPath() {
+  return path.join(app.getPath('userData'), 'azeroth-editor-config.json');
+}
+
+ipcMain.handle('config:load', () => {
+  try {
+    const configPath = getConfigPath();
+    if (fs.existsSync(configPath)) {
+      const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      return { success: true, data };
+    }
+    return { success: true, data: null };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('config:save', (_, config) => {
+  try {
+    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2), 'utf8');
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ─── Window ────────────────────────────────────────────────────────────────
+function createWindow() {
+  mainWindow = new BrowserWindow({
+    width: 1600,
+    height: 1000,
+    minWidth: 1200,
+    minHeight: 700,
+    icon: path.join(__dirname, '../src/assets/icon.ico'),
+    backgroundColor: '#0a0c10',
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#0a0c10',
+      symbolColor: '#c8a96e',
+      height: 32
+    },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false
+    }
+  });
+
+  if (isDev) {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools();
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+}
+
+app.whenReady().then(createWindow);
+app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
+app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
+
+// ─── Database ───────────────────────────────────────────────────────────────
+ipcMain.handle('db:connect', async (_, config) => {
+  try {
+    dbConnection = await mysql.createConnection({
+      host: config.host || 'localhost',
+      port: config.port || 3306,
+      user: config.user,
+      password: config.password,
+      database: config.database || 'acore_wotlk_world'
+    });
+    await dbConnection.execute('SELECT 1');
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('db:query', async (_, sql, params = []) => {
+  if (!dbConnection) return { success: false, error: 'Not connected' };
+  try {
+    const [rows] = await dbConnection.execute(sql, params);
+    return { success: true, data: rows };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('db:disconnect', async () => {
+  if (dbConnection) {
+    await dbConnection.end();
+    dbConnection = null;
+  }
+  return { success: true };
+});
+
+// ─── SOAP ───────────────────────────────────────────────────────────────────
+ipcMain.handle('soap:command', async (_, { host, port, user, password, command }) => {
+  return new Promise((resolve) => {
+    const url = `http://${host}:${port}/RPC2`;
+    const auth = Buffer.from(`${user}:${password}`).toString('base64');
+
+    createClient(url, {
+      wsdl_headers: { Authorization: `Basic ${auth}` }
+    }, (err, client) => {
+      if (err) return resolve({ success: false, error: err.message });
+
+      client.executeCommand({ command }, (err2, result) => {
+        if (err2) return resolve({ success: false, error: err2.message });
+        resolve({ success: true, result: result?.result || 'OK' });
+      });
+    });
+  });
+});
+
+// ─── Icons handling (from unzipped files) ──────────────────────────────────────
+function getIconsDir() {
+  const possiblePaths = [
+    path.join(__dirname, '../src/static'),
+    path.join(process.cwd(), 'src/static'),
+    'D:\\CaioCore Tools\\azeroth-editor\\src\\static'
+  ];
+
+  for (const testPath of possiblePaths) {
+    if (fs.existsSync(testPath)) {
+      console.log(`Icons directory found: ${testPath}`);
+      return testPath;
+    }
+  }
+  console.log('Icons directory not found in any location');
+  return null;
+}
+
+ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
+  try {
+    if (!iconPath) {
+      console.log('icons:get - empty iconPath');
+      return null;
+    }
+
+    // Clean the path: strip "Interface\Icons\" prefix and extract filename
+    let iconName = iconPath;
+    if (iconName.includes('\\')) {
+      iconName = iconName.split('\\').pop();
+    }
+    if (iconName.includes('/')) {
+      iconName = iconName.split('/').pop();
+    }
+
+    console.log(`icons:get - Loading: ${iconPath} → ${iconName}`);
+
+    if (iconCache[iconName]) {
+      console.log(`icons:get - cache hit: ${iconName}`);
+      return iconCache[iconName];
+    }
+
+    const iconsDir = getIconsDir();
+    if (!iconsDir) {
+      console.log('icons:get - Icons directory not found');
+      return null;
+    }
+
+    // Try multiple file extensions (filename already has no extension)
+    const extensions = ['.png', '.blp', '.tga'];
+    for (const ext of extensions) {
+      const fullIconPath = path.join(iconsDir, iconName + ext);
+      if (fs.existsSync(fullIconPath)) {
+        const data = fs.readFileSync(fullIconPath);
+        const base64 = data.toString('base64');
+        const mimeType = ext === '.png' ? 'image/png' : 'image/x-tga';
+        const dataUrl = `data:${mimeType};base64,${base64}`;
+        iconCache[iconName] = dataUrl;
+        console.log(`icons:get - ✓ Loaded icon: ${iconName}${ext} (${data.length} bytes)`);
+        return dataUrl;
+      }
+    }
+
+    console.log(`icons:get - ✗ Icon not found: ${iconName} (looked in ${iconsDir})`);
+    return null;
+  } catch (e) {
+    console.error('icons:get error:', e);
+    return null;
+  }
+});
+
+// ─── DBC Reader ────────────────────────────────────────────────────────────────
+function readStringFromBlock(buffer, stringOffset, stringBlock) {
+  if (stringOffset === 0) return '';
+  let end = stringOffset;
+  while (end < stringBlock.length && stringBlock[end] !== 0) end++;
+  return stringBlock.toString('utf8', stringOffset, end);
+}
+
+function readUInt32LE(buffer, offset) {
+  return buffer.readUInt32LE(offset);
+}
+
+async function readDbcFile(filePath) {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 20) return null;
+
+    const magic = buffer.toString('ascii', 0, 4);
+    if (magic !== 'WDBC') return null;
+
+    const recordCount = readUInt32LE(buffer, 4);
+    const fieldCount = readUInt32LE(buffer, 8);
+    const recordSize = readUInt32LE(buffer, 12);
+    const stringBlockSize = readUInt32LE(buffer, 16);
+
+    const headerSize = 20;
+    const dataEnd = headerSize + (recordCount * recordSize);
+    const dataBuffer = buffer.slice(headerSize, dataEnd);
+    const stringBlock = buffer.slice(dataEnd, dataEnd + stringBlockSize);
+
+    return { recordCount, fieldCount, recordSize, dataBuffer, stringBlock };
+  } catch (e) {
+    return null;
+  }
+}
+
+ipcMain.handle('dbc:readTalentTabs', async (_, dbcPath) => {
+  try {
+    const filePath = path.join(dbcPath, 'TalentTab.dbc');
+    console.log('Reading TalentTab.dbc from:', filePath);
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: `Could not read TalentTab.dbc at ${filePath}` };
+
+    console.log(`TalentTab.dbc: ${dbc.recordCount} records, record size: ${dbc.recordSize}`);
+    const data = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const offset = i * dbc.recordSize;
+      const nameRef = readUInt32LE(dbc.dataBuffer, offset + 4);
+      const rec = {
+        ID: readUInt32LE(dbc.dataBuffer, offset + 0),
+        Name_Lang_enUS: readStringFromBlock(dbc.dataBuffer, nameRef, dbc.stringBlock),
+        SpellIconID: readUInt32LE(dbc.dataBuffer, offset + 72),
+        ClassMask: readUInt32LE(dbc.dataBuffer, offset + 80),
+        OrderIndex: readUInt32LE(dbc.dataBuffer, offset + 88)
+      };
+      data.push(rec);
+    }
+    console.log('=== ALL TALENT TABS ===');
+    data.forEach(t => {
+      console.log(`ID=${t.ID}, ClassMask=${t.ClassMask} (binary: ${t.ClassMask.toString(2).padStart(11, '0')}), Name="${t.Name_Lang_enUS}", OrderIndex=${t.OrderIndex}`);
+    });
+    console.log(`Loaded ${data.length} talent tabs`);
+    return { success: true, data };
+  } catch (e) {
+    console.error('Error reading TalentTab.dbc:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:readTalents', async (_, dbcPath, tabId) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    console.log('=== readTalents: TabID =', tabId);
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Could not read Talent.dbc' };
+
+    const data = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const offset = i * dbc.recordSize;
+      const rec = {
+        ID: readUInt32LE(dbc.dataBuffer, offset + 0),
+        TabID: readUInt32LE(dbc.dataBuffer, offset + 4),
+        TierID: readUInt32LE(dbc.dataBuffer, offset + 8),
+        ColumnIndex: readUInt32LE(dbc.dataBuffer, offset + 12),
+        SpellRank_1: readUInt32LE(dbc.dataBuffer, offset + 16),
+        SpellRank_2: readUInt32LE(dbc.dataBuffer, offset + 20),
+        SpellRank_3: readUInt32LE(dbc.dataBuffer, offset + 24),
+        SpellRank_4: readUInt32LE(dbc.dataBuffer, offset + 28),
+        SpellRank_5: readUInt32LE(dbc.dataBuffer, offset + 32),
+        SpellRank_6: readUInt32LE(dbc.dataBuffer, offset + 36),
+        SpellRank_7: readUInt32LE(dbc.dataBuffer, offset + 40),
+        SpellRank_8: readUInt32LE(dbc.dataBuffer, offset + 44),
+        SpellRank_9: readUInt32LE(dbc.dataBuffer, offset + 48),
+        PrereqTalent_1: readUInt32LE(dbc.dataBuffer, offset + 52),
+        PrereqTalent_2: readUInt32LE(dbc.dataBuffer, offset + 56),
+        PrereqTalent_3: readUInt32LE(dbc.dataBuffer, offset + 60),
+        PrereqRank_1: readUInt32LE(dbc.dataBuffer, offset + 64),
+        PrereqRank_2: readUInt32LE(dbc.dataBuffer, offset + 68),
+        PrereqRank_3: readUInt32LE(dbc.dataBuffer, offset + 72)
+      };
+
+      if (rec.TabID === tabId) {
+        data.push(rec);
+      }
+    }
+    console.log(`readTalents: Loaded ${data.length} talents for TabID ${tabId}`);
+    if (data.length > 0) {
+      const spellIds = [];
+      data.forEach((t, idx) => {
+        for (let i = 1; i <= 9; i++) {
+          const sid = t[`SpellRank_${i}`];
+          if (sid > 0) spellIds.push(sid);
+        }
+        if (idx < 3) console.log(`  Talent ${t.ID}: spells [${t.SpellRank_1}, ${t.SpellRank_2}, ${t.SpellRank_3}]`);
+      });
+      console.log(`Total unique spell IDs needed: ${new Set(spellIds).size}`);
+    }
+    return { success: true, data };
+  } catch (e) {
+    console.error('Error reading Talent.dbc:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:readSpellIcons', async (_, dbcPath, iconIds) => {
+  try {
+    const filePath = path.join(dbcPath, 'SpellIcon.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: true, data: {} };
+
+    console.log(`\n=== readSpellIcons: Looking for ${iconIds.length} icon IDs ===`);
+    console.log(`First 10 icon IDs:`, iconIds.slice(0, 10).join(','));
+    const icons = {};
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const offset = i * dbc.recordSize;
+      const id = readUInt32LE(dbc.dataBuffer, offset + 0);
+      if (iconIds.includes(id)) {
+        // TextureFilename is at offset 4 (field 1)
+        const filenameRef = readUInt32LE(dbc.dataBuffer, offset + 4);
+        const filename = readStringFromBlock(dbc.dataBuffer, filenameRef, dbc.stringBlock);
+        icons[id] = filename;
+        console.log(`  SpellIcon ${id}: "${filename}"`);
+      }
+    }
+    console.log(`readSpellIcons: Found ${Object.keys(icons).length} icon filenames\n`);
+    return { success: true, data: icons };
+  } catch (e) {
+    console.error('readSpellIcons error:', e);
+    return { success: true, data: {} };
+  }
+});
+
+ipcMain.handle('dbc:readSpells', async (_, dbcPath, spellIds) => {
+  try {
+    const filePath = path.join(dbcPath, 'Spell.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: true, data: {} };
+
+    // DEBUG: Find correct offsets by analyzing spell 16039
+    if (spellIds.includes(16039)) {
+      console.log(`\n=== DEBUG: Analyzing spell 16039 to find offsets ===`);
+      console.log(`Expected: Name="Convection", SpellIconID=122`);
+
+      // Find spell 16039
+      for (let i = 0; i < dbc.recordCount; i++) {
+        const offset = i * dbc.recordSize;
+        const spellId = readUInt32LE(dbc.dataBuffer, offset + 0);
+
+        if (spellId === 16039) {
+          console.log(`Found spell 16039 at record index ${i}`);
+
+          // Verify offset 524 contains SpellIconID = 122
+          const iconId524 = readUInt32LE(dbc.dataBuffer, offset + 524);
+          console.log(`  Offset 524: ${iconId524} (expected 122: ${iconId524 === 122 ? '✓' : '✗'})`);
+
+          // Scan all offsets to find string reference to "Convection"
+          console.log(`  Scanning for "Convection"...`);
+          for (let fieldOffset = 520; fieldOffset <= 600; fieldOffset += 4) {
+            const val = readUInt32LE(dbc.dataBuffer, offset + fieldOffset);
+            if (val > 0 && val < dbc.stringBlock.length) {
+              const str = readStringFromBlock(dbc.dataBuffer, val, dbc.stringBlock);
+              if (str === 'Convection') {
+                console.log(`  ✓ FOUND: Offset ${fieldOffset} contains string ref to "Convection"`);
+                console.log(`    This is the Name_Lang_enUS offset!`);
+              }
+            }
+          }
+          break;
+        }
+      }
+    }
+
+    console.log(`\n=== readSpells: Looking for ${spellIds.length} spell IDs ===`);
+    const spells = {};
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const offset = i * dbc.recordSize;
+      const spellId = readUInt32LE(dbc.dataBuffer, offset + 0);
+      if (spellIds.includes(spellId)) {
+        // SpellIconID is at offset 532 (field 133)
+        const spellIconId = readUInt32LE(dbc.dataBuffer, offset + 532);
+
+        // Name_Lang_enUS is at offset 544 (field 136)
+        const nameRef = readUInt32LE(dbc.dataBuffer, offset + 544);
+        const name = readStringFromBlock(dbc.dataBuffer, nameRef, dbc.stringBlock);
+        spells[spellId] = { name, spellIconId };
+        console.log(`  Spell ${spellId}: "${name}" (iconId=${spellIconId})`);
+      }
+    }
+    console.log(`readSpells: Found ${Object.keys(spells).length} spells with names\n`);
+    return { success: true, data: spells };
+  } catch (e) {
+    console.error('readSpells error:', e);
+    return { success: true, data: {} };
+  }
+});
+
+ipcMain.handle('dbc:writeTalent', async (_, dbcPath, talent) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const buffer = fs.readFileSync(filePath);
+
+    if (buffer.length < 20) return { success: false, error: 'Invalid DBC file' };
+
+    const magic = buffer.toString('ascii', 0, 4);
+    if (magic !== 'WDBC') return { success: false, error: 'Invalid DBC header' };
+
+    const recordCount = buffer.readUInt32LE(4);
+    const recordSize = buffer.readUInt32LE(12);
+    const headerSize = 20;
+
+    // Find record index
+    let recordIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      const offset = headerSize + (i * recordSize);
+      const id = buffer.readUInt32LE(offset);
+      if (id === talent.ID) {
+        recordIndex = i;
+        break;
+      }
+    }
+
+    if (recordIndex === -1) return { success: false, error: 'Talent not found' };
+
+    const offset = headerSize + (recordIndex * recordSize);
+    const tempBuffer = Buffer.alloc(buffer.length);
+    buffer.copy(tempBuffer);
+
+    // Write fields (3.3.5 Talent.dbc structure - based on DBC field order)
+    tempBuffer.writeUInt32LE(talent.TierID || 0, offset + 8);
+    tempBuffer.writeUInt32LE(talent.ColumnIndex || 0, offset + 12);
+    for (let i = 1; i <= 9; i++) {
+      const spellId = talent[`SpellRank_${i}`] || 0;
+      tempBuffer.writeUInt32LE(spellId, offset + 16 + ((i - 1) * 4));
+    }
+    tempBuffer.writeUInt32LE(talent.PrereqTalent_1 || 0, offset + 52);
+    tempBuffer.writeUInt32LE(talent.PrereqTalent_2 || 0, offset + 56);
+    tempBuffer.writeUInt32LE(talent.PrereqTalent_3 || 0, offset + 60);
+    tempBuffer.writeUInt32LE(talent.PrereqRank_1 || 0, offset + 64);
+    tempBuffer.writeUInt32LE(talent.PrereqRank_2 || 0, offset + 68);
+    tempBuffer.writeUInt32LE(talent.PrereqRank_3 || 0, offset + 72);
+
+    fs.writeFileSync(filePath, tempBuffer);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
