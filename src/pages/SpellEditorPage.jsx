@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -106,14 +106,14 @@ export default function SpellEditorPage() {
     setSaving(true);
     setMsg(null);
     try {
-      const fields = Object.keys(form).filter(k => k !== 'Id');
+      const fields = Object.keys(form).filter(k => k !== 'ID');
       const sets = fields.map(k => `\`${k}\` = ?`).join(', ');
-      const vals = [...fields.map(k => form[k]), form.Id];
-      const result = await query(`UPDATE spell_dbc SET ${sets} WHERE Id = ?`, vals);
+      const vals = [...fields.map(k => form[k]), form.ID];
+      const result = await query(`UPDATE spell_dbc SET ${sets} WHERE ID = ?`, vals);
       if (result.success) {
         setSelected(form);
         setDirty(false);
-        setMsg({ type: 'success', text: `Saved spell ${form.Id}. Note: spell_dbc changes require server restart.` });
+        setMsg({ type: 'success', text: `Saved spell ${form.ID}. Note: spell_dbc changes require server restart.` });
         searchSpells(search);
       } else {
         setMsg({ type: 'error', text: result.error });
@@ -124,80 +124,110 @@ export default function SpellEditorPage() {
     setSaving(false);
   };
 
+  const getFieldSections = () => [
+    { title: 'Basis Info', keys: ['ID', 'Name_Lang_enUS', 'NameSubtext_Lang_enUS', 'Description_Lang_enUS', 'AuraDescription_Lang_enUS'] },
+    { title: 'School & Type', keys: ['SchoolMask', 'DefenseType', 'Category', 'Mechanic'] },
+    { title: 'Attributes', keys: ['Attributes', 'AttributesEx', 'AttributesEx2', 'AttributesEx3'] },
+    { title: 'Timing', keys: ['CastingTimeIndex', 'RecoveryTime', 'CategoryRecoveryTime', 'DurationIndex', 'Speed'] },
+    { title: 'Range & Targets', keys: ['RangeIndex', 'MaxTargetLevel', 'MaxTargets'] },
+    { title: 'Mechanics', keys: ['CumulativeAura', 'ProcTypeMask', 'ProcChance', 'ProcCharges'] },
+    { title: 'Power & Levels', keys: ['MaxLevel', 'BaseLevel', 'SpellLevel', 'PowerType', 'ManaCost', 'ManaCostPct', 'ManaPerSecond'] },
+    { title: 'Effects', keys: ['Effect_1', 'Effect_2', 'Effect_3', 'EffectBasePoints_1', 'EffectBasePoints_2', 'EffectBasePoints_3', 'EffectAura_1', 'EffectAura_2', 'EffectAura_3', 'EffectTriggerSpell_1', 'EffectTriggerSpell_2', 'EffectTriggerSpell_3'] },
+    { title: 'Visual & Priority', keys: ['SpellClassSet', 'SpellIconID', 'SpellVisualID_1', 'SpellPriority'] },
+  ];
+
   return (
-    <div className="editor-layout">
-      <div className="editor-list">
-        <div className="editor-list-header">
-          <div className="search-box">
-            <Search size={13} />
-            <input
-              placeholder="Search name or entry..."
-              value={search}
-              onChange={e => { setSearch(e.target.value); searchSpells(e.target.value); }}
-            />
+    <>
+      <div className="editor-page-header">
+        <h2 className="editor-page-title">Spell Editor</h2>
+        <p className="editor-page-subtitle">Manage spell data and properties</p>
+      </div>
+      <div className="editor-layout">
+        <div className="editor-list">
+          <div className="editor-list-header">
+            <div className="search-box">
+              <Search size={13} />
+              <input
+                placeholder="Search name or entry..."
+                value={search}
+                onChange={e => { setSearch(e.target.value); searchSpells(e.target.value); }}
+              />
+            </div>
+          </div>
+          <div className="list-items">
+            {loading && <div className="loading-text">Searching...</div>}
+            {!loading && spells.map(s => (
+              <div
+                key={s.ID}
+                className={`list-item ${selected?.ID === s.ID ? 'active' : ''}`}
+                onClick={() => selectSpell(s.ID)}
+              >
+                <div className="list-item-main">
+                  <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
+                  <ChevronRight size={12} className="list-item-arrow" />
+                </div>
+                <div className="list-item-meta">
+                  <span className="mono">#{s.ID}</span>
+                </div>
+              </div>
+            ))}
+            {!loading && spells.length === 0 && <div className="loading-text">No results</div>}
           </div>
         </div>
-        <div className="list-items">
-          {loading && <div className="loading-text">Searching...</div>}
-          {!loading && spells.map(s => (
-            <div
-              key={s.ID}
-              className={`list-item ${selected?.ID === s.ID ? 'active' : ''}`}
-              onClick={() => selectSpell(s.ID)}
-            >
-              <div className="list-item-main">
-                <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
-                <ChevronRight size={12} className="list-item-arrow" />
-              </div>
-              <div className="list-item-meta">
-                <span className="mono">#{s.ID}</span>
-              </div>
+
+        <div className="editor-form">
+          {!selected ? (
+            <div className="editor-empty">
+              <MousePointerClick />
+              <p>Select a spell to edit</p>
             </div>
-          ))}
-          {!loading && spells.length === 0 && <div className="loading-text">No results</div>}
+          ) : (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">{selected.Name_Lang_enUS || '(unnamed)'}</h1>
+                  <p className="page-sub">Entry #{selected.ID} · spell_dbc</p>
+                </div>
+                <div className="header-actions">
+                  {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
+                  <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
+                    <Save size={13}/> {saving ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+              {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
+              <div className="form-fields">
+                {getFieldSections().map((section, idx) => (
+                  <div key={idx}>
+                    <h4 className="field-section-title">{section.title}</h4>
+                    {section.keys.map(key => {
+                      const f = SPELL_FIELDS.find(fld => fld.key === key);
+                      if (!f) return null;
+                      return (
+                        <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
+                          <label>{f.label}</label>
+                          {f.type === 'textarea' ? (
+                            <textarea rows={2} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} />
+                          ) : f.type === 'select' ? (
+                            <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)}>
+                              {f.options.map(o => {
+                                const [val, lbl] = o.split(':');
+                                return <option key={val} value={val}>{lbl}</option>;
+                              })}
+                            </select>
+                          ) : (
+                            <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       </div>
-
-      <div className="editor-form">
-        {!selected ? (
-          <div className="editor-empty"><p>Select a spell to edit</p></div>
-        ) : (
-          <>
-            <div className="page-header">
-              <div>
-                <h1 className="page-title">{selected.Name_Lang_enUS || '(unnamed)'}</h1>
-                <p className="page-sub">Entry #{selected.ID} · spell_dbc</p>
-              </div>
-              <div className="header-actions">
-                {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
-                <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
-                  <Save size={13}/> {saving ? 'Saving...' : 'Save'}
-                </button>
-              </div>
-            </div>
-            {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
-            <div className="form-fields">
-              {SPELL_FIELDS.map(f => (
-                <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
-                  <label>{f.label}</label>
-                  {f.type === 'textarea' ? (
-                    <textarea rows={2} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} />
-                  ) : f.type === 'select' ? (
-                    <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)}>
-                      {f.options.map(o => {
-                        const [val, lbl] = o.split(':');
-                        return <option key={val} value={val}>{lbl}</option>;
-                      })}
-                    </select>
-                  ) : (
-                    <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
-                  )}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
-      </div>
-    </div>
+    </>
   );
 }

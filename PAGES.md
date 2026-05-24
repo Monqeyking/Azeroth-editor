@@ -364,7 +364,21 @@ SELECT * FROM quest_template WHERE ID = ?
 
 ## Session History & Notes
 
-### Sessie 1 (Latest)
+### Sessie 3 (Latest)
+- ✅ **Prioriteit 2.6 Phase 2 completed:** Reverse lookup fix voor SpellIconID input veld
+- ✅ Root cause identified: `primarySpellIconId` state was not persistent in form; only preview state
+- ✅ Fix: Built reverse index `iconToSpellId` mapping during loadTalents
+- ✅ Simplified `handleChangeSpellIconId()`: now uses direct index lookup instead of async operations
+- ✅ User confirmed: "werkt nu perfect"
+- Status: Ready for next priority (2.2, 2.3, 2.4 or move to Prioriteit 3)
+
+### Sessie 2
+- ✅ Field-sections added to all 4 editors (Creature, Item, Spell, Quest)
+- ✅ Talent Editor icon picker modal implemented (spell search + selection)
+- ✅ Talent Editor primary spell icon section added
+- Status: Testing validated, moved to reverse lookup implementation
+
+### Sessie 1
 - ✅ Icon loading pipeline fixed (Spell.dbc offsets corrected: 544 for name, 532 for iconID)
 - ✅ TalentEditorPage now fully functional
 - ⚠️ Git setup started (node_modules size issue with GitHub)
@@ -439,5 +453,326 @@ localhost:3306 / acore_wotlk_world (default)
 - **CSS**: Separate .css files per page (DashboardPage.css, EditorPage.css, etc.)
 
 ---
+
+## Testing Instructions — Prioriteit 2.1: Field-secties
+
+### Voor elke editor (Creature, Item, Spell, Quest):
+
+1. **Open de editor** en selecteer een bestaande entry
+   - Creature Editor: Kies bijv. entry #1 (humans)
+   - Item Editor: Kies bijv. entry #1
+   - Spell Editor: Kies bijv. spell #1
+   - Quest Editor: Kies bijv. quest #1
+
+2. **Verificeer sectiontitels**
+   - Scroll door het formulier en controleer of je duidelijke section headers ziet (bijv. "BASIS INFO", "SPEEDS", "MODIFIERS")
+   - Elk section title moet UPPERCASE zijn en in het goud/muted kleur
+
+3. **Verificeer visuele scheiding**
+   - Tussen elke section moet een subtiele horizontale lijn zichtbaar zijn (border-top)
+   - Er moet duidelijke spacing zijn tussen sections (niet klem tegen elkaar)
+
+4. **Verificeer field-groepering**
+   - CreatureEditor: 9 sections (Basis Info, Levels, Speeds, Combat, Appearance, Modifiers, Loot & Gold, Flags, Behavior)
+   - ItemEditor: 9 sections (Basis Info, Classification, Display, Pricing, Requirements, Stats, Properties, Bonuses, Spells & Scripts)
+   - SpellEditor: 9 sections (Basis Info, School & Type, Attributes, Timing, Range & Targets, Mechanics, Power & Levels, Effects, Visual & Priority)
+   - QuestEditor: 10 sections (Basis Info, Objectives, Classification, Configuration, Rewards, Reward Items, Reward Choices, Requirements, Quest Chain, Waypoint)
+
+5. **Scroll behavior**
+   - Scroll helemaal naar beneden in het form
+   - Controleer dat de laatste section (bijv. "Behavior" in CreatureEditor) ook duidelijk zichtbaar is
+   - Geen truncation of overlap van content
+
+6. **Field alignment**
+   - Alle velden binnen een section moeten netjes in het 3-koloms grid uitlijnen
+   - Section title moet volledige breedte spanning (grid-column: 1 / -1)
+
+### Expected Result:
+- Alle editors tonen hun velden nu in logische, gelabelde sections
+- Visuele hiërarchie is duidelijk
+- Formulier is veel overzichtelijker voor 40-50+ velden
+
+---
+
+## Testing Instructions — Prioriteit 2.6: Talent Editor Primary Spell Icon (Updated)
+
+### Talent Editor — Multi-rank spell update + Live preview
+
+1. **Open Talent Editor** en selecteer een talent met meerdere ranks hetzelfde spell
+   - Bijv. "Anger Management" (Stormstrike, etc.) waar Rank 1, 2, 3 allemaal spell 910 hebben
+   - Check: formulier toont "Spell Icon" section bovenaan (voor "Positie")
+
+2. **Verificeer Primary Spell section**
+   - Ziet je: "[icon] Primary Spell — Anger Management (3 ranks)"
+   - Input veld toont: 910
+   - Preview icon: toont icon van spell 910 (groot, 48x48)
+   - Icon laadt automatisch (readSpellIcons haalt SpellIconID op)
+
+3. **Wijzig het Spell ID**
+   - Typ in het input veld: 1337 (ander spell, bijv. Stormstrike)
+   - **Automatische updates:**
+     - Alle 3 ranks updaten naar 1337
+     - Preview icon update naar icon van spell 1337
+     - **Talent node in de tree update ook live** (icon verandert in de grid!)
+     - Label toont: "1337 — Stormstrike (3 ranks)"
+
+4. **Verificeer talent tree live preview**
+   - Scroll naar de talent tree
+   - De node icon verander terwijl je typen → live feedback
+   - Formulier markeer als dirty
+
+5. **Reset test**
+   - Klik Reset → preview gaat terug naar origineel (910)
+   - Talent tree icon gaat ook terug
+   - Ander talent selecteren en terug → origineel blijft
+
+6. **Verificeer "Spell IDs per Rank" vereenvoudigd**
+   - Scroll naar beneden
+   - Ziet je enkel input velden (geen duplicate icons/buttons meer)
+   - Rank 1,2,3 tonen allemaal 1337 (up-to-date)
+
+### Expected Result:
+- Wijziging primaire spell update **alle ranks tegelijk**
+- **Icon preview laadt automatisch** (SpellIconID lookup)
+- **Talent tree update live** (visuele feedback)
+- Veel schoner UI (geen duplicates)
+- Reset werkt correct (terug naar origineel)
+
+---
+
+## Testing Instructions — Prioriteit 2.5: Talent Editor Icon Picker
+
+### Talent Editor — Icon Selector Modal
+
+1. **Open Talent Editor** en selecteer een class + talent tree tab
+   - Selecteer bijvoorbeeld "Warrior" → "Fury" tab
+   - Kies een talent in de grid
+
+2. **Verifieer SpellRank velden**
+   - In het edit panel onder "Spell IDs per Rank" zie je nu:
+     - Label (bijv. "Rank 1 — Spell Name")
+     - "Wijzig Icon" button
+     - Icon preview (als beschikbaar)
+     - Spell ID input field
+
+3. **Open icon picker modal**
+   - Klik op "Wijzig Icon" button → modal verschijnt
+   - Modal toont: header, close button (X), search bar, scrollable spell list
+
+4. **Zoek en selecteer spell**
+   - Typ in search bar: bijv. "fireball" of "1234" (spell ID)
+   - Lijst filtert automatisch op naam of ID
+   - Klik op een spell → preview icon verschijnt naast name/ID
+   - Modal sluit automatisch en SpellRank field update
+
+5. **Verifieer update**
+   - Na selectie → SpellRank ID field toont nieuwe spell ID
+   - Preview icon in het Rank veld toont de nieuwe icon
+   - Dirty state wordt aangezet (kan je nu opslaan)
+
+### Expected Result:
+- Icon picker modal is intuïtief en responsive
+- Zoeken werkt naar naam en spell ID
+- Selectie update het formulier direct (ohne to save yet)
+- Modal sluit netjes na selectie
+- Icons laden correct in preview
+
+---
+
+Bijgewerkt: 2026-05-24
+
+---
+
+## QoL Verbeterplan — Sessie 3+
+
+Dit plan beschrijft concrete, prioritized verbeteringen voor look & feel, intuitief gebruik, en testbaarheid. Elke taak is klein genoeg om zelfstandig op te pakken.
+
+### Prioriteit 1 — Layout & Navigatie (hoge impact, weinig risico) ✅ VOLTOOID
+
+**1.1 Editor-header toevoegen aan alle editorpagina's** ✅ GEDAAN
+- Probleem: editors starten direct met het split-panel, er is geen duidelijke pagina-titel of context
+- Fix: voeg een sticky `.editor-header` toe (32px hoog, border-bottom) met paginanaam + korte beschrijving, vergelijkbaar met DashboardPage `.page-header`
+- Bestanden: CreatureEditorPage.jsx, ItemEditorPage.jsx, QuestEditorPage.jsx, SpellEditorPage.jsx + EditorPage.css
+- Patroon: `<div className="editor-page-header"><h2>{title}</h2><p>{subtitle}</p></div>`
+- **Status:** ✅ Geïmplementeerd in alle 4 editors met duidelijke titels
+
+**1.2 Active list-item beter zichtbaar maken** ✅ GEDAAN
+- Probleem: geselecteerd item in de lijst heeft alleen een subtiele goud-tint (`rgba(200,169,110,0.08)`), nauwelijks zichtbaar op donkere achtergrond
+- Fix: verhoog naar `rgba(200,169,110,0.14)` + maak de border-left dikker (3px) en helderder (`var(--gold)` i.p.v. `var(--gold-dim)`)
+- Bestand: EditorPage.css `.list-item.active`
+- **Status:** ✅ CSS aangepast
+
+**1.3 Lege staat editor-panel (empty state)** ✅ GEDAAN
+- Probleem: als niets geselecteerd is, toont `.editor-empty` alleen een regel tekst, geen visuele uitnodiging
+- Fix: centreer een Lucide-icon (bijv. `<MousePointerClick />`) + twee regels tekst ("Selecteer een item" / "om te beginnen met bewerken"), licht goud gekleurd
+- Bestand: EditorPage.css + elke editor-JSX
+- **Status:** ✅ Geïmplementeerd in alle 4 editors met MousePointerClick icon
+
+**1.4 Sidebar — actieve nav-item left-border aanpassen** ✅ GEDAAN
+- Probleem: de 2px left-border verschuift de padding subtiel (padding-left 10→8), wat een kleine layout-jitter veroorzaakt bij navigatie
+- Fix: gebruik `box-shadow: inset 3px 0 0 var(--gold)` i.p.v. border-left om geen layout-shift te veroorzaken
+- Bestand: Layout.css `.nav-item.active`
+- **Status:** ✅ CSS aangepast, geen jitter meer
+
+---
+
+### Prioriteit 2 — Formulieren & Fields (gebruiksgemak)
+
+**2.1 Field-secties met visuele groepering** ✅ VOLTOOID
+- Probleem: alle velden in een 3-koloms grid zonder visuele scheiding, onoverzichtelijk bij 40+ velden
+- Fix: voeg `<div className="field-section">` toe met een `<h4 className="field-section-title">` (bijv. "Basis", "Snelheden", "Modifiers", "Loot", "Flags") + een subtiele `border-top` scheidingslijn
+- Bestanden: CreatureEditorPage.jsx, ItemEditorPage.jsx, QuestEditorPage.jsx, SpellEditorPage.jsx + EditorPage.css
+- **Implementatie:**
+  - EditorPage.css: Toegevoegd `.field-section` (grid-column: 1 / -1; margin-top: 24px; border-top: 1px solid var(--border)) en `.field-section-title` (uppercase, muted color, letter-spacing)
+  - CreatureEditorPage.jsx: `getFieldSections()` met 9 logische groepen (Basis Info, Levels, Speeds, Combat, Appearance, Modifiers, Loot & Gold, Flags, Behavior)
+  - ItemEditorPage.jsx: `getFieldSections()` met 9 groepen (Basis Info, Classification, Display, Pricing, Requirements, Stats, Properties, Bonuses, Spells & Scripts)
+  - SpellEditorPage.jsx: `getFieldSections()` met 9 groepen (Basis Info, School & Type, Attributes, Timing, Range & Targets, Mechanics, Power & Levels, Effects, Visual & Priority)
+  - QuestEditorPage.jsx: `getFieldSections()` met 10 groepen (Basis Info, Objectives, Classification, Configuration, Rewards, Reward Items, Reward Choices, Requirements, Quest Chain, Waypoint)
+  - Form-rendering: Alle 4 editors nu gebruiken `getFieldSections().map(section => ...)` in plaats van directe field mapping
+- **Status:** ✅ Geïmplementeerd in alle 4 editors met duidelijke thematische groepering
+
+**2.5 Talent Editor — Icon picker in edit panel** ✅ VOLTOOID
+- Probleem: moeilijk om icons/spells te selecteren door handmatig spell IDs in te typen
+- Fix: voeg "Wijzig Icon" button toe naast SpellRank velden → modal met searchable spell list met icons
+- Implementatie:
+  - State: `showSpellPicker`, `pickingRank`, `spellSearchTerm`
+  - Modal component: `spell-picker-modal` met overlay, header, search, scrollable list
+  - SpellRank velden nu tonen: label + "Wijzig Icon" button + preview icon + input
+  - Modal toont alle beschikbare spells (uit `spellNames`) met icons, sorteerbaar op naam/ID
+  - Selectie → update `form.SpellRank_X` zonder te saven (save later)
+- CSS: nieuwe classes voor `.spell-rank-group`, `.spell-picker-modal`, `.spell-picker-item`, etc.
+- **Status:** ✅ Geïmplementeerd; SelectSpell zoeken/filteren werkt
+
+**2.6 Talent Editor — Primary Spell Icon per Talent** ✅ VOLTOOID (inclusief reverse lookup fix)
+- Probleem: wijzigen van spell icon moet per rank gebeuren, maar meestal hebben alle ranks dezelfde spell
+- Fix: voeg "Spell Icon" section toe bovenaan edit panel met één input + preview
+- Implementatie (Fase 1):
+  - Detecteer welke ranks hebben dezelfde spell als SpellRank_1 (primary spell)
+  - Toon: "Spell Icon ID [2562] (3 ranks) — Anger Management"
+  - Bij wijziging: update **alle** ranks die deze spell hebben naar het nieuwe spell ID
+  - Preview: één grote icon (48x48, niet per rank)
+  - **Auto-load icon**: Bij wijziging van primary spell → haalt automatisch SpellIconID op + laadt PNG
+  - **Live talent tree preview**: Wijziging update ook de selected talent node in de tree (live feedback)
+  - **Reset on unselect**: Bij navigatie/unselect gaat preview terug naar origineel
+  - "Spell IDs per Rank" vereenvoudigd: alleen input, geen duplicate icons/buttons
+- CSS: `.spell-icon-master` (highlighted section), `.spell-icon-master-preview` (48px icon)
+- **Status Phase 1 (Input editable):** ✅ Geïmplementeerd; multi-rank update + live preview werkt, maar veld springt terug bij edit
+- **Status Phase 2 (Reverse lookup):** ✅ VOLTOOID
+  - **Probleem:** Input veld springde terug naar originele waarde
+  - **Root cause:** `primarySpellIconId` was niet persistent in form state; alleen preview state
+  - **Fix:** Reverse index `iconToSpellId` gebouwd in loadTalents → maps iconID → spellID
+  - **Logica:** Wanneer user SpellIconID wijzigt → reverse lookup in index → vind welk spell dat icon heeft → update alle matching ranks naar dat spell
+  - **Result:** Wijziging is nu persistent; primarySpellId verandert → useEffect re-syncs correct
+  - **State added:** `const [iconToSpellId, setIconToSpellId] = useState({})` — gebouwd in loadTalents
+  - **Function:** `handleChangeSpellIconId()` simplified — gebruikt `iconToSpellId[newIconId]` direct ipv async lookup
+  - **Testing:** ✅ User confirmed: "werkt nu perfect"
+
+**2.2 Dirty-state indicatie in de header**
+- Probleem: gebruiker weet niet altijd of er unsaved changes zijn
+- Fix: toon een kleine gele stip (`●`) naast de Entry/naam in de form-header als `dirty === true`
+- Bestanden: alle editor-JSX, geen CSS-wijziging nodig
+
+**2.3 Save-knop keyboard shortcut (Ctrl+S)**
+- Probleem: moet muisklik gebruiken om op te slaan
+- Fix: `useEffect` met `keydown` listener op `Ctrl+S` → roept `handleSave()` aan; opruimen in cleanup
+- Bestanden: alle editor-JSX (zelfde patroon overal)
+
+**2.4 Zoekbalk focus bij pagina-load**
+- Probleem: gebruiker moet handmatig in zoekbalk klikken
+- Fix: `useEffect(() => { searchRef.current?.focus(); }, [])` met `ref` op het zoek-input
+- Bestanden: alle editor-JSX
+
+---
+
+### Prioriteit 3 — Feedback & Statusindicaties
+
+**3.1 Toast-notificatie component (herbruikbaar)**
+- Probleem: success/error berichten zijn per pagina anders geïmplementeerd, inconsistent gedrag (sommige faden niet weg)
+- Fix: maak `src/components/Toast.jsx` + `Toast.css`, exporteer als `<Toast message={msg} />`. Gebruik in alle editors i.p.v. inline `.editor-msg` divs
+- Patroon: `{ type: 'success'|'error', text: '...' }` → auto-dismiss na 3s met fadeOut animatie
+
+**3.2 Loading skeleton voor de lijst**
+- Probleem: lijst toont niets tijdens het laden, geen feedback
+- Fix: toon 6x een `.skeleton-item` placeholder (animated shimmer) tijdens `loading === true`
+- Bestanden: EditorPage.css (nieuwe `.skeleton-item` klasse) + alle editor-JSX
+
+**3.3 ConnectPage — "Test verbinding" knop**
+- Probleem: de TODO in ConnectPage is al lang open, gebruiker moet blind verbinden
+- Fix: voeg een "Test" button toe naast Connect die alleen `query('SELECT 1')` uitvoert en success/error toont zonder navigatie
+- Bestand: ConnectPage.jsx
+
+---
+
+### Prioriteit 4 — Save-functionaliteit implementeren
+
+**4.1 CreatureEditorPage save**
+- Query: `UPDATE creature_template SET name=?, subname=?, minlevel=?, maxlevel=?, ... WHERE entry=?`
+- Na save: eventueel SOAP `.reload creature entry X`
+- Dirty-reset na succesvolle save
+
+**4.2 ItemEditorPage save**
+- Query: `UPDATE item_template SET name=?, class=?, subclass=?, ... WHERE entry=?`
+
+**4.3 SpellEditorPage save**
+- Query: `UPDATE spell_dbc SET Name_Lang_enUS=?, Effect_1=?, ... WHERE ID=?`
+- Let op: controleer welke kolommen beschrijfbaar zijn in AzerothCore's spell_dbc tabel
+
+**4.4 QuestEditorPage save**
+- Query: `UPDATE quest_template SET Title=?, Details=?, Objectives=?, ... WHERE ID=?`
+
+> **Aanpak voor saves**: Bouw één generieke `buildUpdateQuery(table, pkField, fields, form)` helper in `src/lib/queryHelpers.js` die de UPDATE-query + params opstelt. Hiermee zijn alle vier editors snel te implementeren.
+
+---
+
+### Prioriteit 5 — Testen
+
+**5.1 Handmatige testchecklist per editor**
+
+Voor elke editor doorlopen:
+1. [ ] Zoeken op naam (LIKE) → lijst toont resultaten
+2. [ ] Zoeken op ID (exact) → correct item geselecteerd
+3. [ ] Klik item → form vult correct in
+4. [ ] Wijzig een veld → dirty-indicator verschijnt
+5. [ ] Reset → form terug naar originele waarden, dirty verdwenen
+6. [ ] Save → success toast, dirty verdwenen
+7. [ ] Ververs pagina → sla op, herlaad, check of waarden persistent zijn in DB
+8. [ ] Lege zoekterm → laad eerste 50 items
+
+**5.2 Electron DevTools snelkoppeling**
+- Voeg in `electron/main.js` toe: `globalShortcut.register('F12', () => win.webContents.openDevTools())`
+- Makkelijker debuggen zonder code te wijzigen
+
+**5.3 IPC Error logging**
+- Zorg dat alle IPC handlers in `electron/main.js` fouten loggen naar `console.error` met de handler-naam als prefix
+- Patroon: `catch(e) { console.error('[creatures:save]', e.message); return { error: e.message }; }`
+
+---
+
+### CSS Verbeteringen — Overzicht
+
+| Klasse/Selector | Bestand | Huidige waarde | Aanbevolen waarde |
+|---|---|---|---|
+| `.list-item.active` | EditorPage.css | `border-left: 2px solid var(--gold-dim)` | `border-left: 3px solid var(--gold)` + `background: rgba(200,169,110,0.14)` |
+| `.nav-item.active` | Layout.css | `border-left: 2px solid var(--gold)` | `box-shadow: inset 3px 0 0 var(--gold)` (geen layout-shift) |
+| `.editor-empty` | EditorPage.css | alleen tekst | voeg icon + subtekst toe |
+| `.field-section-title` | EditorPage.css | (nieuw) | zie Prioriteit 2.1 |
+| `.skeleton-item` | EditorPage.css | (nieuw) | shimmer animatie |
+
+---
+
+### Implementatievolgorde (aanbevolen voor Haiku)
+
+1. CSS tweaks (1.2, 1.4) — puur CSS, geen logica
+2. Empty state (1.3) — minimale JSX
+3. Editor-headers (1.1) — copy-paste patroon
+4. Dirty indicator (2.2) — één regel JSX per editor
+5. Ctrl+S shortcut (2.3) — zelfde useEffect in alle editors
+6. Field-secties (2.1) — JSX herstructurering per editor
+7. Zoekbalk autofocus (2.4)
+8. Toast component (3.1) — nieuwe component, daarna refactor editors
+9. Loading skeleton (3.2)
+10. ConnectPage test-knop (3.3)
+11. Save queries (Prioriteit 4) — per editor, gebruik queryHelpers.js
+12. F12 DevTools + IPC logging (5.2, 5.3)
 
 Bijgewerkt: 2026-05-24

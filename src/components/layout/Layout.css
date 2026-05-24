@@ -123,8 +123,7 @@
 .nav-item.active {
   background: linear-gradient(90deg, rgba(200,169,110,0.1), transparent);
   color: var(--gold);
-  border-left: 2px solid var(--gold);
-  padding-left: 8px;
+  box-shadow: inset 3px 0 0 var(--gold);
 }
 
 .nav-item.disconnect {
