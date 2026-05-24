@@ -782,3 +782,84 @@ ipcMain.handle('dbc:writeTalent', async (_, dbcPath, talent) => {
     return { success: false, error: e.message };
   }
 });
+
+ipcMain.handle('dbc:deleteTalent', async (_, dbcPath, talentId) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC')
+      return { success: false, error: 'Ongeldig DBC bestand' };
+
+    const recordCount  = buffer.readUInt32LE(4);
+    const recordSize   = buffer.readUInt32LE(12);
+    const strBlockSize = buffer.readUInt32LE(16);
+    const headerSize   = 20;
+    const dataSize     = recordCount * recordSize;
+
+    let idx = -1;
+    for (let i = 0; i < recordCount; i++) {
+      if (buffer.readUInt32LE(headerSize + i * recordSize) === talentId) { idx = i; break; }
+    }
+    if (idx === -1) return { success: false, error: 'Talent niet gevonden' };
+
+    const newBuf = Buffer.alloc(headerSize + (recordCount - 1) * recordSize + strBlockSize);
+    buffer.copy(newBuf, 0, 0, headerSize);
+    newBuf.writeUInt32LE(recordCount - 1, 4);
+    buffer.copy(newBuf, headerSize, headerSize, headerSize + idx * recordSize);
+    buffer.copy(newBuf, headerSize + idx * recordSize, headerSize + (idx + 1) * recordSize, headerSize + dataSize);
+    buffer.copy(newBuf, headerSize + (recordCount - 1) * recordSize, headerSize + dataSize, headerSize + dataSize + strBlockSize);
+
+    fs.writeFileSync(filePath, newBuf);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:insertTalent', async (_, dbcPath, talent) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC')
+      return { success: false, error: 'Ongeldig DBC bestand' };
+
+    const recordCount  = buffer.readUInt32LE(4);
+    const recordSize   = buffer.readUInt32LE(12);
+    const strBlockSize = buffer.readUInt32LE(16);
+    const headerSize   = 20;
+    const dataSize     = recordCount * recordSize;
+
+    // Controleer of ID al bestaat
+    for (let i = 0; i < recordCount; i++) {
+      if (buffer.readUInt32LE(headerSize + i * recordSize) === talent.ID)
+        return { success: false, error: `Talent ID ${talent.ID} bestaat al` };
+    }
+
+    const newBuf = Buffer.alloc(headerSize + (recordCount + 1) * recordSize + strBlockSize);
+    buffer.copy(newBuf, 0, 0, headerSize);
+    newBuf.writeUInt32LE(recordCount + 1, 4);
+    buffer.copy(newBuf, headerSize, headerSize, headerSize + dataSize);
+
+    // Schrijf nieuw record aan het einde van de data
+    const off = headerSize + dataSize;
+    newBuf.writeUInt32LE(talent.ID          || 0, off + 0);
+    newBuf.writeUInt32LE(talent.TabID       || 0, off + 4);
+    newBuf.writeUInt32LE(talent.TierID      || 0, off + 8);
+    newBuf.writeUInt32LE(talent.ColumnIndex || 0, off + 12);
+    for (let i = 1; i <= 9; i++)
+      newBuf.writeUInt32LE(talent[`SpellRank_${i}`] || 0, off + 16 + (i - 1) * 4);
+    newBuf.writeUInt32LE(talent.PrereqTalent_1 || 0, off + 52);
+    newBuf.writeUInt32LE(talent.PrereqTalent_2 || 0, off + 56);
+    newBuf.writeUInt32LE(talent.PrereqTalent_3 || 0, off + 60);
+    newBuf.writeUInt32LE(talent.PrereqRank_1   || 0, off + 64);
+    newBuf.writeUInt32LE(talent.PrereqRank_2   || 0, off + 68);
+    newBuf.writeUInt32LE(talent.PrereqRank_3   || 0, off + 72);
+
+    buffer.copy(newBuf, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + strBlockSize);
+
+    fs.writeFileSync(filePath, newBuf);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
