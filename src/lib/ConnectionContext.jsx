@@ -99,6 +99,14 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.writeTalent(dbcPath, talent);
   }, [dbcPath]);
 
+  const deleteTalent = useCallback(async (talentId) => {
+    return window.azeroth.dbc.deleteTalent(dbcPath, talentId);
+  }, [dbcPath]);
+
+  const insertTalent = useCallback(async (talent) => {
+    return window.azeroth.dbc.insertTalent(dbcPath, talent);
+  }, [dbcPath]);
+
   const findNextId = useCallback(async ({ table, idColumn, startId }) => {
     return window.azeroth.db.findNextId({ table, idColumn, startId });
   }, []);
@@ -141,7 +149,7 @@ export function ConnectionProvider({ children }) {
       connectDb, disconnectDb,
       query, soapCommand,
       readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent,
-      getIcon, writeTalent,
+      getIcon, writeTalent, deleteTalent, insertTalent,
       findNextId, findNextTalentId, copyTalentDbc,
       searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
       idRanges, setIdRanges

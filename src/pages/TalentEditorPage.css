@@ -107,13 +107,43 @@
   pointer-events: none;
 }
 
-/* ── Talent grid cell (empty slot) ───────────────────────────────────── */
+/* ── Talent grid cell (leeg slot) ────────────────────────────────────── */
 .talent-grid-cell {
   position: absolute;
   border: 1px dashed var(--border);
   background: transparent;
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.15s, background 0.15s;
+  z-index: 2;
+}
+.talent-grid-cell:hover {
+  border-color: var(--gold-dim);
+  background: rgba(200,169,110,0.07);
+}
+.talent-grid-cell.selected-empty {
+  border-color: var(--gold);
+  background: rgba(200,169,110,0.12);
+  box-shadow: 0 0 0 2px rgba(200,169,110,0.2);
+}
+.talent-grid-cell.drag-over {
+  border-color: #4caf50;
+  background: rgba(76,175,80,0.12);
+  border-style: solid;
+}
+.grid-cell-plus {
+  font-size: 18px;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity 0.15s;
   pointer-events: none;
+}
+.talent-grid-cell:hover .grid-cell-plus,
+.talent-grid-cell.selected-empty .grid-cell-plus {
+  opacity: 0.5;
 }
 
 /* ── Talent node ───────────────────────────────────────────────────────── */
@@ -145,6 +175,15 @@
   background: var(--bg-active);
   z-index: 7;
 }
+.talent-node.dragging {
+  opacity: 0.45;
+  cursor: grabbing;
+}
+.talent-node.drag-over {
+  border-color: #4caf50;
+  box-shadow: 0 0 0 2px rgba(76,175,80,0.35);
+  background: rgba(76,175,80,0.1);
+}
 
 .talent-node-rank {
   font-size: 11px;
@@ -175,10 +214,12 @@
 
 .talent-edit-actions {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  padding: 10px 14px;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 10px;
   border-bottom: 1px solid var(--border);
+  flex-wrap: nowrap;
+  overflow: hidden;
 }
 
 .talent-edit-fields {
@@ -401,4 +442,26 @@
   stroke-width: 2;
   fill: none;
   opacity: 0.8;
+}
+
+/* ── Delete inline (rechts in de actions-balk) ───────────────────────── */
+.talent-delete-inline {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.btn-ghost-confirm {
+  color: var(--gold-bright);
+  border-color: var(--border-gold) !important;
+}
+.btn-ghost-confirm:hover:not(:disabled) {
+  background: rgba(200,169,110,0.12) !important;
+}
+
+.delete-confirm-label {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
 }
