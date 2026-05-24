@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
@@ -49,6 +49,7 @@ export default function ItemEditorPage() {
 	const [saving, setSaving] = useState(false);
 	const [msg, setMsg] = useState(null);
 	const [loading, setLoading] = useState(false);
+	const searchRef = useRef(null);
 
 	const searchItems = useCallback(async (term) => {
 		setLoading(true);
@@ -70,6 +71,9 @@ export default function ItemEditorPage() {
 	}, [query]);
 
 	useEffect(() => { searchItems(''); }, []);
+
+
+	useEffect(() => { searchRef.current?.focus(); }, []);
 
 	const selectItem = async (entry) => {
 		const result = await query('SELECT * FROM item_template WHERE entry = ?', [entry]);
@@ -125,6 +129,17 @@ export default function ItemEditorPage() {
 		setSaving(false);
 	};
 
+	useEffect(() => {
+		const handleKeyDown = (e) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+				e.preventDefault();
+				if (dirty && selected) handleSave();
+			}
+		};
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [dirty, selected, handleSave]);
+
 	return (
 		<>
 			<div className="editor-page-header">
@@ -137,6 +152,7 @@ export default function ItemEditorPage() {
 						<div className="search-box">
 							<Search size={13} />
 							<input
+								ref={searchRef}
 								placeholder="Search name or entry..."
 								value={search}
 								onChange={e => { setSearch(e.target.value); searchItems(e.target.value); }}
@@ -181,7 +197,7 @@ export default function ItemEditorPage() {
 							<div className="page-header">
 								<div>
 									<h1 className="page-title" style={{ color: QUALITY_COLORS[selected.Quality] || 'var(--gold-bright)' }}>
-										{selected.name}
+										{selected.name}{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}
 									</h1>
 									<p className="page-sub">Entry #{selected.entry} · item_template</p>
 								</div>

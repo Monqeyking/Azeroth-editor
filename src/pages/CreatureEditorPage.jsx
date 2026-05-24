@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight, MousePointerClick } from 'lucide-react';
 import '../pages/DashboardPage.css';
@@ -55,6 +55,30 @@ export default function CreatureEditorPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [errors, setErrors] = useState({});
+  const searchRef = useRef(null);
+
+  // Load recent creatures from localStorage
+  const loadRecent = useCallback(() => {
+    try {
+      const recent = JSON.parse(localStorage.getItem('recent_creatures') || '[]');
+      return recent.slice(0, 5);
+    } catch {
+      return [];
+    }
+  }, []);
+
+  // Save creature to recent list
+  const saveRecent = useCallback((entry) => {
+    try {
+      let recent = JSON.parse(localStorage.getItem('recent_creatures') || '[]');
+      recent = recent.filter(e => e !== entry);
+      recent.unshift(entry);
+      localStorage.setItem('recent_creatures', JSON.stringify(recent.slice(0, 10)));
+    } catch {
+      // Silent fail
+    }
+  }, []);
 
   const searchCreatures = useCallback(async (term) => {
     setLoading(true);
@@ -77,6 +101,9 @@ export default function CreatureEditorPage() {
 
   useEffect(() => { searchCreatures(''); }, []);
 
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
+
   const selectCreature = async (entry) => {
     const result = await query('SELECT * FROM creature_template WHERE entry = ?', [entry]);
     if (result.data?.[0]) {
@@ -84,7 +111,18 @@ export default function CreatureEditorPage() {
       setForm(result.data[0]);
       setDirty(false);
       setMsg(null);
+      setErrors({});
+      saveRecent(entry);
     }
+  };
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!form.name || form.name.trim() === '') {
+      newErrors.name = 'Name is required';
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const handleChange = (key, value) => {
@@ -93,6 +131,11 @@ export default function CreatureEditorPage() {
   };
 
   const handleSave = async () => {
+    if (!validateForm()) {
+      setMsg({ type: 'error', text: 'Please fix validation errors before saving' });
+      return;
+    }
+
     setSaving(true);
     setMsg(null);
     try {
@@ -104,23 +147,35 @@ export default function CreatureEditorPage() {
       if (result.success) {
         setSelected(form);
         setDirty(false);
+        setErrors({});
         setMsg({ type: 'success', text: 'Saved! Reloading server...' });
         // Live reload via SOAP
         if (soapConfig.user) {
           await soapCommand(`.reload creature_template`);
-          setMsg({ type: 'success', text: `Saved & reloaded entry ${form.entry}` });
+          setMsg({ type: 'success', text: `✓ Saved & reloaded entry ${form.entry}` });
         } else {
-          setMsg({ type: 'success', text: `Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
+          setMsg({ type: 'success', text: `✓ Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
         }
         searchCreatures(search);
       } else {
-        setMsg({ type: 'error', text: result.error });
+        setMsg({ type: 'error', text: `✗ Save failed: ${result.error}` });
       }
     } catch (e) {
-      setMsg({ type: 'error', text: e.message });
+      setMsg({ type: 'error', text: `✗ Error: ${e.message}` });
     }
     setSaving(false);
   };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty && selected) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dirty, selected, handleSave]);
 
   const handleCreate = async () => {
     const result = await query('SELECT MAX(entry) as m FROM creature_template');
@@ -163,6 +218,7 @@ export default function CreatureEditorPage() {
           <div className="search-box">
             <Search size={13} />
             <input
+              ref={searchRef}
               placeholder="Search name or entry..."
               value={search}
               onChange={e => { setSearch(e.target.value); searchCreatures(e.target.value); }}
@@ -207,16 +263,16 @@ export default function CreatureEditorPage() {
           <>
             <div className="page-header">
               <div>
-                <h1 className="page-title">{selected.name}</h1>
+                <h1 className="page-title">{selected.name}{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}</h1>
                 <p className="page-sub">Entry #{selected.entry} · creature_template</p>
               </div>
               <div className="header-actions">
                 {dirty && (
-                  <button className="btn-ghost" onClick={handleReset}>
+                  <button className="btn-ghost" onClick={handleReset} title="Discard changes">
                     <RotateCcw size={13} /> Reset
                   </button>
                 )}
-                <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
+                <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty} title="Save changes (Ctrl+S)">
                   <Save size={13} /> {saving ? 'Saving...' : 'Save & Reload'}
                 </button>
               </div>
@@ -235,11 +291,12 @@ export default function CreatureEditorPage() {
                   {section.keys.map(key => {
                     const f = CREATURE_FIELDS.find(fld => fld.key === key);
                     if (!f) return null;
+                    const hasError = errors[f.key];
                     return (
-                      <div key={f.key} className="field-group">
-                        <label>{f.label}</label>
+                      <div key={f.key} className={`field-group ${hasError ? 'field-error' : ''}`}>
+                        <label>{f.label}{f.required && <span style={{color: 'var(--accent-red)'}}>*</span>}</label>
                         {f.type === 'select' ? (
-                          <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} disabled={f.readonly}>
+                          <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} disabled={f.readonly} style={hasError ? {borderColor: 'var(--accent-red)'} : {}}>
                             {f.options.map(o => {
                               const [val, lbl] = o.split(':');
                               return <option key={val} value={val}>{lbl}</option>;
@@ -252,8 +309,11 @@ export default function CreatureEditorPage() {
                             value={form[f.key] ?? ''}
                             onChange={e => handleChange(f.key, e.target.value)}
                             readOnly={f.readonly}
+                            style={hasError ? {borderColor: 'var(--accent-red)'} : {}}
+                            title={hasError ? errors[f.key] : ''}
                           />
                         )}
+                        {hasError && <span style={{fontSize: '11px', color: 'var(--accent-red)'}}>{errors[f.key]}</span>}
                       </div>
                     );
                   })}

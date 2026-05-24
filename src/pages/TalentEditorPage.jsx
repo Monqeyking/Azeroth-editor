@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Save, RotateCcw, GitBranch, X, Search } from 'lucide-react';
 import './DashboardPage.css';
@@ -154,6 +154,7 @@ export default function TalentEditorPage() {
 	useEffect(() => { if (selectedClass) loadTabs(selectedClass); }, [selectedClass, loadTabs]);
 	useEffect(() => { if (activeTab) loadTalents(activeTab.ID); }, [activeTab, loadTalents]);
 
+
 	const selectTalent = (t) => {
 		setSelected(t);
 		setForm({ ...t });
@@ -186,6 +187,17 @@ export default function TalentEditorPage() {
 		}
 		setSaving(false);
 	};
+
+	useEffect(() => {
+		const handleKeyDown = (e) => {
+			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+				e.preventDefault();
+				if (dirty && selected) handleSave();
+			}
+		};
+		window.addEventListener('keydown', handleKeyDown);
+		return () => window.removeEventListener('keydown', handleKeyDown);
+	}, [dirty, selected, handleSave]);
 
 	const handleSaveAll = async () => {
 		setCommitting(true);
@@ -264,47 +276,55 @@ export default function TalentEditorPage() {
 		}
 	};
 
-	// Handle spell icon ID change — reverse lookup to find spell with this icon
-	const handleChangeSpellIconId = (newIconId) => {
-		setPrimarySpellIconId(newIconId);
+	// Handle spell icon ID change — triggers on blur to allow editing without instant reset
+	const handleBlurSpellIconId = async (newIconId) => {
+		if (!newIconId) return;
+
+		const iconIdNum = +newIconId;
+		if (iconIdNum === primarySpellIconId) return; // No change
+
+		// Reverse lookup: use iconToSpellId index to find a spell with this iconID
+		const spellIdWithIcon = iconToSpellId[iconIdNum];
+		if (!spellIdWithIcon || ranksWithPrimarySpell.length === 0) {
+			// Icon not found or no ranks to update
+			return;
+		}
+
+		// Update state
+		setPrimarySpellIconId(iconIdNum);
 		setDirty(true);
 
 		// Load icon preview for this iconID
-		readSpellIcons([newIconId]).then(result => {
-			if (result.success) {
-				const iconFilename = result.data?.[newIconId];
-				if (iconFilename) {
-					getIcon(iconFilename).then(iconUrl => {
-						if (iconUrl) {
-							setSpellIcons(prev => ({ ...prev, [newIconId]: iconUrl }));
-						}
-					});
+		const iconResult = await readSpellIcons([iconIdNum]);
+		if (iconResult.success) {
+			const iconFilename = iconResult.data?.[iconIdNum];
+			if (iconFilename) {
+				const iconUrl = await getIcon(iconFilename);
+				if (iconUrl) {
+					setSpellIcons(prev => ({ ...prev, [spellIdWithIcon]: iconUrl }));
 				}
 			}
+		}
+
+		// Update all ranks with the new spell
+		ranksWithPrimarySpell.forEach(rank => {
+			setForm(f => ({ ...f, [`SpellRank_${rank}`]: spellIdWithIcon }));
 		});
 
-		// Reverse lookup: use iconToSpellId index to find a spell with this iconID
-		const spellIdWithIcon = iconToSpellId[newIconId];
-		if (spellIdWithIcon && ranksWithPrimarySpell.length > 0) {
-			// Update all ranks that have primarySpellId to use this new spell
-			ranksWithPrimarySpell.forEach(rank => {
-				handleChange(`SpellRank_${rank}`, spellIdWithIcon);
-			});
-			// Update selected talent preview for live tree update
-			if (selected) {
-				setSelected(prev => ({
-					...prev,
-					SpellRank_1: spellIdWithIcon,
-					SpellRank_2: prev.SpellRank_2 === primarySpellId ? spellIdWithIcon : prev.SpellRank_2,
-					SpellRank_3: prev.SpellRank_3 === primarySpellId ? spellIdWithIcon : prev.SpellRank_3,
-					SpellRank_4: prev.SpellRank_4 === primarySpellId ? spellIdWithIcon : prev.SpellRank_4,
-					SpellRank_5: prev.SpellRank_5 === primarySpellId ? spellIdWithIcon : prev.SpellRank_5,
-					SpellRank_6: prev.SpellRank_6 === primarySpellId ? spellIdWithIcon : prev.SpellRank_6,
-					SpellRank_7: prev.SpellRank_7 === primarySpellId ? spellIdWithIcon : prev.SpellRank_7,
-					SpellRank_8: prev.SpellRank_8 === primarySpellId ? spellIdWithIcon : prev.SpellRank_8,
-					SpellRank_9: prev.SpellRank_9 === primarySpellId ? spellIdWithIcon : prev.SpellRank_9,
-				}));
-			}
+		// Update selected talent preview
+		if (selected) {
+			setSelected(prev => ({
+				...prev,
+				SpellRank_1: spellIdWithIcon,
+				SpellRank_2: prev.SpellRank_2 === primarySpellId ? spellIdWithIcon : prev.SpellRank_2,
+				SpellRank_3: prev.SpellRank_3 === primarySpellId ? spellIdWithIcon : prev.SpellRank_3,
+				SpellRank_4: prev.SpellRank_4 === primarySpellId ? spellIdWithIcon : prev.SpellRank_4,
+				SpellRank_5: prev.SpellRank_5 === primarySpellId ? spellIdWithIcon : prev.SpellRank_5,
+				SpellRank_6: prev.SpellRank_6 === primarySpellId ? spellIdWithIcon : prev.SpellRank_6,
+				SpellRank_7: prev.SpellRank_7 === primarySpellId ? spellIdWithIcon : prev.SpellRank_7,
+				SpellRank_8: prev.SpellRank_8 === primarySpellId ? spellIdWithIcon : prev.SpellRank_8,
+				SpellRank_9: prev.SpellRank_9 === primarySpellId ? spellIdWithIcon : prev.SpellRank_9,
+			}));
 		}
 	};
 
@@ -386,12 +406,56 @@ export default function TalentEditorPage() {
 						<div className="talent-tree-scroll">
 							{activeTab && talents.length > 0 && (
 								<div className="talent-tree" style={{ width: treeW, height: treeH }}>
+									{/* Grid cells (dashed borders for empty slots) */}
+									{Array.from({ length: (maxRow + 1) * (maxCol + 1) }).map((_, idx) => {
+										const col = idx % (maxCol + 1);
+										const row = Math.floor(idx / (maxCol + 1));
+										return (
+											<div
+												key={`grid-${col}-${row}`}
+												className="talent-grid-cell"
+												style={{
+													left: col * (CELL + GAP),
+													top: row * (CELL + GAP),
+													width: CELL,
+													height: CELL,
+												}}
+											/>
+										);
+									})}
+
+									{/* Prerequisite lines (SVG arrows) */}
 									<svg width={treeW} height={treeH} className="talent-arrows" style={{ overflow: 'visible' }}>
 										<defs>
 											<marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-												<path d="M0,0 L6,3 L0,6 Z" fill="var(--gold-dim)" />
+												<path d="M0,0 L6,3 L0,6 Z" fill="#d32f2f" />
 											</marker>
 										</defs>
+
+										{talents.map(t => {
+											const prereqTalentId = t.PrereqTalent_1;
+											if (!prereqTalentId) return null;
+
+											const prereqTalent = talents.find(talent => talent.ID === prereqTalentId);
+											if (!prereqTalent) return null;
+
+											const x1 = (prereqTalent.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+											const y1 = (prereqTalent.TierID || 0) * (CELL + GAP) + CELL;
+											const x2 = (t.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+											const y2 = (t.TierID || 0) * (CELL + GAP);
+
+											return (
+												<line
+													key={`prereq-${prereqTalentId}-${t.ID}`}
+													x1={x1}
+													y1={y1}
+													x2={x2}
+													y2={y2}
+													className="talent-prereq-line"
+													markerEnd="url(#arrowhead)"
+												/>
+											);
+										})}
 									</svg>
 
 									{talents.map(t => {
@@ -440,7 +504,7 @@ export default function TalentEditorPage() {
 					<>
 						<div className="panel-header">
 							<GitBranch size={14} />
-							<span>Talent #{selected.ID}</span>
+							<span>Talent #{selected.ID}{dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>●</span>}</span>
 						</div>
 
 						<div className="talent-edit-actions">
@@ -450,7 +514,7 @@ export default function TalentEditorPage() {
 								</button>
 							)}
 							<button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
-								<Save size={13} /> {saving ? 'Opslaan…' : 'Opslaan'}
+								<Save size={13} /> {saving ? 'Opslaan…' : 'Save'}
 							</button>
 							<button className="btn-secondary" onClick={handleSaveAll} disabled={committing} title="Alle talents in deze tab opslaan">
 								<Save size={13} /> {committing ? 'Opslaan…' : 'Export DBC'}
@@ -470,9 +534,9 @@ export default function TalentEditorPage() {
 											<span className="spell-icon-ranks"> ({ranksWithPrimarySpell.length} rank{ranksWithPrimarySpell.length !== 1 ? 's' : ''})</span>
 										</label>
 										<div className="spell-icon-input-group">
-											{(spellIcons[primarySpellIconId] || spellIcons[primarySpellId]) &&
+											{(spellIcons[primarySpellId]) &&
 												<img
-													src={spellIcons[primarySpellIconId] || spellIcons[primarySpellId]}
+													src={spellIcons[primarySpellId]}
 													alt="icon"
 													className="spell-icon-master-preview"
 												/>
@@ -480,9 +544,10 @@ export default function TalentEditorPage() {
 											<input
 												type="number"
 												value={primarySpellIconId ?? 0}
-												onChange={e => handleChangeSpellIconId(+e.target.value)}
+												onChange={e => setPrimarySpellIconId(+e.target.value)}
+												onBlur={e => handleBlurSpellIconId(+e.target.value)}
 												placeholder="Icon ID"
-												title="Wijzig icon ID → laadt preview en updatet alle ranks"
+												title="Typ icon ID en druk Tab/Enter, of klik ergens anders → laadt preview en updatet alle ranks"
 											/>
 										</div>
 									</div>

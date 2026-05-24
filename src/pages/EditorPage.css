@@ -215,3 +215,30 @@
   margin-bottom: 12px;
   margin-top: 0;
 }
+
+/* Field validation */
+.field-group input,
+.field-group select,
+.field-group textarea {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  padding: 7px 10px;
+  font-size: 13px;
+  transition: border-color 0.15s;
+}
+
+.field-group input:focus,
+.field-group select:focus,
+.field-group textarea:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+
+.field-error input,
+.field-error select,
+.field-error textarea {
+  border-color: var(--accent-red) !important;
+  background: rgba(204, 74, 74, 0.05);
+}

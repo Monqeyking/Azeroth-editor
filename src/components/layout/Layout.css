@@ -1,9 +1,11 @@
 .layout {
   display: flex;
   width: 100vw;
-  height: 100vh;
+  height: calc(100vh - 32px);
+  margin-top: 32px;
   overflow: hidden;
   background: var(--bg-void);
+  -webkit-app-region: no-drag;
 }
 
 /* ── Sidebar ─────────────────────────────────────────────────── */

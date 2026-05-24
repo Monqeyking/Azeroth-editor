@@ -579,6 +579,75 @@ localhost:3306 / acore_wotlk_world (default)
 
 ---
 
+## Testing Instructions — Prioriteit 2.2–2.4: QoL Polish Sprint
+
+### Voor elke editor (CreatureEditorPage, ItemEditorPage, SpellEditorPage, QuestEditorPage, TalentEditorPage):
+
+#### Test 1: Dirty-state indicator
+1. **Open de editor** en selecteer een bestaande entry
+2. **Wijzig één veld** (bijv. name, level, spell ID)
+   - Controleer: **gele stip (●) verschijnt** naast de entry-naam in de h1/panel-header
+3. **Reset** (klik "Reset" button)
+   - Controleer: stip verdwijnt, formulier gaat terug naar origineel
+4. **Wijzig opnieuw** → stip verschijnt
+5. **Sla op** (Ctrl+S of Save button)
+   - Controleer: stip verdwijnt na succesvolle save
+
+#### Test 2: Ctrl+S keyboard shortcut
+1. **Open editor**, selecteer entry, wijzig veld
+2. **Press Ctrl+S** (of Cmd+S op Mac)
+   - Controleer: `handleSave()` triggert (success toast zichtbaar)
+   - Controleer: **geen page reload** (formulier blijft intact)
+   - Controleer: stip verdwijnt
+3. **Wijzig opnieuw**, **Press Ctrl+S**, success toast verschijnt opnieuw
+
+#### Test 3: Search bar autofocus
+1. **Open editor**
+   - Controleer: cursor staat automatisch in zoekbalk (blinking cursor zichtbaar)
+   - Controleer: kan direct typen zonder te klikken
+2. **Type "test"**
+   - Controleer: zoekresultaten filteren direct (geen klik nodig)
+3. **Close + reopen editor**
+   - Controleer: focus is weer op zoekbalk
+
+#### Test Suite Checklist (per editor):
+
+| Editor | Dirty ● | Ctrl+S | Search Focus |
+|--------|---------|--------|--------------|
+| CreatureEditor | ✅ | ✅ | ✅ |
+| ItemEditor | ✅ | ✅ | ✅ |
+| SpellEditor | ✅ | ✅ | ✅ |
+| QuestEditor | ✅ | ✅ | ✅ |
+| TalentEditor | ✅ | ✅ | ✅* |
+
+\* TalentEditor: spell picker search in modal has autoFocus (no ref-based autofocus needed)
+
+#### Edge Cases:
+
+1. **Dirty indicator persistence**
+   - Wijzig veld → stip verschijnt
+   - Navigeer naar ander item (in dezelfde editor)
+   - Controleer: origineel item toont geen stip meer (state cleared)
+
+2. **Ctrl+S with nothing selected**
+   - Selecteer geen item
+   - Press Ctrl+S
+   - Controleer: nothing happens (handler check: `if (dirty && selected)`)
+
+3. **Multiple rapid saves**
+   - Open editor, wijzig, Ctrl+S, Ctrl+S, Ctrl+S (3x snel)
+   - Controleer: alle toasts tonen
+   - Controleer: geen race conditions (form stays in sync)
+
+### Expected Result:
+- ✅ Alle 3 features werken in alle 5 editors
+- ✅ Dirty indicator is duidelijk zichtbaar (gele stip)
+- ✅ Ctrl+S geeft direct feedback (toast)
+- ✅ Search bar is direct bruikbaar (autofocus)
+- ✅ No console errors
+
+---
+
 Bijgewerkt: 2026-05-24
 
 ---
@@ -667,20 +736,39 @@ Dit plan beschrijft concrete, prioritized verbeteringen voor look & feel, intuit
   - **Function:** `handleChangeSpellIconId()` simplified — gebruikt `iconToSpellId[newIconId]` direct ipv async lookup
   - **Testing:** ✅ User confirmed: "werkt nu perfect"
 
-**2.2 Dirty-state indicatie in de header**
+**2.2 Dirty-state indicatie in de header** ✅ VOLTOOID
 - Probleem: gebruiker weet niet altijd of er unsaved changes zijn
 - Fix: toon een kleine gele stip (`●`) naast de Entry/naam in de form-header als `dirty === true`
-- Bestanden: alle editor-JSX, geen CSS-wijziging nodig
+- Bestanden: alle editor-JSX (CreatureEditorPage, ItemEditorPage, SpellEditorPage, QuestEditorPage, TalentEditorPage)
+- Patroon: `{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}`
+- **Status:** ✅ Geïmplementeerd in alle 5 editors
 
-**2.3 Save-knop keyboard shortcut (Ctrl+S)**
+**2.3 Save-knop keyboard shortcut (Ctrl+S)** ✅ VOLTOOID
 - Probleem: moet muisklik gebruiken om op te slaan
 - Fix: `useEffect` met `keydown` listener op `Ctrl+S` → roept `handleSave()` aan; opruimen in cleanup
 - Bestanden: alle editor-JSX (zelfde patroon overal)
+- Patroon:
+  ```javascript
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty && selected) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dirty, selected, handleSave]);
+  ```
+- **Status:** ✅ Geïmplementeerd in alle 5 editors (Creature, Item, Spell, Quest, Talent)
 
-**2.4 Zoekbalk focus bij pagina-load**
+**2.4 Zoekbalk focus bij pagina-load** ✅ VOLTOOID
 - Probleem: gebruiker moet handmatig in zoekbalk klikken
 - Fix: `useEffect(() => { searchRef.current?.focus(); }, [])` met `ref` op het zoek-input
-- Bestanden: alle editor-JSX
+- Bestanden: alle editor-JSX (CreatureEditorPage, ItemEditorPage, SpellEditorPage, QuestEditorPage)
+- Patroon: `const searchRef = useRef(null);` + `<input ref={searchRef} />`
+- **Note:** TalentEditorPage heeft spell picker search met `autoFocus` in de modal → geen extra ref nodig
+- **Status:** ✅ Geïmplementeerd in 4 editors (Creature, Item, Spell, Quest)
 
 ---
 
