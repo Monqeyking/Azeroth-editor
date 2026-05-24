@@ -14,6 +14,60 @@ let mainWindow;
 let dbConnection = null;
 let iconsZip = null;
 let iconCache = {};
+let spellDbcCache = null;
+
+// DBC field offsets for Spell.dbc (WotLK 3.3.5a)
+// Offset = MySQL column index × 4 (each DBC field is 4 bytes)
+const SPELL_OFFSETS = {
+  ID:                       { offset: 0,   type: 'uint32' },
+  Category:                 { offset: 4,   type: 'uint32' },
+  Mechanic:                 { offset: 12,  type: 'uint32' },
+  Attributes:               { offset: 16,  type: 'uint32' },
+  AttributesEx:             { offset: 20,  type: 'uint32' },
+  AttributesEx2:            { offset: 24,  type: 'uint32' },
+  AttributesEx3:            { offset: 28,  type: 'uint32' },
+  CastingTimeIndex:         { offset: 112, type: 'uint32' },
+  RecoveryTime:             { offset: 116, type: 'uint32' },
+  CategoryRecoveryTime:     { offset: 120, type: 'uint32' },
+  ProcTypeMask:             { offset: 136, type: 'uint32' },
+  ProcChance:               { offset: 140, type: 'uint32' },
+  ProcCharges:              { offset: 144, type: 'uint32' },
+  MaxLevel:                 { offset: 148, type: 'uint32' },
+  BaseLevel:                { offset: 152, type: 'uint32' },
+  SpellLevel:               { offset: 156, type: 'uint32' },
+  DurationIndex:            { offset: 160, type: 'uint32' },
+  PowerType:                { offset: 164, type: 'int32'  },
+  ManaCost:                 { offset: 168, type: 'uint32' },
+  ManaPerSecond:            { offset: 176, type: 'uint32' },
+  RangeIndex:               { offset: 184, type: 'uint32' },
+  Speed:                    { offset: 188, type: 'float'  },
+  CumulativeAura:           { offset: 196, type: 'uint32' },
+  Effect_1:                 { offset: 284, type: 'uint32' },
+  Effect_2:                 { offset: 288, type: 'uint32' },
+  Effect_3:                 { offset: 292, type: 'uint32' },
+  EffectBasePoints_1:       { offset: 320, type: 'int32'  },
+  EffectBasePoints_2:       { offset: 324, type: 'int32'  },
+  EffectBasePoints_3:       { offset: 328, type: 'int32'  },
+  EffectAura_1:             { offset: 380, type: 'uint32' },
+  EffectAura_2:             { offset: 384, type: 'uint32' },
+  EffectAura_3:             { offset: 388, type: 'uint32' },
+  EffectTriggerSpell_1:     { offset: 464, type: 'uint32' },
+  EffectTriggerSpell_2:     { offset: 468, type: 'uint32' },
+  EffectTriggerSpell_3:     { offset: 472, type: 'uint32' },
+  SpellVisualID_1:          { offset: 524, type: 'uint32' },
+  SpellIconID:              { offset: 532, type: 'uint32' },
+  SpellPriority:            { offset: 540, type: 'uint32' },
+  ManaCostPct:              { offset: 816, type: 'uint32' },
+  MaxTargetLevel:           { offset: 828, type: 'uint32' },
+  SpellClassSet:            { offset: 832, type: 'uint32' },
+  MaxTargets:               { offset: 848, type: 'uint32' },
+  DefenseType:              { offset: 852, type: 'uint32' },
+  SchoolMask:               { offset: 900, type: 'uint32' },
+  Name_Lang_enUS:           { offset: 544, type: 'string' },
+  NameSubtext_Lang_enUS:    { offset: 612, type: 'string' },
+  Description_Lang_enUS:    { offset: 680, type: 'string' },
+  AuraDescription_Lang_enUS:{ offset: 748, type: 'string' },
+};
 
 // ─── Config persistence ──────────────────────────────────────────────────────
 function getConfigPath() {
@@ -235,6 +289,194 @@ async function readDbcFile(filePath) {
     return null;
   }
 }
+
+async function loadSpellDbc(dbcPath) {
+  const filePath = path.join(dbcPath, 'Spell.dbc');
+  if (spellDbcCache?.filePath === filePath) return spellDbcCache.dbc;
+  const dbc = await readDbcFile(filePath);
+  if (dbc) spellDbcCache = { filePath, dbc };
+  return dbc;
+}
+
+ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term) => {
+  try {
+    const dbc = await loadSpellDbc(dbcPath);
+    if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
+
+    const results = [];
+    const isNum = /^\d+$/.test(term);
+    const termNum = isNum ? parseInt(term) : 0;
+    const termLower = term ? term.toLowerCase() : '';
+
+    for (let i = 0; i < dbc.recordCount && results.length < 50; i++) {
+      const off = i * dbc.recordSize;
+      const id = dbc.dataBuffer.readUInt32LE(off);
+      if (!term || (isNum && id === termNum) || !isNum) {
+        const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
+        const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
+        if (isNum ? id === termNum : (!term || name.toLowerCase().includes(termLower))) {
+          results.push({
+            ID: id,
+            Name_Lang_enUS: name,
+            SchoolMask: dbc.dataBuffer.readUInt32LE(off + 900),
+            DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
+          });
+        }
+      }
+    }
+    return { success: true, data: results };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:readSpellFull', async (_, dbcPath, id) => {
+  try {
+    const dbc = await loadSpellDbc(dbcPath);
+    if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
+
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const off = i * dbc.recordSize;
+      if (dbc.dataBuffer.readUInt32LE(off) !== id) continue;
+
+      const rec = {};
+      for (const [key, f] of Object.entries(SPELL_OFFSETS)) {
+        if (f.type === 'string') {
+          const ref = dbc.dataBuffer.readUInt32LE(off + f.offset);
+          rec[key] = readStringFromBlock(null, ref, dbc.stringBlock);
+        } else if (f.type === 'float') {
+          rec[key] = dbc.dataBuffer.readFloatLE(off + f.offset);
+        } else if (f.type === 'int32') {
+          rec[key] = dbc.dataBuffer.readInt32LE(off + f.offset);
+        } else {
+          rec[key] = dbc.dataBuffer.readUInt32LE(off + f.offset);
+        }
+      }
+      return { success: true, data: rec };
+    }
+    return { success: false, error: `Spell ${id} niet gevonden` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeSpellFull', async (_, dbcPath, spell) => {
+  try {
+    const filePath = path.join(dbcPath, 'Spell.dbc');
+    const raw = fs.readFileSync(filePath);
+
+    const recordCount = raw.readUInt32LE(4);
+    const recordSize = raw.readUInt32LE(12);
+    const origStrBlockSize = raw.readUInt32LE(16);
+    const headerSize = 20;
+    const dataSize = recordCount * recordSize;
+    const strBlockStart = headerSize + dataSize;
+
+    let recordIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      if (raw.readUInt32LE(headerSize + i * recordSize) === spell.ID) { recordIndex = i; break; }
+    }
+    if (recordIndex === -1) return { success: false, error: 'Spell niet gevonden' };
+
+    const recordBase = headerSize + recordIndex * recordSize;
+    const origStrBlock = raw.slice(strBlockStart, strBlockStart + origStrBlockSize);
+
+    const STRING_KEYS = ['Name_Lang_enUS', 'NameSubtext_Lang_enUS', 'Description_Lang_enUS', 'AuraDescription_Lang_enUS'];
+    const newStrRefs = {};
+    const extraParts = [];
+    let extraOffset = origStrBlockSize;
+
+    for (const key of STRING_KEYS) {
+      if (spell[key] === undefined) continue;
+      const f = SPELL_OFFSETS[key];
+      const oldRef = raw.readUInt32LE(recordBase + f.offset);
+      const oldStr = readStringFromBlock(null, oldRef, origStrBlock);
+      const newStr = spell[key] || '';
+      if (newStr === oldStr) continue;
+      newStrRefs[key] = extraOffset;
+      const strBuf = Buffer.from(newStr + '\0', 'utf8');
+      extraParts.push(strBuf);
+      extraOffset += strBuf.length;
+    }
+
+    const newBuffer = extraParts.length > 0
+      ? Buffer.concat([raw, ...extraParts])
+      : Buffer.from(raw);
+
+    if (extraParts.length > 0) newBuffer.writeUInt32LE(extraOffset, 16);
+
+    for (const [key, f] of Object.entries(SPELL_OFFSETS)) {
+      if (f.type === 'string' || key === 'ID' || spell[key] === undefined) continue;
+      const val = Number(spell[key]);
+      const pos = recordBase + f.offset;
+      if (f.type === 'float') newBuffer.writeFloatLE(val, pos);
+      else if (f.type === 'int32') newBuffer.writeInt32LE(val | 0, pos);
+      else newBuffer.writeUInt32LE(val >>> 0, pos);
+    }
+
+    for (const [key, ref] of Object.entries(newStrRefs)) {
+      newBuffer.writeUInt32LE(ref, recordBase + SPELL_OFFSETS[key].offset);
+    }
+
+    fs.writeFileSync(filePath, newBuffer);
+    spellDbcCache = null;
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:findNextSpellId', async (_, dbcPath, startId) => {
+  try {
+    const dbc = await loadSpellDbc(dbcPath);
+    if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
+    const usedIds = new Set();
+    for (let i = 0; i < dbc.recordCount; i++) usedIds.add(dbc.dataBuffer.readUInt32LE(i * dbc.recordSize));
+    let nextId = Number(startId);
+    while (usedIds.has(nextId)) nextId++;
+    return { success: true, nextId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:copySpell', async (_, dbcPath, sourceId, newId) => {
+  try {
+    const filePath = path.join(dbcPath, 'Spell.dbc');
+    const buffer = fs.readFileSync(filePath);
+
+    const recordCount = buffer.readUInt32LE(4);
+    const recordSize = buffer.readUInt32LE(12);
+    const stringBlockSize = buffer.readUInt32LE(16);
+    const headerSize = 20;
+    const dataSize = recordCount * recordSize;
+
+    let sourceIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      const id = buffer.readUInt32LE(headerSize + i * recordSize);
+      if (id === sourceId) sourceIndex = i;
+      if (id === newId) return { success: false, error: `ID ${newId} bestaat al` };
+    }
+    if (sourceIndex === -1) return { success: false, error: 'Bron spell niet gevonden' };
+
+    const newBuffer = Buffer.alloc(headerSize + (recordCount + 1) * recordSize + stringBlockSize);
+    buffer.copy(newBuffer, 0, 0, headerSize);
+    newBuffer.writeUInt32LE(recordCount + 1, 4);
+    buffer.copy(newBuffer, headerSize, headerSize, headerSize + dataSize);
+
+    const srcOff = headerSize + sourceIndex * recordSize;
+    const newOff = headerSize + dataSize;
+    buffer.copy(newBuffer, newOff, srcOff, srcOff + recordSize);
+    newBuffer.writeUInt32LE(newId, newOff);
+    buffer.copy(newBuffer, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + stringBlockSize);
+
+    fs.writeFileSync(filePath, newBuffer);
+    spellDbcCache = null;
+    return { success: true, newId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
 ipcMain.handle('dbc:readTalentTabs', async (_, dbcPath) => {
   try {

@@ -56,7 +56,7 @@ const SPELL_FIELDS = [
 ];
 
 export default function SpellEditorPage() {
-  const { query, findNextId, idRanges } = useConnection();
+  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges } = useConnection();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -70,33 +70,20 @@ export default function SpellEditorPage() {
 
   const searchSpells = useCallback(async (term) => {
     setLoading(true);
-    const isNum = /^\d+$/.test(term);
-    let sql, params;
-    if (!term) {
-      sql = 'SELECT ID, Name_Lang_enUS, SchoolMask, DefenseType FROM spell_dbc ORDER BY ID ASC LIMIT 50';
-      params = [];
-    } else if (isNum) {
-      sql = 'SELECT ID, Name_Lang_enUS, SchoolMask, DefenseType FROM spell_dbc WHERE ID = ? LIMIT 50';
-      params = [term];
-    } else {
-      sql = 'SELECT ID, Name_Lang_enUS, SchoolMask, DefenseType FROM spell_dbc WHERE Name_Lang_enUS LIKE ? LIMIT 50';
-      params = [`%${term}%`];
-    }
-    const result = await query(sql, params);
+    const result = await searchSpellsDbc(term);
     setSpells(result.data || []);
     setLoading(false);
-  }, [query]);
+  }, [searchSpellsDbc]);
 
   useEffect(() => { searchSpells(''); }, []);
-
 
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   const selectSpell = async (ID) => {
-    const result = await query('SELECT * FROM spell_dbc WHERE ID = ?', [ID]);
-    if (result.data?.[0]) {
-      setSelected(result.data[0]);
-      setForm(result.data[0]);
+    const result = await readSpellFull(ID);
+    if (result.data) {
+      setSelected(result.data);
+      setForm(result.data);
       setDirty(false);
       setMsg(null);
     }
@@ -112,16 +99,13 @@ export default function SpellEditorPage() {
     setCopying(true);
     setMsg(null);
     try {
-      const idResult = await findNextId({ table: 'spell_dbc', idColumn: 'ID', startId: idRanges.spell });
+      const idResult = await findNextSpellId(idRanges.spell);
       if (!idResult.success) throw new Error(idResult.error);
       const newId = idResult.nextId;
-      const source = { ...selected, Name_Lang_enUS: `Copy of ${selected.Name_Lang_enUS || ''}`.trim() };
-      const fields = Object.keys(source);
-      const cols = fields.map(k => `\`${k}\``).join(', ');
-      const vals = fields.map(k => k === 'ID' ? newId : source[k]);
-      const placeholders = fields.map(() => '?').join(', ');
-      const result = await query(`INSERT INTO spell_dbc (${cols}) VALUES (${placeholders})`, vals);
+      const result = await copySpellDbc(selected.ID, newId);
       if (!result.success) throw new Error(result.error);
+      const nameResult = await writeSpellFull({ ID: newId, Name_Lang_enUS: `Copy of ${selected.Name_Lang_enUS || ''}`.trim() });
+      if (!nameResult.success) throw new Error(nameResult.error);
       await searchSpells(search);
       await selectSpell(newId);
       setMsg({ type: 'success', text: `✓ Gekloond naar ID #${newId}` });
@@ -135,14 +119,11 @@ export default function SpellEditorPage() {
     setSaving(true);
     setMsg(null);
     try {
-      const fields = Object.keys(form).filter(k => k !== 'ID');
-      const sets = fields.map(k => `\`${k}\` = ?`).join(', ');
-      const vals = [...fields.map(k => form[k]), form.ID];
-      const result = await query(`UPDATE spell_dbc SET ${sets} WHERE ID = ?`, vals);
+      const result = await writeSpellFull(form);
       if (result.success) {
         setSelected(form);
         setDirty(false);
-        setMsg({ type: 'success', text: `Saved spell ${form.ID}. Note: spell_dbc changes require server restart.` });
+        setMsg({ type: 'success', text: `✓ Spell ${form.ID} opgeslagen in Spell.dbc` });
         searchSpells(search);
       } else {
         setMsg({ type: 'error', text: result.error });
@@ -227,7 +208,7 @@ export default function SpellEditorPage() {
               <div className="page-header">
                 <div>
                   <h1 className="page-title">{selected.Name_Lang_enUS || '(unnamed)'}{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}</h1>
-                  <p className="page-sub">Entry #{selected.ID} · spell_dbc</p>
+                  <p className="page-sub">Entry #{selected.ID} · Spell.dbc</p>
                 </div>
                 <div className="header-actions">
                   {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}

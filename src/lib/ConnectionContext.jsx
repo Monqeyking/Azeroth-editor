@@ -111,6 +111,26 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.copyTalent(dbcPath, sourceId, newId);
   }, [dbcPath]);
 
+  const searchSpellsDbc = useCallback(async (term) => {
+    return window.azeroth.dbc.searchSpells(dbcPath, term);
+  }, [dbcPath]);
+
+  const readSpellFull = useCallback(async (id) => {
+    return window.azeroth.dbc.readSpellFull(dbcPath, id);
+  }, [dbcPath]);
+
+  const writeSpellFull = useCallback(async (spell) => {
+    return window.azeroth.dbc.writeSpellFull(dbcPath, spell);
+  }, [dbcPath]);
+
+  const findNextSpellId = useCallback(async (startId) => {
+    return window.azeroth.dbc.findNextSpellId(dbcPath, startId);
+  }, [dbcPath]);
+
+  const copySpellDbc = useCallback(async (sourceId, newId) => {
+    return window.azeroth.dbc.copySpell(dbcPath, sourceId, newId);
+  }, [dbcPath]);
+
   return (
     <ConnectionContext.Provider value={{
       dbConfig, setDbConfig,
@@ -123,6 +143,7 @@ export function ConnectionProvider({ children }) {
       readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent,
       getIcon, writeTalent,
       findNextId, findNextTalentId, copyTalentDbc,
+      searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
       idRanges, setIdRanges
     }}>
       {children}
