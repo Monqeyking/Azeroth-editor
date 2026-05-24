@@ -416,6 +416,79 @@ ipcMain.handle('dbc:readSpells', async (_, dbcPath, spellIds) => {
   }
 });
 
+// ─── Find next free ID ────────────────────────────────────────────────────────
+ipcMain.handle('db:findNextId', async (_, { table, idColumn, startId }) => {
+  if (!dbConnection) return { success: false, error: 'Not connected' };
+  try {
+    const [rows] = await dbConnection.execute(
+      `SELECT \`${idColumn}\` FROM \`${table}\` WHERE \`${idColumn}\` >= ? ORDER BY \`${idColumn}\` ASC LIMIT 5000`,
+      [Number(startId)]
+    );
+    const usedIds = new Set(rows.map(r => Number(r[idColumn])));
+    let nextId = Number(startId);
+    while (usedIds.has(nextId)) nextId++;
+    return { success: true, nextId };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('dbc:findNextTalentId', async (_, dbcPath, startId) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon Talent.dbc niet lezen' };
+    const usedIds = new Set();
+    for (let i = 0; i < dbc.recordCount; i++) {
+      usedIds.add(readUInt32LE(dbc.dataBuffer, i * dbc.recordSize));
+    }
+    let nextId = Number(startId);
+    while (usedIds.has(nextId)) nextId++;
+    return { success: true, nextId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:copyTalent', async (_, dbcPath, sourceId, newId) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 20) return { success: false, error: 'Ongeldig DBC bestand' };
+    if (buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Ongeldig DBC header' };
+
+    const recordCount = buffer.readUInt32LE(4);
+    const recordSize = buffer.readUInt32LE(12);
+    const stringBlockSize = buffer.readUInt32LE(16);
+    const headerSize = 20;
+
+    let sourceIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      if (buffer.readUInt32LE(headerSize + i * recordSize) === sourceId) { sourceIndex = i; break; }
+    }
+    if (sourceIndex === -1) return { success: false, error: 'Bron talent niet gevonden' };
+    for (let i = 0; i < recordCount; i++) {
+      if (buffer.readUInt32LE(headerSize + i * recordSize) === newId) return { success: false, error: `ID ${newId} bestaat al` };
+    }
+
+    const dataSize = recordCount * recordSize;
+    const newBuffer = Buffer.alloc(headerSize + (recordCount + 1) * recordSize + stringBlockSize);
+    buffer.copy(newBuffer, 0, 0, headerSize);
+    newBuffer.writeUInt32LE(recordCount + 1, 4);
+    buffer.copy(newBuffer, headerSize, headerSize, headerSize + dataSize);
+    const srcOffset = headerSize + sourceIndex * recordSize;
+    const newOffset = headerSize + dataSize;
+    buffer.copy(newBuffer, newOffset, srcOffset, srcOffset + recordSize);
+    newBuffer.writeUInt32LE(newId, newOffset);
+    buffer.copy(newBuffer, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + stringBlockSize);
+
+    fs.writeFileSync(filePath, newBuffer);
+    return { success: true, newId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('dbc:writeTalent', async (_, dbcPath, talent) => {
   try {
     const filePath = path.join(dbcPath, 'Talent.dbc');

@@ -1,31 +1,59 @@
 import { useState } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Save, Zap } from 'lucide-react';
+import { Save, Zap, Hash } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
+const ID_RANGE_EDITORS = [
+  { key: 'creature', label: 'Creature' },
+  { key: 'item',     label: 'Item' },
+  { key: 'spell',    label: 'Spell' },
+  { key: 'quest',    label: 'Quest' },
+  { key: 'talent',   label: 'Talent' },
+];
+
 export default function SettingsPage() {
-  const { soapConfig, setSoapConfig, dbcPath, setDbcPath } = useConnection();
+  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, idRanges, setIdRanges } = useConnection();
   const [form, setForm] = useState(soapConfig);
   const [dbcForm, setDbcForm] = useState(dbcPath);
+  const [idRangesForm, setIdRangesForm] = useState(idRanges);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saved, setSaved] = useState(false);
   const [dbcSaved, setDbcSaved] = useState(false);
+  const [idRangesSaved, setIdRangesSaved] = useState(false);
 
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
 
+  const persistConfig = (patch) => {
+    const current = { soap: soapConfig, dbcPath, idRanges, ...patch };
+    window.azeroth.config.save(current);
+  };
+
   const handleSave = () => {
     setSoapConfig(form);
+    persistConfig({ soap: form });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
   const handleDbcSave = () => {
     setDbcPath(dbcForm);
+    persistConfig({ dbcPath: dbcForm });
     setDbcSaved(true);
     setTimeout(() => setDbcSaved(false), 2000);
+  };
+
+  const handleIdRangesSave = () => {
+    const parsed = {};
+    for (const { key } of ID_RANGE_EDITORS) {
+      parsed[key] = parseInt(idRangesForm[key]) || 4000000;
+    }
+    setIdRanges(parsed);
+    persistConfig({ idRanges: parsed });
+    setIdRangesSaved(true);
+    setTimeout(() => setIdRangesSaved(false), 2000);
   };
 
   const handleTest = async () => {
@@ -101,6 +129,33 @@ export default function SettingsPage() {
                 <Save size={13} /> {saved ? 'Saved!' : 'Save Settings'}
               </button>
             </div>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <Hash size={13} />
+            <span>Custom ID Ranges — Clone start IDs</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Startpunt voor het zoeken naar een vrije ID bij het klonen van records. Standaard: 4.000.000.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
+              {ID_RANGE_EDITORS.map(({ key, label }) => (
+                <div key={key} className="field-group">
+                  <label>{label} ID Range Start</label>
+                  <input
+                    type="number"
+                    value={idRangesForm[key] ?? 4000000}
+                    onChange={e => setIdRangesForm(f => ({ ...f, [key]: e.target.value }))}
+                  />
+                </div>
+              ))}
+            </div>
+            <button className="btn-primary" onClick={handleIdRangesSave}>
+              <Save size={13} /> {idRangesSaved ? 'Opgeslagen!' : 'Save ID Ranges'}
+            </button>
           </div>
         </div>
 

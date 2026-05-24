@@ -242,3 +242,9 @@
   border-color: var(--accent-red) !important;
   background: rgba(204, 74, 74, 0.05);
 }
+
+/* Copy button — disabled/loading state */
+.header-actions button:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}

@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useCallback } from 'react';
+import { createContext, useContext, useState, useCallback, useEffect } from 'react';
 
 const ConnectionContext = createContext(null);
 
@@ -19,6 +19,24 @@ export function ConnectionProvider({ children }) {
   });
 
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
+
+  const [idRanges, setIdRanges] = useState({
+    creature: 4000000,
+    item: 4000000,
+    spell: 4000000,
+    quest: 4000000,
+    talent: 4000000,
+  });
+
+  useEffect(() => {
+    window.azeroth.config.load().then(result => {
+      if (result.success && result.data) {
+        if (result.data.soap) setSoapConfig(prev => ({ ...prev, ...result.data.soap }));
+        if (result.data.dbcPath) setDbcPath(result.data.dbcPath);
+        if (result.data.idRanges) setIdRanges(prev => ({ ...prev, ...result.data.idRanges }));
+      }
+    });
+  }, []);
 
   const [dbStatus, setDbStatus] = useState('disconnected'); // disconnected | connecting | connected | error
   const [soapStatus, setSoapStatus] = useState('disconnected');
@@ -81,6 +99,18 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.writeTalent(dbcPath, talent);
   }, [dbcPath]);
 
+  const findNextId = useCallback(async ({ table, idColumn, startId }) => {
+    return window.azeroth.db.findNextId({ table, idColumn, startId });
+  }, []);
+
+  const findNextTalentId = useCallback(async (startId) => {
+    return window.azeroth.dbc.findNextTalentId(dbcPath, startId);
+  }, [dbcPath]);
+
+  const copyTalentDbc = useCallback(async (sourceId, newId) => {
+    return window.azeroth.dbc.copyTalent(dbcPath, sourceId, newId);
+  }, [dbcPath]);
+
   return (
     <ConnectionContext.Provider value={{
       dbConfig, setDbConfig,
@@ -91,7 +121,9 @@ export function ConnectionProvider({ children }) {
       connectDb, disconnectDb,
       query, soapCommand,
       readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent,
-      getIcon, writeTalent
+      getIcon, writeTalent,
+      findNextId, findNextTalentId, copyTalentDbc,
+      idRanges, setIdRanges
     }}>
       {children}
     </ConnectionContext.Provider>

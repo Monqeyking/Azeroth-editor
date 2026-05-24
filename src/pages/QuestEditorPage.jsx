@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -55,7 +55,7 @@ const QUEST_FIELDS = [
 ];
 
 export default function QuestEditorPage() {
-  const { query, soapCommand, soapConfig } = useConnection();
+  const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
   const [search, setSearch] = useState('');
   const [quests, setQuests] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -64,6 +64,7 @@ export default function QuestEditorPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
   const searchRef = useRef(null);
 
   const searchQuests = useCallback(async (term) => {
@@ -103,6 +104,29 @@ export default function QuestEditorPage() {
   const handleChange = (key, value) => {
     setForm(f => ({ ...f, [key]: value }));
     setDirty(true);
+  };
+
+  const handleCopy = async () => {
+    if (!selected) return;
+    setCopying(true);
+    setMsg(null);
+    try {
+      const idResult = await findNextId({ table: 'quest_template', idColumn: 'ID', startId: idRanges.quest });
+      if (!idResult.success) throw new Error(idResult.error);
+      const newId = idResult.nextId;
+      const fields = Object.keys(selected);
+      const cols = fields.map(k => `\`${k}\``).join(', ');
+      const vals = fields.map(k => k === 'ID' ? newId : selected[k]);
+      const placeholders = fields.map(() => '?').join(', ');
+      const result = await query(`INSERT INTO quest_template (${cols}) VALUES (${placeholders})`, vals);
+      if (!result.success) throw new Error(result.error);
+      await searchQuests(search);
+      await selectQuest(newId);
+      setMsg({ type: 'success', text: `✓ Gekloond naar ID #${newId}` });
+    } catch (e) {
+      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+    }
+    setCopying(false);
   };
 
   const handleSave = async () => {
@@ -212,6 +236,9 @@ export default function QuestEditorPage() {
                 </div>
                 <div className="header-actions">
                   {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
+                  <button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon naar nieuw ID">
+                    <Copy size={13}/> {copying ? 'Klonen...' : 'Copy'}
+                  </button>
                   <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
                     <Save size={13}/> {saving ? 'Saving...' : 'Save & Reload'}
                   </button>
