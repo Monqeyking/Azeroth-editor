@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
@@ -64,6 +64,7 @@ export default function QuestEditorPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const searchRef = useRef(null);
 
   const searchQuests = useCallback(async (term) => {
     setLoading(true);
@@ -85,6 +86,9 @@ export default function QuestEditorPage() {
   }, [query]);
 
   useEffect(() => { searchQuests(''); }, []);
+
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
 
   const selectQuest = async (ID) => {
     const result = await query('SELECT * FROM quest_template WHERE ID = ?', [ID]);
@@ -128,6 +132,17 @@ export default function QuestEditorPage() {
     setSaving(false);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty && selected) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dirty, selected, handleSave]);
+
   const getFieldSections = () => [
     { title: 'Basis Info', keys: ['ID', 'LogTitle', 'LogDescription', 'QuestDescription', 'AreaDescription', 'QuestCompletionLog'] },
     { title: 'Objectives', keys: ['ObjectiveText1', 'ObjectiveText2', 'ObjectiveText3', 'ObjectiveText4'] },
@@ -153,6 +168,7 @@ export default function QuestEditorPage() {
             <div className="search-box">
               <Search size={13} />
               <input
+                ref={searchRef}
                 placeholder="Search title or entry..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); searchQuests(e.target.value); }}
@@ -191,7 +207,7 @@ export default function QuestEditorPage() {
             <>
               <div className="page-header">
                 <div>
-                  <h1 className="page-title">{selected.LogTitle || '(untitled)'}</h1>
+                  <h1 className="page-title">{selected.LogTitle || '(untitled)'}{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}</h1>
                   <p className="page-sub">Entry #{selected.ID} · quest_template</p>
                 </div>
                 <div className="header-actions">

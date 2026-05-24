@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
@@ -65,6 +65,7 @@ export default function SpellEditorPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const searchRef = useRef(null);
 
   const searchSpells = useCallback(async (term) => {
     setLoading(true);
@@ -86,6 +87,9 @@ export default function SpellEditorPage() {
   }, [query]);
 
   useEffect(() => { searchSpells(''); }, []);
+
+
+  useEffect(() => { searchRef.current?.focus(); }, []);
 
   const selectSpell = async (ID) => {
     const result = await query('SELECT * FROM spell_dbc WHERE ID = ?', [ID]);
@@ -124,6 +128,17 @@ export default function SpellEditorPage() {
     setSaving(false);
   };
 
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        if (dirty && selected) handleSave();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [dirty, selected, handleSave]);
+
   const getFieldSections = () => [
     { title: 'Basis Info', keys: ['ID', 'Name_Lang_enUS', 'NameSubtext_Lang_enUS', 'Description_Lang_enUS', 'AuraDescription_Lang_enUS'] },
     { title: 'School & Type', keys: ['SchoolMask', 'DefenseType', 'Category', 'Mechanic'] },
@@ -148,6 +163,7 @@ export default function SpellEditorPage() {
             <div className="search-box">
               <Search size={13} />
               <input
+                ref={searchRef}
                 placeholder="Search name or entry..."
                 value={search}
                 onChange={e => { setSearch(e.target.value); searchSpells(e.target.value); }}
@@ -185,7 +201,7 @@ export default function SpellEditorPage() {
             <>
               <div className="page-header">
                 <div>
-                  <h1 className="page-title">{selected.Name_Lang_enUS || '(unnamed)'}</h1>
+                  <h1 className="page-title">{selected.Name_Lang_enUS || '(unnamed)'}{dirty && <span style={{color: 'var(--gold)', marginLeft: '8px'}}>●</span>}</h1>
                   <p className="page-sub">Entry #{selected.ID} · spell_dbc</p>
                 </div>
                 <div className="header-actions">

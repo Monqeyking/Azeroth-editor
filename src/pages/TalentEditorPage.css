@@ -107,6 +107,15 @@
   pointer-events: none;
 }
 
+/* ── Talent grid cell (empty slot) ───────────────────────────────────── */
+.talent-grid-cell {
+  position: absolute;
+  border: 1px dashed var(--border);
+  background: transparent;
+  border-radius: var(--radius-sm);
+  pointer-events: none;
+}
+
 /* ── Talent node ───────────────────────────────────────────────────────── */
 .talent-node {
   position: absolute;
@@ -122,18 +131,19 @@
   padding: 4px 3px;
   transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
   overflow: hidden;
+  z-index: 5;
 }
 .talent-node:hover {
   border-color: var(--gold-dim);
   transform: scale(1.06);
-  z-index: 2;
+  z-index: 6;
   box-shadow: 0 0 12px rgba(200,169,110,0.2);
 }
 .talent-node.selected {
   border-color: var(--gold);
   box-shadow: 0 0 0 2px rgba(200,169,110,0.25), 0 0 14px rgba(200,169,110,0.2);
   background: var(--bg-active);
-  z-index: 3;
+  z-index: 7;
 }
 
 .talent-node-rank {
@@ -159,6 +169,8 @@
   flex-shrink: 0;
   background: var(--bg-panel);
   padding: 0 0 24px;
+  position: relative;
+  z-index: 10;
 }
 
 .talent-edit-actions {
@@ -381,4 +393,12 @@
 
 .spell-icon-input-group input {
   flex: 1;
+}
+
+/* ── Prerequisite lines (SVG markers) ────────────────────────────────── */
+.talent-prereq-line {
+  stroke: #d32f2f;
+  stroke-width: 2;
+  fill: none;
+  opacity: 0.8;
 }
