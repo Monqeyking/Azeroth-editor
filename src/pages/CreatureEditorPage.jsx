@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
+import FlagsSelector from '../components/FlagsSelector';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
 
@@ -11,7 +12,7 @@ const CREATURE_FIELDS = [
   { key: 'minlevel',         label: 'Min Level',       type: 'number' },
   { key: 'maxlevel',         label: 'Max Level',       type: 'number' },
   { key: 'faction',          label: 'Faction',         type: 'number' },
-  { key: 'npcflag',          label: 'NPC Flags',       type: 'number' },
+  { key: 'npcflag',          label: 'NPC Flags',       type: 'flags', field: 'npcflag' },
   { key: 'speed_walk',       label: 'Walk Speed',      type: 'decimal' },
   { key: 'speed_run',        label: 'Run Speed',       type: 'decimal' },
   { key: 'speed_swim',       label: 'Swim Speed',      type: 'decimal' },
@@ -33,16 +34,16 @@ const CREATURE_FIELDS = [
   { key: 'skinloot',         label: 'Skin Loot',       type: 'number' },
   { key: 'mingold',          label: 'Min Gold',        type: 'number' },
   { key: 'maxgold',          label: 'Max Gold',        type: 'number' },
-  { key: 'unit_flags',       label: 'Unit Flags',      type: 'number' },
-  { key: 'unit_flags2',      label: 'Unit Flags 2',    type: 'number' },
-  { key: 'dynamicflags',     label: 'Dynamic Flags',   type: 'number' },
+  { key: 'unit_flags',       label: 'Unit Flags',      type: 'flags', field: 'unit_flags' },
+  { key: 'unit_flags2',      label: 'Unit Flags 2',    type: 'flags', field: 'unit_flags2' },
+  { key: 'dynamicflags',     label: 'Dynamic Flags',   type: 'flags', field: 'dynamicflags' },
   { key: 'AIName',           label: 'AI Name',         type: 'text' },
   { key: 'MovementType',     label: 'Movement Type',   type: 'select', options: ['0:Idle','1:Random','2:Waypoint'] },
   { key: 'HoverHeight',      label: 'Hover Height',    type: 'decimal' },
   { key: 'RegenHealth',      label: 'Regen Health',    type: 'number' },
   { key: 'detection_range',  label: 'Detection Range', type: 'decimal' },
   { key: 'ScriptName',       label: 'Script Name',     type: 'text' },
-  { key: 'flags_extra',      label: 'Extra Flags',     type: 'number' },
+  { key: 'flags_extra',      label: 'Extra Flags',     type: 'flags', field: 'flags_extra' },
 ];
 
 export default function CreatureEditorPage() {
@@ -322,7 +323,9 @@ export default function CreatureEditorPage() {
                     return (
                       <div key={f.key} className={`field-group ${hasError ? 'field-error' : ''}`}>
                         <label>{f.label}{f.required && <span style={{color: 'var(--accent-red)'}}>*</span>}</label>
-                        {f.type === 'select' ? (
+                        {f.type === 'flags' ? (
+                          <FlagsSelector field={f.field} value={form[f.key] ?? 0} onChange={v => handleChange(f.key, v)} label={f.label} />
+                        ) : f.type === 'select' ? (
                           <select value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} disabled={f.readonly} style={hasError ? {borderColor: 'var(--accent-red)'} : {}}>
                             {f.options.map(o => {
                               const [val, lbl] = o.split(':');
