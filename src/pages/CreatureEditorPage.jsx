@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight, MousePointerClick } from 'lucide-react';
+import { Search, Plus, Save, RotateCcw, Trash2, RefreshCw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
 
@@ -46,7 +46,7 @@ const CREATURE_FIELDS = [
 ];
 
 export default function CreatureEditorPage() {
-  const { query, soapCommand, soapConfig } = useConnection();
+  const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
   const [search, setSearch] = useState('');
   const [creatures, setCreatures] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -56,6 +56,7 @@ export default function CreatureEditorPage() {
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
   const [errors, setErrors] = useState({});
+  const [copying, setCopying] = useState(false);
   const searchRef = useRef(null);
 
   // Load recent creatures from localStorage
@@ -192,6 +193,29 @@ export default function CreatureEditorPage() {
     setDirty(false);
   };
 
+  const handleCopy = async () => {
+    if (!selected) return;
+    setCopying(true);
+    setMsg(null);
+    try {
+      const idResult = await findNextId({ table: 'creature_template', idColumn: 'entry', startId: idRanges.creature });
+      if (!idResult.success) throw new Error(idResult.error);
+      const newId = idResult.nextId;
+      const fields = Object.keys(selected);
+      const cols = fields.map(k => `\`${k}\``).join(', ');
+      const vals = fields.map(k => k === 'entry' ? newId : selected[k]);
+      const placeholders = fields.map(() => '?').join(', ');
+      const result = await query(`INSERT INTO creature_template (${cols}) VALUES (${placeholders})`, vals);
+      if (!result.success) throw new Error(result.error);
+      await searchCreatures(search);
+      await selectCreature(newId);
+      setMsg({ type: 'success', text: `✓ Gekloond naar entry #${newId}` });
+    } catch (e) {
+      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+    }
+    setCopying(false);
+  };
+
   // Group fields into sections for better organization
   const getFieldSections = () => [
     { title: 'Basis Info', keys: ['entry', 'name', 'subname'] },
@@ -272,6 +296,9 @@ export default function CreatureEditorPage() {
                     <RotateCcw size={13} /> Reset
                   </button>
                 )}
+                <button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon dit record naar een nieuw ID">
+                  <Copy size={13} /> {copying ? 'Klonen...' : 'Copy'}
+                </button>
                 <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty} title="Save changes (Ctrl+S)">
                   <Save size={13} /> {saving ? 'Saving...' : 'Save & Reload'}
                 </button>

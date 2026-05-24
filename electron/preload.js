@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     connect: (config) => ipcRenderer.invoke('db:connect', config),
     query: (sql, params) => ipcRenderer.invoke('db:query', sql, params),
     disconnect: () => ipcRenderer.invoke('db:disconnect'),
+    findNextId: (opts) => ipcRenderer.invoke('db:findNextId', opts),
   },
   // SOAP / Live server
   soap: {
@@ -18,6 +19,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     readSpells: (dbcPath, spellIds) => ipcRenderer.invoke('dbc:readSpells', dbcPath, spellIds),
     readSpellIcons: (dbcPath, iconIds) => ipcRenderer.invoke('dbc:readSpellIcons', dbcPath, iconIds),
     writeTalent: (dbcPath, talent) => ipcRenderer.invoke('dbc:writeTalent', dbcPath, talent),
+    findNextTalentId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextTalentId', dbcPath, startId),
+    copyTalent: (dbcPath, sourceId, newId) => ipcRenderer.invoke('dbc:copyTalent', dbcPath, sourceId, newId),
   },
   // Icons
   icons: {

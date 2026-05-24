@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Save, RotateCcw, GitBranch, X, Search } from 'lucide-react';
+import { Save, RotateCcw, GitBranch, X, Search, Copy } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
@@ -22,7 +22,7 @@ const CELL = 60;
 const GAP = 10;
 
 export default function TalentEditorPage() {
-	const { readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent, getIcon, writeTalent } = useConnection();
+	const { readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent, getIcon, writeTalent, findNextTalentId, copyTalentDbc, idRanges } = useConnection();
 	const [selectedClass, setSelectedClass] = useState(null);
 	const [tabs, setTabs] = useState([]);
 	const [activeTab, setActiveTab] = useState(null);
@@ -35,6 +35,7 @@ export default function TalentEditorPage() {
 	const [dirty, setDirty] = useState(false);
 	const [saving, setSaving] = useState(false);
 	const [committing, setCommitting] = useState(false);
+	const [copying, setCopying] = useState(false);
 	const [msg, setMsg] = useState(null);
 	const [loadError, setLoadError] = useState(null);
 	const [showSpellPicker, setShowSpellPicker] = useState(false);
@@ -198,6 +199,27 @@ export default function TalentEditorPage() {
 		window.addEventListener('keydown', handleKeyDown);
 		return () => window.removeEventListener('keydown', handleKeyDown);
 	}, [dirty, selected, handleSave]);
+
+	const handleCopy = async () => {
+		if (!selected) return;
+		setCopying(true);
+		setMsg(null);
+		try {
+			const idResult = await findNextTalentId(idRanges.talent);
+			if (!idResult.success) throw new Error(idResult.error);
+			const newId = idResult.nextId;
+			const result = await copyTalentDbc(selected.ID, newId);
+			if (!result.success) throw new Error(result.error);
+			setMsg({ type: 'success', text: `✓ Talent gekloond naar ID #${newId}` });
+			if (activeTab) {
+				await loadTalents(activeTab.ID);
+				selectTalent({ ...selected, ID: newId });
+			}
+		} catch (e) {
+			setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+		}
+		setCopying(false);
+	};
 
 	const handleSaveAll = async () => {
 		setCommitting(true);
@@ -513,6 +535,9 @@ export default function TalentEditorPage() {
 									<RotateCcw size={13} /> Reset
 								</button>
 							)}
+							<button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon dit talent naar een nieuw ID">
+								<Copy size={13} /> {copying ? 'Klonen...' : 'Copy'}
+							</button>
 							<button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
 								<Save size={13} /> {saving ? 'Opslaan…' : 'Save'}
 							</button>

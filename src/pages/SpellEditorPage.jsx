@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -56,7 +56,7 @@ const SPELL_FIELDS = [
 ];
 
 export default function SpellEditorPage() {
-  const { query } = useConnection();
+  const { query, findNextId, idRanges } = useConnection();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -65,6 +65,7 @@ export default function SpellEditorPage() {
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [copying, setCopying] = useState(false);
   const searchRef = useRef(null);
 
   const searchSpells = useCallback(async (term) => {
@@ -104,6 +105,30 @@ export default function SpellEditorPage() {
   const handleChange = (key, value) => {
     setForm(f => ({ ...f, [key]: value }));
     setDirty(true);
+  };
+
+  const handleCopy = async () => {
+    if (!selected) return;
+    setCopying(true);
+    setMsg(null);
+    try {
+      const idResult = await findNextId({ table: 'spell_dbc', idColumn: 'ID', startId: idRanges.spell });
+      if (!idResult.success) throw new Error(idResult.error);
+      const newId = idResult.nextId;
+      const source = { ...selected, Name_Lang_enUS: `Copy of ${selected.Name_Lang_enUS || ''}`.trim() };
+      const fields = Object.keys(source);
+      const cols = fields.map(k => `\`${k}\``).join(', ');
+      const vals = fields.map(k => k === 'ID' ? newId : source[k]);
+      const placeholders = fields.map(() => '?').join(', ');
+      const result = await query(`INSERT INTO spell_dbc (${cols}) VALUES (${placeholders})`, vals);
+      if (!result.success) throw new Error(result.error);
+      await searchSpells(search);
+      await selectSpell(newId);
+      setMsg({ type: 'success', text: `✓ Gekloond naar ID #${newId}` });
+    } catch (e) {
+      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+    }
+    setCopying(false);
   };
 
   const handleSave = async () => {
@@ -206,6 +231,9 @@ export default function SpellEditorPage() {
                 </div>
                 <div className="header-actions">
                   {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
+                  <button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon naar nieuw ID">
+                    <Copy size={13}/> {copying ? 'Klonen...' : 'Copy'}
+                  </button>
                   <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
                     <Save size={13}/> {saving ? 'Saving...' : 'Save'}
                   </button>

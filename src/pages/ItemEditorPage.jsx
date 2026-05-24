@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Plus, Save, RotateCcw, ChevronRight, MousePointerClick } from 'lucide-react';
+import { Search, Plus, Save, RotateCcw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -40,7 +40,7 @@ const QUALITY_COLORS = ['#9d9d9d', '#ffffff', '#1eff00', '#0070dd', '#a335ee', '
 const QUALITY_LABELS = ['Poor', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Artifact', 'Heirloom'];
 
 export default function ItemEditorPage() {
-	const { query, soapCommand, soapConfig } = useConnection();
+	const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
 	const [search, setSearch] = useState('');
 	const [items, setItems] = useState([]);
 	const [selected, setSelected] = useState(null);
@@ -49,6 +49,7 @@ export default function ItemEditorPage() {
 	const [saving, setSaving] = useState(false);
 	const [msg, setMsg] = useState(null);
 	const [loading, setLoading] = useState(false);
+	const [copying, setCopying] = useState(false);
 	const searchRef = useRef(null);
 
 	const searchItems = useCallback(async (term) => {
@@ -88,6 +89,29 @@ export default function ItemEditorPage() {
 	const handleChange = (key, value) => {
 		setForm(f => ({ ...f, [key]: value }));
 		setDirty(true);
+	};
+
+	const handleCopy = async () => {
+		if (!selected) return;
+		setCopying(true);
+		setMsg(null);
+		try {
+			const idResult = await findNextId({ table: 'item_template', idColumn: 'entry', startId: idRanges.item });
+			if (!idResult.success) throw new Error(idResult.error);
+			const newId = idResult.nextId;
+			const fields = Object.keys(selected);
+			const cols = fields.map(k => `\`${k}\``).join(', ');
+			const vals = fields.map(k => k === 'entry' ? newId : selected[k]);
+			const placeholders = fields.map(() => '?').join(', ');
+			const result = await query(`INSERT INTO item_template (${cols}) VALUES (${placeholders})`, vals);
+			if (!result.success) throw new Error(result.error);
+			await searchItems(search);
+			await selectItem(newId);
+			setMsg({ type: 'success', text: `✓ Gekloond naar entry #${newId}` });
+		} catch (e) {
+			setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+		}
+		setCopying(false);
 	};
 
 	const getFieldSections = () => [
@@ -203,6 +227,9 @@ export default function ItemEditorPage() {
 								</div>
 								<div className="header-actions">
 									{dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13} /> Reset</button>}
+									<button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon dit record naar een nieuw ID">
+										<Copy size={13} /> {copying ? 'Klonen...' : 'Copy'}
+									</button>
 									<button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
 										<Save size={13} /> {saving ? 'Saving...' : 'Save & Reload'}
 									</button>
