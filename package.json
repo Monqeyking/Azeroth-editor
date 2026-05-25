@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@wowserhq/stormjs": "^0.4.1",
     "adm-zip": "^0.5.17",
     "lucide-react": "^0.383.0",
     "mysql2": "^3.9.0",

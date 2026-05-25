@@ -43,8 +43,10 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // World map BLP tiles
   worldmap: {
-    getZoneImage: (folderName, baseName) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName),
+    getZoneImage: (folderName, baseName, dataPath) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName, dataPath),
     readWorldMapAreas: (dbcPath) => ipcRenderer.invoke('worldmap:readWorldMapAreas', dbcPath),
+    listZones: (dataPath) => ipcRenderer.invoke('worldmap:listZones', dataPath),
+    validatePath: (dataPath) => ipcRenderer.invoke('worldmap:validatePath', dataPath),
   },
   // Config persistence
   config: {

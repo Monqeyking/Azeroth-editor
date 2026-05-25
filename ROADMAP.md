@@ -30,8 +30,8 @@
 ### ✅ 3. Zoek & filter spawns — `Haiku` 🔶 medium
 ~~Zoekbalk in de toolbar: filter zichtbare markers op naam of entry-ID. Niet-overeenkomende markers worden gedempt. Klik op resultaat centreert de kaart.~~ **KLAAR** — zoekbalk filtert op naam of entry-ID, niet-overeenkomende markers gedempt (opacity 0.2), klik op resultaat centreert kaart en opent inspector. Bij actieve zoekterm wordt clustering uitgeschakeld zodat dimming per individuele marker werkt. Herstel na Haiku-rewrite waarbij alle vorige verbeteringen verloren waren gegaan.
 
-### 4. Worldmap tiles vanuit WoW client (Optie A) — `Haiku` 🔶 medium
-Configureerbaar pad in Settings dat naar een al-geëxtracteerde WORLDMAP-map wijst buiten het project. Verkleint de repo aanzienlijk en geeft de gebruiker controle over de versie.
+### ✅ 4. Worldmap tiles vanuit WoW client (Optie A) — `Haiku` 🔶 medium
+~~Configureerbaar pad in Settings dat naar een al-geëxtracteerde WORLDMAP-map wijst buiten het project. Verkleint de repo aanzienlijk en geeft de gebruiker controle over de versie.~~ **KLAAR** — Settings panel "Worldmap Tiles" met optioneel pad-invoer, Validate Path button (telt zones), fallback naar ingebedde `src/background/WORLDMAP`. Ondersteunt PNG en BLP formaten, zone-gebaseerde structuur (Azeroth/, Blackrock/, etc.). IPC handlers: `getTile()`, `listZones()`, `validatePath()`.
 
 ### 5. Continent-overzicht met klikbare zone-overlays — `Sonnet` 🔶 medium
 Zone-grenzen tekenen als klikbare overlays op het continent-overzicht, berekend vanuit WorldMapArea.dbc bounds. Hover = tooltip met naam, klik = naar zone navigeren zonder dropdown.
@@ -39,8 +39,8 @@ Zone-grenzen tekenen als klikbare overlays op het continent-overzicht, berekend 
 ### 6. Rechtsklik context-menu — `Sonnet` 🔵 laag
 Rechtsklik op lege plek: spawn toevoegen. Rechtsklik op marker: coördinaten kopiëren, teleporteer via SOAP (`.go xyz`), spawn verwijderen.
 
-### 7. Worldmap tiles vanuit WoW client (Optie B — MPQ) — `Opus` 🔵 laag / complex
-Pure JS MPQ-archief reader in main.js zodat BLP-bestanden direct uit `Data/*.mpq` van de WoW-installatie gelezen worden. Dynamisch zoals de client zelf. Zwaar werk, alleen zinvol als optie A niet voldoet.
+### ✅ 7. Worldmap tiles vanuit WoW client (Optie B — MPQ) — `Sonnet` 🔵 laag / complex
+~~Pure JS MPQ-archief reader in main.js zodat BLP-bestanden direct uit `Data/*.mpq` van de WoW-installatie gelezen worden. Dynamisch zoals de client zelf. Zwaar werk, alleen zinvol als optie A niet voldoet.~~ **KLAAR** — `@wowserhq/stormjs` (StormLib via WASM) geïntegreerd als `electron/mpq-reader.js`. User geeft `Data`-root op in Settings; app zoekt automatisch in root + `enUS/` submappen, sorteert op patch-prioriteit, leest tiles direct uit MPQ via listfile-discovery. Herbruikbaar voor toekomstige 3D-model lookups.
 
 ---
 

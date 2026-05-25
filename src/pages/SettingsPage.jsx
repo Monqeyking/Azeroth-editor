@@ -13,23 +13,27 @@ const ID_RANGE_EDITORS = [
 ];
 
 export default function SettingsPage() {
-  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, idRanges, setIdRanges } = useConnection();
+  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, worldmapMpqPath, setWorldmapMpqPath, idRanges, setIdRanges } = useConnection();
   const [form, setForm] = useState(soapConfig);
   const [dbcForm, setDbcForm] = useState(dbcPath);
   const [minimapForm, setMinimapForm] = useState(minimapPath);
+  const [worldmapForm, setWorldmapForm] = useState(worldmapMpqPath);
   const [idRangesForm, setIdRangesForm] = useState(idRanges);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saved, setSaved] = useState(false);
   const [dbcSaved, setDbcSaved] = useState(false);
   const [minimapSaved, setMinimapSaved] = useState(false);
+  const [worldmapSaved, setWorldmapSaved] = useState(false);
+  const [worldmapValidating, setWorldmapValidating] = useState(false);
+  const [worldmapValidation, setWorldmapValidation] = useState(null);
   const [idRangesSaved, setIdRangesSaved] = useState(false);
 
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
 
   const persistConfig = (patch) => {
-    const current = { soap: soapConfig, dbcPath, minimapPath, idRanges, ...patch };
+    const current = { soap: soapConfig, dbcPath, minimapPath, worldmapMpqPath, idRanges, ...patch };
     window.azeroth.config.save(current);
   };
 
@@ -38,6 +42,25 @@ export default function SettingsPage() {
     persistConfig({ minimapPath: minimapForm });
     setMinimapSaved(true);
     setTimeout(() => setMinimapSaved(false), 2000);
+  };
+
+  const handleWorldmapSave = () => {
+    setWorldmapMpqPath(worldmapForm);
+    persistConfig({ worldmapMpqPath: worldmapForm });
+    setWorldmapSaved(true);
+    setTimeout(() => setWorldmapSaved(false), 2000);
+  };
+
+  const handleWorldmapValidate = async () => {
+    setWorldmapValidating(true);
+    setWorldmapValidation(null);
+    try {
+      const result = await window.azeroth.worldmap.validatePath(worldmapForm);
+      setWorldmapValidation(result);
+    } catch (e) {
+      setWorldmapValidation({ success: false, error: e.message });
+    }
+    setWorldmapValidating(false);
   };
 
   const handleSave = () => {
@@ -194,6 +217,47 @@ export default function SettingsPage() {
             <button className="btn-primary" onClick={handleMinimapSave}>
               <Save size={13} /> {minimapSaved ? 'Opgeslagen!' : 'Save Minimap Path'}
             </button>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <Zap size={13} />
+            <span>Worldmap Tiles — WoW Client Data</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Pad naar de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Data</code>-map van je WoW-client.
+              De app zoekt automatisch in alle MPQ-bestanden (root + <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>enUS/</code>) naar worldmap tiles.
+              <br/>Voorbeeld: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\Client\Data</code>
+            </p>
+            <div className="field-group" style={{ marginBottom: 16 }}>
+              <label>WoW Client Data-map (optioneel)</label>
+              <input
+                value={worldmapForm}
+                onChange={e => setWorldmapForm(e.target.value)}
+                placeholder="D:\CaioCore\Client\Data"
+              />
+            </div>
+            {worldmapValidation && (
+              <div className={`editor-msg ${worldmapValidation.success ? 'success' : 'error'}`} style={{ marginBottom: 12 }}>
+                {worldmapValidation.message || worldmapValidation.error}
+                {worldmapValidation.count && ` (${worldmapValidation.count} tiles)`}
+              </div>
+            )}
+            {worldmapSaved && (
+              <div className="editor-msg success" style={{ marginBottom: 12 }}>
+                Worldmap path opgeslagen!
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn-ghost" onClick={handleWorldmapValidate} disabled={worldmapValidating || !worldmapForm}>
+                <Zap size={13} /> {worldmapValidating ? 'Validating...' : 'Validate Path'}
+              </button>
+              <button className="btn-primary" onClick={handleWorldmapSave}>
+                <Save size={13} /> {worldmapSaved ? 'Opgeslagen!' : 'Save Worldmap Path'}
+              </button>
+            </div>
           </div>
         </div>
 
