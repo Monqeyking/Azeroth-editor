@@ -4,6 +4,21 @@ const fs = require('fs');
 const mysql = require('mysql2/promise');
 const { createClient } = require('node-soap');
 const AdmZip = require('adm-zip');
+let mpqReader = null;
+const MPQ_STUB = {
+  isDataPath: () => false,
+  findMpqFiles: () => [],
+  listWorldmapZones: async () => [],
+  readTileBuffer: async () => null,
+  validateDataPath: async () => ({ success: false, error: 'MPQ reader niet beschikbaar' }),
+};
+function getMpqReader() {
+  if (!mpqReader) {
+    try { mpqReader = require('./mpq-reader'); }
+    catch (e) { console.error('mpq-reader load failed:', e); mpqReader = MPQ_STUB; }
+  }
+  return mpqReader;
+}
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
@@ -236,6 +251,44 @@ ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
     console.log(`icons:get - ✗ Icon not found: ${iconName} (looked in ${iconsDir})`);
     return null;
   } catch (e) {    return null;
+  }
+});
+
+// ─── Worldmap Tiles Loader ─────────────────────────────────────────────────────
+ipcMain.handle('worldmap:listZones', async (_, dataPath) => {
+  try {
+    if (dataPath && getMpqReader().isDataPath(dataPath)) {
+      return await getMpqReader().listWorldmapZones(dataPath);
+    }
+    // Fallback: geëxtraheerde WORLDMAP-map
+    const base = resolveWorldmapDir(dataPath);
+    if (!base) return [];
+    return fs.readdirSync(base).filter(item => fs.statSync(path.join(base, item)).isDirectory());
+  } catch (e) {
+    console.error('worldmap:listZones error:', e);
+    return [];
+  }
+});
+
+ipcMain.handle('worldmap:validatePath', async (_, dataPath) => {
+  try {
+    if (!dataPath || !fs.existsSync(dataPath)) {
+      return { success: false, error: 'Pad bestaat niet' };
+    }
+    if (getMpqReader().isDataPath(dataPath)) {
+      return await getMpqReader().validateDataPath(dataPath);
+    }
+    // Geëxtraheerde map: check op zone-submappen
+    const items = fs.readdirSync(dataPath);
+    const zoneCount = items.filter(item => {
+      try { return fs.statSync(path.join(dataPath, item)).isDirectory(); } catch { return false; }
+    }).length;
+    if (zoneCount > 0) {
+      return { success: true, type: 'directory', message: `${zoneCount} zone(s) gevonden (geëxtraheerde map)`, count: zoneCount };
+    }
+    return { success: false, error: 'Geen MPQ bestanden of zone-mappen gevonden' };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 
@@ -1004,22 +1057,47 @@ function rgbaToPNG(rgba, w, h) {
 }
 
 // Compositeer 12 BLP-tiles (4 kolommen × 3 rijen) naar één PNG
-ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName) => {
+// ── Hulpfunctie: zoek geëxtraheerde WORLDMAP-map ─────────────────────────────
+function resolveWorldmapDir(configuredPath) {
+  if (configuredPath && fs.existsSync(configuredPath) && !getMpqReader().isDataPath(configuredPath)) {
+    return configuredPath;
+  }
+  const fallbacks = [
+    path.join(__dirname, '..', 'src', 'background', 'WORLDMAP'),
+    path.join(app.getAppPath(), 'src', 'background', 'WORLDMAP'),
+    path.join(process.cwd(), 'src', 'background', 'WORLDMAP'),
+  ];
+  return fallbacks.find(p => fs.existsSync(p)) || null;
+}
+
+ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath) => {
   try {
-    const worldmapPath = path.join(__dirname, '..', 'src', 'background', 'WORLDMAP');
     const COLS = 4, ROWS = 3;
     const tileW = 256, tileH = 256;
-    const fullW  = COLS * tileW;
-    const fullH  = ROWS * tileH;
+    const fullW = COLS * tileW;
+    const fullH = ROWS * tileH;
     const composite = Buffer.alloc(fullW * fullH * 4, 0);
+
+    const useMpq = dataPath && getMpqReader().isDataPath(dataPath);
 
     for (let row = 0; row < ROWS; row++) {
       for (let col = 0; col < COLS; col++) {
-        const idx     = row * COLS + col + 1;
-        const blpPath = path.join(worldmapPath, folderName, `${baseName}${idx}.blp`);
-        if (!fs.existsSync(blpPath)) continue;
+        const idx = row * COLS + col + 1;
+        let blpBuf = null;
 
-        const { rgba, w, h } = decodeBLP(fs.readFileSync(blpPath));
+        if (useMpq) {
+          blpBuf = await getMpqReader().readTileBuffer(dataPath, folderName, idx);
+        } else {
+          const dir = resolveWorldmapDir(dataPath);
+          if (dir) {
+            const p = path.join(dir, folderName, `${baseName}${idx}.blp`);
+            if (fs.existsSync(p)) blpBuf = fs.readFileSync(p);
+          }
+        }
+
+        if (!blpBuf) continue;
+
+        const { rgba, w, h } = decodeBLP(blpBuf);
         const ox = col * tileW;
         const oy = row * tileH;
 
@@ -1039,6 +1117,7 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName) => {
     const png = rgbaToPNG(composite, fullW, fullH);
     return { success: true, data: `data:image/png;base64,${png.toString('base64')}` };
   } catch (e) {
+    console.error('worldmap:getZoneImage error:', e);
     return { success: false, error: e.message };
   }
 });

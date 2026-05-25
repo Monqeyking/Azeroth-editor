@@ -99,7 +99,7 @@ function clusterSpawns(spawns, show, zone, scale, forceFlat) {
 }
 
 export default function SpawnMapPage() {
-	const { query, dbcPath } = useConnection();
+	const { query, dbcPath, worldmapMpqPath } = useConnection();
 
 	const [worldAreas, setWorldAreas] = useState([]);
 	const [areasError, setAreasError] = useState('');
@@ -183,7 +183,7 @@ export default function SpawnMapPage() {
 		const base   = zone ? zone.internalName : continent.base;
 		setImgLoading(true);
 		setBgImage(null);
-		window.azeroth.worldmap.getZoneImage(folder, base).then(res => {
+		window.azeroth.worldmap.getZoneImage(folder, base, worldmapMpqPath).then(res => {
 			if (res.success) setBgImage(res.data);
 			setImgLoading(false);
 		});
