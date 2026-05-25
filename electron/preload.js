@@ -37,6 +37,15 @@ contextBridge.exposeInMainWorld('azeroth', {
   talents: {
     getBackground: (backgroundFile) => ipcRenderer.invoke('talents:getBackground', backgroundFile),
   },
+  // Minimap tiles
+  minimap: {
+    getTile: (minimapPath, mapId, col, row) => ipcRenderer.invoke('minimap:getTile', minimapPath, mapId, col, row),
+  },
+  // World map BLP tiles
+  worldmap: {
+    getZoneImage: (folderName, baseName) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName),
+    readWorldMapAreas: (dbcPath) => ipcRenderer.invoke('worldmap:readWorldMapAreas', dbcPath),
+  },
   // Config persistence
   config: {
     load: () => ipcRenderer.invoke('config:load'),

@@ -8,6 +8,7 @@ import ItemEditorPage from './pages/ItemEditorPage';
 import QuestEditorPage from './pages/QuestEditorPage';
 import SpellEditorPage from './pages/SpellEditorPage';
 import TalentEditorPage from './pages/TalentEditorPage';
+import SpawnMapPage from './pages/SpawnMapPage';
 import SettingsPage from './pages/SettingsPage';
 
 export default function App() {
@@ -24,6 +25,7 @@ export default function App() {
             <Route path="quests" element={<QuestEditorPage />} />
             <Route path="spells" element={<SpellEditorPage />} />
             <Route path="talents" element={<TalentEditorPage />} />
+            <Route path="map" element={<SpawnMapPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

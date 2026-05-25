@@ -13,22 +13,31 @@ const ID_RANGE_EDITORS = [
 ];
 
 export default function SettingsPage() {
-  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, idRanges, setIdRanges } = useConnection();
+  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, idRanges, setIdRanges } = useConnection();
   const [form, setForm] = useState(soapConfig);
   const [dbcForm, setDbcForm] = useState(dbcPath);
+  const [minimapForm, setMinimapForm] = useState(minimapPath);
   const [idRangesForm, setIdRangesForm] = useState(idRanges);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [saved, setSaved] = useState(false);
   const [dbcSaved, setDbcSaved] = useState(false);
+  const [minimapSaved, setMinimapSaved] = useState(false);
   const [idRangesSaved, setIdRangesSaved] = useState(false);
 
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
 
   const persistConfig = (patch) => {
-    const current = { soap: soapConfig, dbcPath, idRanges, ...patch };
+    const current = { soap: soapConfig, dbcPath, minimapPath, idRanges, ...patch };
     window.azeroth.config.save(current);
+  };
+
+  const handleMinimapSave = () => {
+    setMinimapPath(minimapForm);
+    persistConfig({ minimapPath: minimapForm });
+    setMinimapSaved(true);
+    setTimeout(() => setMinimapSaved(false), 2000);
   };
 
   const handleSave = () => {
@@ -155,6 +164,35 @@ export default function SettingsPage() {
             </div>
             <button className="btn-primary" onClick={handleIdRangesSave}>
               <Save size={13} /> {idRangesSaved ? 'Opgeslagen!' : 'Save ID Ranges'}
+            </button>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <Zap size={13} />
+            <span>Minimap Tiles — Spawn Map achtergrond</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Map naar de map met minimap tiles. Verwacht structuur: <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Map_0\Map_0_32_32.png</code>
+              <br/>Ondersteunde formaten: PNG, JPEG.
+            </p>
+            <div className="field-group" style={{ marginBottom: 16 }}>
+              <label>Minimap Path</label>
+              <input
+                value={minimapForm}
+                onChange={e => setMinimapForm(e.target.value)}
+                placeholder="D:\WoW\Minimap"
+              />
+            </div>
+            {minimapSaved && (
+              <div className="editor-msg success" style={{ marginBottom: 12 }}>
+                Minimap path opgeslagen!
+              </div>
+            )}
+            <button className="btn-primary" onClick={handleMinimapSave}>
+              <Save size={13} /> {minimapSaved ? 'Opgeslagen!' : 'Save Minimap Path'}
             </button>
           </div>
         </div>

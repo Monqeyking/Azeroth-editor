@@ -19,6 +19,7 @@ export function ConnectionProvider({ children }) {
   });
 
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
+  const [minimapPath, setMinimapPath] = useState('');
 
   const [idRanges, setIdRanges] = useState({
     creature: 4000000,
@@ -33,6 +34,7 @@ export function ConnectionProvider({ children }) {
       if (result.success && result.data) {
         if (result.data.soap) setSoapConfig(prev => ({ ...prev, ...result.data.soap }));
         if (result.data.dbcPath) setDbcPath(result.data.dbcPath);
+        if (result.data.minimapPath) setMinimapPath(result.data.minimapPath);
         if (result.data.idRanges) setIdRanges(prev => ({ ...prev, ...result.data.idRanges }));
       }
     });
@@ -144,6 +146,7 @@ export function ConnectionProvider({ children }) {
       dbConfig, setDbConfig,
       soapConfig, setSoapConfig,
       dbcPath, setDbcPath,
+      minimapPath, setMinimapPath,
       dbStatus, dbError,
       soapStatus, setSoapStatus,
       connectDb, disconnectDb,

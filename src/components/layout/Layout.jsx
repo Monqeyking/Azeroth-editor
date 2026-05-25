@@ -3,7 +3,7 @@ import { useConnection } from '../../lib/ConnectionContext';
 import { useEffect } from 'react';
 import {
   LayoutDashboard, Swords, Package, ScrollText,
-  Sparkles, GitBranch, Settings, Unplug, Globe
+  Sparkles, GitBranch, Map, Settings, Unplug, Globe
 } from 'lucide-react';
 import './Layout.css';
 
@@ -14,6 +14,7 @@ const NAV = [
   { to: '/quests',     icon: ScrollText,      label: 'Quests' },
   { to: '/spells',     icon: Sparkles,        label: 'Spells' },
   { to: '/talents',    icon: GitBranch,       label: 'Talents' },
+  { to: '/map',        icon: Map,             label: 'Spawn Map' },
 ];
 
 export default function Layout() {
