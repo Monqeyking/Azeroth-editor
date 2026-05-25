@@ -24,11 +24,11 @@
 ### ✅ 1. Fix drag & drop DB-write — `Haiku` ⚡ hoog
 ~~Visueel slepen werkt al. De mouseup-handler schrijft de nieuwe positie nog niet correct naar MySQL. Kleine bugfix.~~ **KLAAR** — `await` + error handling, drag threshold (5px) geïmplementeerd.
 
-### 2. Spawn clustering / LOD — `Sonnet` ⚡ hoog
-Bij zones met veel spawns (Barrens, EPL) zijn markers niet leesbaar. Grid-gebaseerde clustering op basis van zoom-niveau: clusters tonen als cirkel met tellerbadge, splitsen op bij inzoomen.
+### ✅ 2. Spawn clustering / LOD — `Sonnet` ⚡ hoog
+~~Bij zones met veel spawns (Barrens, EPL) zijn markers niet leesbaar. Grid-gebaseerde clustering op basis van zoom-niveau: clusters tonen als cirkel met tellerbadge, splitsen op bij inzoomen.~~ **KLAAR** — grid-clustering (64px cellen), harde drempel op scale 1.5 (daarboven altijd losse markers), klik op cluster zoomt 2.5× in. Extra: kleurcodering per creature-type (oranje = hostile, rood = Horde, blauw = Alliance, grijs = critter), canvas vergroot naar 2048×1536 voor betere spreiding, inspector als floating overlay, auto-fit kaart bij zone-selectie, SQL zone-filtering op coördinaten (geen overlapping zones meer).
 
-### 3. Zoek & filter spawns — `Haiku` 🔶 medium
-Zoekbalk in de toolbar: filter zichtbare markers op naam of entry-ID. Niet-overeenkomende markers worden gedempt. Klik op resultaat centreert de kaart.
+### ✅ 3. Zoek & filter spawns — `Haiku` 🔶 medium
+~~Zoekbalk in de toolbar: filter zichtbare markers op naam of entry-ID. Niet-overeenkomende markers worden gedempt. Klik op resultaat centreert de kaart.~~ **KLAAR** — zoekbalk filtert op naam of entry-ID, niet-overeenkomende markers gedempt (opacity 0.2), klik op resultaat centreert kaart en opent inspector. Bij actieve zoekterm wordt clustering uitgeschakeld zodat dimming per individuele marker werkt. Herstel na Haiku-rewrite waarbij alle vorige verbeteringen verloren waren gegaan.
 
 ### 4. Worldmap tiles vanuit WoW client (Optie A) — `Haiku` 🔶 medium
 Configureerbaar pad in Settings dat naar een al-geëxtracteerde WORLDMAP-map wijst buiten het project. Verkleint de repo aanzienlijk en geeft de gebruiker controle over de versie.
