@@ -33,6 +33,10 @@ contextBridge.exposeInMainWorld('azeroth', {
   icons: {
     get: (dbcPath, iconName) => ipcRenderer.invoke('icons:get', dbcPath, iconName),
   },
+  // Talents
+  talents: {
+    getBackground: (backgroundFile) => ipcRenderer.invoke('talents:getBackground', backgroundFile),
+  },
   // Config persistence
   config: {
     load: () => ipcRenderer.invoke('config:load'),

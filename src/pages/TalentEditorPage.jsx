@@ -6,22 +6,22 @@ import './EditorPage.css';
 import './TalentEditorPage.css';
 
 const CLASSES = [
-	{ id: 1,  name: 'Warrior',     color: '#C79C6E' },
-	{ id: 2,  name: 'Paladin',     color: '#F58CBA' },
-	{ id: 3,  name: 'Hunter',      color: '#ABD473' },
-	{ id: 4,  name: 'Rogue',       color: '#FFF569' },
-	{ id: 5,  name: 'Priest',      color: '#FFFFFF' },
-	{ id: 6,  name: 'Death Knight',color: '#C41E3A' },
-	{ id: 7,  name: 'Shaman',      color: '#0070DE' },
-	{ id: 8,  name: 'Mage',        color: '#69CCF0' },
-	{ id: 9,  name: 'Warlock',     color: '#9482C9' },
-	{ id: 11, name: 'Druid',       color: '#FF7D0A' },
+	{ id: 1, name: 'Warrior', color: '#C79C6E' },
+	{ id: 2, name: 'Paladin', color: '#F58CBA' },
+	{ id: 3, name: 'Hunter', color: '#ABD473' },
+	{ id: 4, name: 'Rogue', color: '#FFF569' },
+	{ id: 5, name: 'Priest', color: '#FFFFFF' },
+	{ id: 6, name: 'Death Knight', color: '#C41E3A' },
+	{ id: 7, name: 'Shaman', color: '#0070DE' },
+	{ id: 8, name: 'Mage', color: '#69CCF0' },
+	{ id: 9, name: 'Warlock', color: '#9482C9' },
+	{ id: 11, name: 'Druid', color: '#FF7D0A' },
 ];
 
-const CELL       = 60;
-const GAP        = 10;
-const MAX_TIERS  = 15;
-const MAX_COLS   = 4;
+const CELL = 60;
+const GAP = 19;
+const MAX_TIERS = 10;
+const MAX_COLS = 4;
 
 // ─── Prereq validatie ──────────────────────────────────────────────────────
 function canMoveTalent(talent, newTier, allTalents) {
@@ -49,29 +49,30 @@ export default function TalentEditorPage() {
 		findNextTalentId, copyTalentDbc, idRanges,
 	} = useConnection();
 
-	const [selectedClass,      setSelectedClass]      = useState(null);
-	const [tabs,               setTabs]               = useState([]);
-	const [activeTab,          setActiveTab]          = useState(null);
-	const [talents,            setTalents]            = useState([]);
-	const [spellNames,         setSpellNames]         = useState({});
-	const [spellIcons,         setSpellIcons]         = useState({});
-	const [iconToSpellId,      setIconToSpellId]      = useState({});
-	const [selected,           setSelected]           = useState(null);
-	const [isNew,              setIsNew]              = useState(false);
-	const [form,               setForm]               = useState({});
-	const [dirty,              setDirty]              = useState(false);
-	const [saving,             setSaving]             = useState(false);
-	const [copying,            setCopying]            = useState(false);
-	const [deleting,           setDeleting]           = useState(false);
-	const [confirmDelete,      setConfirmDelete]      = useState(false);
-	const [msg,                setMsg]                = useState(null);
-	const [loadError,          setLoadError]          = useState(null);
-	const [showSpellPicker,    setShowSpellPicker]    = useState(false);
-	const [pickingRank,        setPickingRank]        = useState(null);
-	const [spellSearchTerm,    setSpellSearchTerm]    = useState('');
+	const [selectedClass, setSelectedClass] = useState(null);
+	const [tabs, setTabs] = useState([]);
+	const [activeTab, setActiveTab] = useState(null);
+	const [talents, setTalents] = useState([]);
+	const [spellNames, setSpellNames] = useState({});
+	const [spellIcons, setSpellIcons] = useState({});
+	const [iconToSpellId, setIconToSpellId] = useState({});
+	const [selected, setSelected] = useState(null);
+	const [isNew, setIsNew] = useState(false);
+	const [form, setForm] = useState({});
+	const [dirty, setDirty] = useState(false);
+	const [saving, setSaving] = useState(false);
+	const [copying, setCopying] = useState(false);
+	const [deleting, setDeleting] = useState(false);
+	const [confirmDelete, setConfirmDelete] = useState(false);
+	const [msg, setMsg] = useState(null);
+	const [loadError, setLoadError] = useState(null);
+	const [showSpellPicker, setShowSpellPicker] = useState(false);
+	const [pickingRank, setPickingRank] = useState(null);
+	const [spellSearchTerm, setSpellSearchTerm] = useState('');
 	const [primarySpellIconId, setPrimarySpellIconId] = useState(null);
-	const [dragTalentId,       setDragTalentId]       = useState(null);
-	const [dragOver,           setDragOver]           = useState(null); // { row, col }
+	const [dragTalentId, setDragTalentId] = useState(null);
+	const [dragOver, setDragOver] = useState(null);
+	const [backgroundImage, setBackgroundImage] = useState(null);
 
 	// ─── laden ───────────────────────────────────────────────────────────────
 	const loadTabs = useCallback(async (cls) => {
@@ -151,6 +152,63 @@ export default function TalentEditorPage() {
 	useEffect(() => { if (selectedClass) loadTabs(selectedClass); }, [selectedClass, loadTabs]);
 	useEffect(() => { if (activeTab) loadTalents(activeTab.ID); }, [activeTab, loadTalents]);
 
+	useEffect(() => {
+		if (!activeTab) { setBackgroundImage(null); return; }
+		loadBackgroundImage(activeTab);
+	}, [activeTab]);
+
+	const loadBackgroundImage = async (tab) => {
+		try {
+			const bgFile = tab.BackgroundFile;
+			console.log('🎨 loadBackgroundImage called:', { bgFile, hasTab: !!tab });
+			if (!bgFile) {
+				console.log('🎨 No BackgroundFile in tab');
+				setBackgroundImage(null);
+				return;
+			}
+
+			console.log('🎨 Calling window.azeroth.talents.getBackground...');
+			const result = await window.azeroth.talents.getBackground(bgFile);
+
+			if (result && result.TopLeft && result.TopRight && result.BottomLeft && result.BottomRight) {
+				// Composite the 4 tiles on a client-side canvas
+				const tileSize = 256;
+				const canvas = document.createElement('canvas');
+				canvas.width = tileSize * 2;
+				canvas.height = tileSize * 2;
+				const ctx = canvas.getContext('2d');
+
+				const tiles = ['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'];
+				const positions = [
+					{ x: 0, y: 0 },
+					{ x: tileSize, y: 0 },
+					{ x: 0, y: tileSize },
+					{ x: tileSize, y: tileSize }
+				];
+
+				for (let i = 0; i < tiles.length; i++) {
+					const tileKey = tiles[i];
+					const img = new Image();
+					img.src = result[tileKey];
+					await new Promise((resolve, reject) => {
+						img.onload = resolve;
+						img.onerror = reject;
+					});
+					ctx.drawImage(img, positions[i].x, positions[i].y, tileSize, tileSize);
+				}
+
+				setBackgroundImage(canvas.toDataURL());
+				console.log(`🎨 ✓ Background loaded and composited: ${bgFile}`);
+			} else {
+				setBackgroundImage(null);
+				console.log(`🎨 Background not found or incomplete: ${bgFile}`);
+			}
+		} catch (e) {
+			console.error('🎨 Background load error:', e.message);
+			setBackgroundImage(null);
+		}
+	};
+
 	// ─── selectie ────────────────────────────────────────────────────────────
 	const selectTalent = (t) => {
 		setSelected(t);
@@ -170,7 +228,7 @@ export default function TalentEditorPage() {
 			SpellRank_1: 0, SpellRank_2: 0, SpellRank_3: 0, SpellRank_4: 0,
 			SpellRank_5: 0, SpellRank_6: 0, SpellRank_7: 0, SpellRank_8: 0, SpellRank_9: 0,
 			PrereqTalent_1: 0, PrereqTalent_2: 0, PrereqTalent_3: 0,
-			PrereqRank_1: 0,   PrereqRank_2: 0,   PrereqRank_3: 0,
+			PrereqRank_1: 0, PrereqRank_2: 0, PrereqRank_3: 0,
 		};
 		setSelected(blank);
 		setIsNew(true);
@@ -192,7 +250,6 @@ export default function TalentEditorPage() {
 		try {
 			let result;
 			if (isNew) {
-				// Nieuw talent: eerst vrij ID ophalen
 				const idResult = await findNextTalentId(idRanges.talent);
 				if (!idResult.success) throw new Error(idResult.error);
 				const newId = idResult.nextId;
@@ -298,14 +355,12 @@ export default function TalentEditorPage() {
 		if (!src) return;
 		if (src.TierID === dstRow && src.ColumnIndex === dstCol) return;
 
-		// Bezet?
 		const occupied = talents.find(t => t.ID !== src.ID && (t.TierID || 0) === dstRow && (t.ColumnIndex || 0) === dstCol);
 		if (occupied) {
 			setMsg({ type: 'error', text: `Positie (rij ${dstRow}, kolom ${dstCol}) is al bezet door talent #${occupied.ID}.` });
 			return;
 		}
 
-		// Prereq-validatie
 		const { ok, reason } = canMoveTalent(src, dstRow, talents);
 		if (!ok) { setMsg({ type: 'error', text: reason }); return; }
 
@@ -334,10 +389,9 @@ export default function TalentEditorPage() {
 		}
 	};
 
-	// ─── primaire spell iconID helper ────────────────────────────────────────
 	const primarySpellId = form.SpellRank_1 > 0 ? form.SpellRank_1 : null;
 	const ranksWithPrimarySpell = primarySpellId
-		? [1,2,3,4,5,6,7,8,9].filter(i => form[`SpellRank_${i}`] === primarySpellId)
+		? [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(i => form[`SpellRank_${i}`] === primarySpellId)
 		: [];
 
 	const handleChangePrimarySpell = (newSpellId) => {
@@ -430,12 +484,12 @@ export default function TalentEditorPage() {
 
 						<div className="talent-tree-scroll">
 							{activeTab && (
-								<div className="talent-tree" style={{ width: treeW, height: treeH }}>
-									{/* ── SVG prereq pijlen ── */}
+								<div className="talent-tree" style={{ width: treeW, height: treeH, backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none', backgroundSize: 'initial', backgroundRepeat: 'repeat' }}>
+									{/* ── SVG prereq pijlen (Directed L-shaped parent-to-child) ── */}
 									<svg width={treeW} height={treeH} className="talent-arrows" style={{ overflow: 'visible' }}>
 										<defs>
-											<marker id="arrowhead" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-												<path d="M0,0 L6,3 L0,6 Z" fill="#d32f2f" />
+											<marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+												<path d="M0,0 L8,4 L0,8 Z" fill="#ff4444" />
 											</marker>
 										</defs>
 										{talents.map(t => {
@@ -443,13 +497,40 @@ export default function TalentEditorPage() {
 											if (!pid) return null;
 											const pre = talents.find(x => x.ID === pid);
 											if (!pre) return null;
+
+											const x1 = (pre.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+											const y1 = (pre.TierID || 0) * (CELL + GAP) + CELL / 2;
+											const x2 = (t.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+											const y2 = (t.TierID || 0) * (CELL + GAP) + CELL / 2;
+
+											const endX = x2;
+											const endY = y2 - CELL / 2 - 4; // slight offset so the tip touches the node border
+
+											let path = '';
+											if (x1 === x2) {
+												// Rule 1: Direct vertical line down
+												const startX = x1;
+												const startY = y1 + CELL / 2;
+												path = `M ${startX} ${startY} L ${endX} ${endY}`;
+											} else if (y1 === y2) {
+												// Rule 2: Same tier, different columns (horizontal arrow)
+												const startX = x2 > x1 ? x1 + CELL / 2 : x1 - CELL / 2;
+												const startY = y1;
+												const adjustedEndX = x2 > x1 ? x2 - CELL / 2 - 4 : x2 + CELL / 2 + 4;
+												path = `M ${startX} ${startY} L ${adjustedEndX} ${startY}`;
+											} else {
+												// Rule 3: Different columns and down tiers (diagonal arrow)
+												// Starts at bottom of parent, bends in middle of gap, drops down to child
+												const startX = x1;
+												const startY = y1 + CELL / 2;
+												const midY = startY + GAP / 2;
+												path = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+											}
+
 											return (
-												<line
+												<path
 													key={`arrow-${pid}-${t.ID}`}
-													x1={(pre.ColumnIndex || 0) * (CELL + GAP) + CELL / 2}
-													y1={(pre.TierID || 0) * (CELL + GAP) + CELL}
-													x2={(t.ColumnIndex || 0) * (CELL + GAP) + CELL / 2}
-													y2={(t.TierID || 0) * (CELL + GAP)}
+													d={path}
 													className="talent-prereq-line"
 													markerEnd="url(#arrowhead)"
 												/>
@@ -461,16 +542,15 @@ export default function TalentEditorPage() {
 									{Array.from({ length: MAX_TIERS }).map((_, row) =>
 										Array.from({ length: MAX_COLS }).map((_, col) => {
 											const t = talentAt(row, col);
-											const isDragSrc  = t && dragTalentId === t.ID;
-											const isDragDst  = dragOver?.row === row && dragOver?.col === col;
+											const isDragSrc = t && dragTalentId === t.ID;
+											const isDragDst = dragOver?.row === row && dragOver?.col === col;
 											const isSelected = selected && (t ? selected.ID === t.ID : isNew && selected.TierID === row && selected.ColumnIndex === col);
 
 											if (t) {
-												// Gevulde cel — talent node
 												const spellId = t.SpellRank_1;
-												const name    = spellNames[spellId] || `#${t.ID}`;
-												const icon    = spellIcons[spellId];
-												const maxRank = [1,2,3,4,5,6,7,8,9].reduce((m, i) => t[`SpellRank_${i}`] ? i : m, 0);
+												const name = spellNames[spellId] || `#${t.ID}`;
+												const icon = spellIcons[spellId];
+												const maxRank = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((m, i) => t[`SpellRank_${i}`] ? i : m, 0);
 												return (
 													<div
 														key={`node-${t.ID}`}
@@ -498,7 +578,6 @@ export default function TalentEditorPage() {
 													</div>
 												);
 											} else {
-												// Lege cel
 												return (
 													<div
 														key={`empty-${row}-${col}`}
@@ -542,6 +621,11 @@ export default function TalentEditorPage() {
 									: `Talent #${selected.ID}${dirty ? ' ●' : ''}`}
 							</span>
 						</div>
+						{!isNew && (
+							<div className="panel-talent-id" style={{ padding: '8px 14px', fontSize: '12px', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)', fontFamily: 'monospace' }}>
+								ID: <span style={{ color: 'var(--gold)' }}>{selected.ID}</span>
+							</div>
+						)}
 
 						<div className="talent-edit-actions">
 							{!isNew && (
@@ -631,7 +715,7 @@ export default function TalentEditorPage() {
 
 							{/* Spell IDs */}
 							<div className="talent-edit-section">Spell IDs per Rank</div>
-							{[1,2,3,4,5].map(i => {
+							{[1, 2, 3, 4, 5].map(i => {
 								const spellId = form[`SpellRank_${i}`];
 								const hint = spellNames[spellId];
 								return (

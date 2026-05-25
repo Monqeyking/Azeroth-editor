@@ -193,20 +193,14 @@ function getIconsDir() {
   ];
 
   for (const testPath of possiblePaths) {
-    if (fs.existsSync(testPath)) {
-      console.log(`Icons directory found: ${testPath}`);
-      return testPath;
+    if (fs.existsSync(testPath)) {      return testPath;
     }
-  }
-  console.log('Icons directory not found in any location');
-  return null;
+  }  return null;
 }
 
 ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
   try {
-    if (!iconPath) {
-      console.log('icons:get - empty iconPath');
-      return null;
+    if (!iconPath) {      return null;
     }
 
     // Clean the path: strip "Interface\Icons\" prefix and extract filename
@@ -217,18 +211,11 @@ ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
     if (iconName.includes('/')) {
       iconName = iconName.split('/').pop();
     }
-
-    console.log(`icons:get - Loading: ${iconPath} → ${iconName}`);
-
-    if (iconCache[iconName]) {
-      console.log(`icons:get - cache hit: ${iconName}`);
-      return iconCache[iconName];
+    if (iconCache[iconName]) {      return iconCache[iconName];
     }
 
     const iconsDir = getIconsDir();
-    if (!iconsDir) {
-      console.log('icons:get - Icons directory not found');
-      return null;
+    if (!iconsDir) {      return null;
     }
 
     // Try multiple file extensions (filename already has no extension)
@@ -248,8 +235,81 @@ ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
 
     console.log(`icons:get - ✗ Icon not found: ${iconName} (looked in ${iconsDir})`);
     return null;
+  } catch (e) {    return null;
+  }
+});
+
+// ─── Talent Background Loader ──────────────────────────────────────────────────
+ipcMain.handle('talents:getBackground', async (_, backgroundFile) => {
+  try {
+    if (!backgroundFile) {
+      console.log('talents:getBackground - empty backgroundFile');
+      return null;
+    }
+
+    // Try multiple potential paths for flexibility (dev vs production)
+    const possiblePaths = [
+      path.join(__dirname, '..', 'src', 'background', 'Talents'),
+      path.join(app.getAppPath(), 'src', 'background', 'Talents'),
+      path.join(process.cwd(), 'src', 'background', 'Talents'),
+    ];
+
+    let tilesDir = null;
+    for (const p of possiblePaths) {
+      if (fs.existsSync(p)) {
+        tilesDir = p;
+        break;
+      }
+    }
+
+    if (!tilesDir) {
+      console.log(`talents:getBackground - Tiles directory not found. Tried: ${possiblePaths.join(', ')}`);
+      return null;
+    }
+    console.log(`talents:getBackground - Using tiles directory: ${tilesDir}`);
+
+    const tiles = ['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'];
+    const result = {};
+
+    for (const t of tiles) {
+      let foundPath = null;
+      const variations = [t, t.toUpperCase(), t.toLowerCase()];
+      
+      for (const v of variations) {
+        const testPath = path.join(tilesDir, `${backgroundFile}-${v}.png`);
+        if (fs.existsSync(testPath)) {
+          foundPath = testPath;
+          break;
+        }
+      }
+
+      // Fallback case-insensitive search in directory (e.g. for Linux)
+      if (!foundPath) {
+        try {
+          const files = fs.readdirSync(tilesDir);
+          const targetName = `${backgroundFile}-${t}`.toLowerCase();
+          const match = files.find(f => f.toLowerCase() === `${targetName}.png`);
+          if (match) {
+            foundPath = path.join(tilesDir, match);
+          }
+        } catch (err) {
+          // ignore
+        }
+      }
+
+      if (!foundPath) {
+        console.log(`talents:getBackground - Missing tile ${t} for ${backgroundFile}`);
+        return null;
+      }
+
+      const data = fs.readFileSync(foundPath);
+      result[t] = `data:image/png;base64,${data.toString('base64')}`;
+    }
+
+    console.log(`talents:getBackground - ✓ Loaded 4 background tiles for: ${backgroundFile}`);
+    return result;
   } catch (e) {
-    console.error('icons:get error:', e);
+    console.error('talents:getBackground error:', e);
     return null;
   }
 });
@@ -490,12 +550,14 @@ ipcMain.handle('dbc:readTalentTabs', async (_, dbcPath) => {
     for (let i = 0; i < dbc.recordCount; i++) {
       const offset = i * dbc.recordSize;
       const nameRef = readUInt32LE(dbc.dataBuffer, offset + 4);
+      const bgFileRef = readUInt32LE(dbc.dataBuffer, offset + 92);
       const rec = {
         ID: readUInt32LE(dbc.dataBuffer, offset + 0),
         Name_Lang_enUS: readStringFromBlock(dbc.dataBuffer, nameRef, dbc.stringBlock),
         SpellIconID: readUInt32LE(dbc.dataBuffer, offset + 72),
         ClassMask: readUInt32LE(dbc.dataBuffer, offset + 80),
-        OrderIndex: readUInt32LE(dbc.dataBuffer, offset + 88)
+        OrderIndex: readUInt32LE(dbc.dataBuffer, offset + 88),
+        BackgroundFile: readStringFromBlock(dbc.dataBuffer, bgFileRef, dbc.stringBlock)
       };
       data.push(rec);
     }
