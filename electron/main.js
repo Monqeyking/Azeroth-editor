@@ -869,8 +869,7 @@ ipcMain.handle('dbc:deleteTalent', async (_, dbcPath, talentId) => {
     newBuf.writeUInt32LE(recordCount - 1, 4);
     buffer.copy(newBuf, headerSize, headerSize, headerSize + idx * recordSize);
     buffer.copy(newBuf, headerSize + idx * recordSize, headerSize + (idx + 1) * recordSize, headerSize + dataSize);
-    buffer.copy(newBuf, headerSize + (recordCount - 1) * recordSize, headerSize + dataSize, headerSize + dataSize + strBlockSize);
-
+    buffer.copy(newBuf, headerSize + (recordCount - 1) * recordSize, headerSize + dataSize, buffer.length);
     fs.writeFileSync(filePath, newBuf);
     return { success: true };
   } catch (e) {
@@ -878,49 +877,205 @@ ipcMain.handle('dbc:deleteTalent', async (_, dbcPath, talentId) => {
   }
 });
 
-ipcMain.handle('dbc:insertTalent', async (_, dbcPath, talent) => {
+ipcMain.handle('minimap:getTile', async (_, minimapPath, mapId, col, row) => {
   try {
-    const filePath = path.join(dbcPath, 'Talent.dbc');
-    const buffer = fs.readFileSync(filePath);
-    if (buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC')
-      return { success: false, error: 'Ongeldig DBC bestand' };
+    const filename = `Map_${mapId}_${col}_${row}`;
+    const tilePath = path.join(minimapPath, `Map_${mapId}`, filename);
+    for (const ext of ['.png', '.jpg', '.jpeg', '.PNG', '.JPG']) {
+      const fullPath = tilePath + ext;
+      if (fs.existsSync(fullPath)) {
+        const data = fs.readFileSync(fullPath);
+        const mime = ext.toLowerCase() === '.png' ? 'image/png' : 'image/jpeg';
+        return { success: true, data: `data:${mime};base64,${data.toString('base64')}` };
+      }
+    }
+    return { success: false };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
+// ── BLP2 / DXT1 decoder ───────────────────────────────────────────────────────
+function decodeBLP(buffer) {
+  if (buffer.toString('ascii', 0, 4) !== 'BLP2') throw new Error('Geen BLP2');
+  const w      = buffer.readUInt32LE(12);
+  const h      = buffer.readUInt32LE(16);
+  const offset = buffer.readUInt32LE(20);
+  const size   = buffer.readUInt32LE(84);
+  const src    = buffer.slice(offset, offset + size);
+  const rgba   = Buffer.alloc(w * h * 4);
+
+  // DXT1: 4×4 blokken, 8 bytes per blok
+  const bw = Math.ceil(w / 4);
+  const bh = Math.ceil(h / 4);
+
+  function rgb565(c) {
+    return [(c >> 11 & 31) * 255 / 31 | 0, (c >> 5 & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0];
+  }
+
+  for (let by = 0; by < bh; by++) {
+    for (let bx = 0; bx < bw; bx++) {
+      const bi  = (by * bw + bx) * 8;
+      const c0v = src.readUInt16LE(bi);
+      const c1v = src.readUInt16LE(bi + 2);
+      const lut = src.readUInt32LE(bi + 4);
+      const c0  = rgb565(c0v);
+      const c1  = rgb565(c1v);
+      let colors;
+      if (c0v > c1v) {
+        colors = [
+          c0,
+          c1,
+          [((c0[0]*2+c1[0])/3)|0, ((c0[1]*2+c1[1])/3)|0, ((c0[2]*2+c1[2])/3)|0],
+          [((c0[0]+c1[0]*2)/3)|0, ((c0[1]+c1[1]*2)/3)|0, ((c0[2]+c1[2]*2)/3)|0],
+        ];
+      } else {
+        colors = [
+          c0,
+          c1,
+          [((c0[0]+c1[0])/2)|0, ((c0[1]+c1[1])/2)|0, ((c0[2]+c1[2])/2)|0],
+          [0,0,0],
+        ];
+      }
+      for (let py = 0; py < 4; py++) {
+        for (let px = 0; px < 4; px++) {
+          const ix = bx * 4 + px;
+          const iy = by * 4 + py;
+          if (ix >= w || iy >= h) continue;
+          const idx = (lut >> ((py * 4 + px) * 2)) & 3;
+          const [r,g,b] = colors[idx];
+          const off = (iy * w + ix) * 4;
+          rgba[off]   = r;
+          rgba[off+1] = g;
+          rgba[off+2] = b;
+          rgba[off+3] = 255;
+        }
+      }
+    }
+  }
+  return { rgba, w, h };
+}
+
+// PNG schrijven zonder externe library (DEFLATE via zlib)
+const zlib = require('zlib');
+
+function rgbaToPNG(rgba, w, h) {
+  const png_sig = Buffer.from([137,80,78,71,13,10,26,10]);
+
+  function chunk(type, data) {
+    const buf = Buffer.alloc(12 + data.length);
+    buf.writeUInt32BE(data.length, 0);
+    buf.write(type, 4, 'ascii');
+    data.copy(buf, 8);
+    let crc = 0xffffffff;
+    for (let i = 4; i < 8 + data.length; i++) {
+      crc ^= buf[i];
+      for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    buf.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + data.length);
+    return buf;
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8; ihdr[9] = 2; // bit depth 8, RGB
+
+  // Bouw raw scanlines op (RGB, filter byte 0)
+  const raw = Buffer.alloc(h * (1 + w * 3));
+  for (let y = 0; y < h; y++) {
+    raw[y * (1 + w * 3)] = 0;
+    for (let x = 0; x < w; x++) {
+      const s = (y * w + x) * 4;
+      const d = y * (1 + w * 3) + 1 + x * 3;
+      raw[d]   = rgba[s];
+      raw[d+1] = rgba[s+1];
+      raw[d+2] = rgba[s+2];
+    }
+  }
+
+  const idat = zlib.deflateSync(raw, { level: 1 });
+  return Buffer.concat([
+    png_sig,
+    chunk('IHDR', ihdr),
+    chunk('IDAT', idat),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+// Compositeer 12 BLP-tiles (4 kolommen × 3 rijen) naar één PNG
+ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName) => {
+  try {
+    const worldmapPath = path.join(__dirname, '..', 'src', 'background', 'WORLDMAP');
+    const COLS = 4, ROWS = 3;
+    const tileW = 256, tileH = 256;
+    const fullW  = COLS * tileW;
+    const fullH  = ROWS * tileH;
+    const composite = Buffer.alloc(fullW * fullH * 4, 0);
+
+    for (let row = 0; row < ROWS; row++) {
+      for (let col = 0; col < COLS; col++) {
+        const idx     = row * COLS + col + 1;
+        const blpPath = path.join(worldmapPath, folderName, `${baseName}${idx}.blp`);
+        if (!fs.existsSync(blpPath)) continue;
+
+        const { rgba, w, h } = decodeBLP(fs.readFileSync(blpPath));
+        const ox = col * tileW;
+        const oy = row * tileH;
+
+        for (let y = 0; y < h; y++) {
+          for (let x = 0; x < w; x++) {
+            const src = (y * w + x) * 4;
+            const dst = ((oy + y) * fullW + (ox + x)) * 4;
+            composite[dst]   = rgba[src];
+            composite[dst+1] = rgba[src+1];
+            composite[dst+2] = rgba[src+2];
+            composite[dst+3] = rgba[src+3];
+          }
+        }
+      }
+    }
+
+    const png = rgbaToPNG(composite, fullW, fullH);
+    return { success: true, data: `data:image/png;base64,${png.toString('base64')}` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Lees WorldMapArea.dbc (11 velden × 4 bytes, veld 3 = string ref)
+ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
+  try {
+    const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapArea.dbc'));
+    if (buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Geen DBC' };
     const recordCount  = buffer.readUInt32LE(4);
     const recordSize   = buffer.readUInt32LE(12);
     const strBlockSize = buffer.readUInt32LE(16);
     const headerSize   = 20;
-    const dataSize     = recordCount * recordSize;
+    const strStart     = headerSize + recordCount * recordSize;
 
-    // Controleer of ID al bestaat
-    for (let i = 0; i < recordCount; i++) {
-      if (buffer.readUInt32LE(headerSize + i * recordSize) === talent.ID)
-        return { success: false, error: `Talent ID ${talent.ID} bestaat al` };
+    function readStr(offset) {
+      if (!offset) return '';
+      let end = offset;
+      while (strStart + end < buffer.length && buffer[strStart + end] !== 0) end++;
+      return buffer.slice(strStart + offset, strStart + end).toString('utf8');
     }
 
-    const newBuf = Buffer.alloc(headerSize + (recordCount + 1) * recordSize + strBlockSize);
-    buffer.copy(newBuf, 0, 0, headerSize);
-    newBuf.writeUInt32LE(recordCount + 1, 4);
-    buffer.copy(newBuf, headerSize, headerSize, headerSize + dataSize);
-
-    // Schrijf nieuw record aan het einde van de data
-    const off = headerSize + dataSize;
-    newBuf.writeUInt32LE(talent.ID          || 0, off + 0);
-    newBuf.writeUInt32LE(talent.TabID       || 0, off + 4);
-    newBuf.writeUInt32LE(talent.TierID      || 0, off + 8);
-    newBuf.writeUInt32LE(talent.ColumnIndex || 0, off + 12);
-    for (let i = 1; i <= 9; i++)
-      newBuf.writeUInt32LE(talent[`SpellRank_${i}`] || 0, off + 16 + (i - 1) * 4);
-    newBuf.writeUInt32LE(talent.PrereqTalent_1 || 0, off + 52);
-    newBuf.writeUInt32LE(talent.PrereqTalent_2 || 0, off + 56);
-    newBuf.writeUInt32LE(talent.PrereqTalent_3 || 0, off + 60);
-    newBuf.writeUInt32LE(talent.PrereqRank_1   || 0, off + 64);
-    newBuf.writeUInt32LE(talent.PrereqRank_2   || 0, off + 68);
-    newBuf.writeUInt32LE(talent.PrereqRank_3   || 0, off + 72);
-
-    buffer.copy(newBuf, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + strBlockSize);
-
-    fs.writeFileSync(filePath, newBuf);
-    return { success: true };
+    const areas = [];
+    for (let i = 0; i < recordCount; i++) {
+      const b = headerSize + i * recordSize;
+      areas.push({
+        id:           buffer.readUInt32LE(b),
+        mapId:        buffer.readUInt32LE(b + 4),
+        areaId:       buffer.readUInt32LE(b + 8),
+        internalName: readStr(buffer.readUInt32LE(b + 12)),
+        locLeft:      buffer.readFloatLE(b + 16),
+        locRight:     buffer.readFloatLE(b + 20),
+        locTop:       buffer.readFloatLE(b + 24),
+        locBottom:    buffer.readFloatLE(b + 28),
+      });
+    }
+    return { success: true, areas };
   } catch (e) {
     return { success: false, error: e.message };
   }

@@ -1,0 +1,274 @@
+/* ── Page shell ──────────────────────────────────────────────────────── */
+.spawn-map-page {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-dark);
+}
+
+/* ── Toolbar ─────────────────────────────────────────────────────────── */
+.spawn-map-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+}
+
+.map-select {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 5px 8px;
+  min-width: 200px;
+  cursor: pointer;
+}
+.map-select:focus { outline: none; border-color: var(--gold); }
+
+.spawn-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  color: var(--text-secondary);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.spawn-toggle.active {
+  border-color: var(--gold);
+  color: var(--text-primary);
+  background: rgba(199,168,110,0.08);
+}
+.spawn-toggle:hover { border-color: var(--border-gold); color: var(--text-primary); }
+
+.spawn-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.spawn-dot.creature  { background: #60a5fa; }
+.spawn-dot.gameobject { background: #fbbf24; border-radius: 2px; }
+
+.spawn-loading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.spawn-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+  margin-left: 4px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 1s linear infinite; }
+
+/* ── Body = map + inspector ──────────────────────────────────────────── */
+.spawn-map-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Map viewport ────────────────────────────────────────────────────── */
+.map-viewport {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  cursor: grab;
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 63px,
+      rgba(255,255,255,0.03) 63px,
+      rgba(255,255,255,0.03) 64px
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 63px,
+      rgba(255,255,255,0.03) 63px,
+      rgba(255,255,255,0.03) 64px
+    ),
+    var(--bg-dark);
+}
+.map-viewport:active { cursor: grabbing; }
+
+/* ── World container ─────────────────────────────────────────────────── */
+.map-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  will-change: transform;
+}
+
+/* ── Tiles ───────────────────────────────────────────────────────────── */
+.map-tile {
+  position: absolute;
+  width: 256px;
+  height: 256px;
+  image-rendering: pixelated;
+  pointer-events: none;
+  opacity: 0.75;
+}
+
+/* ── No image placeholder ────────────────────────────────────────────── */
+.map-no-image {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-style: italic;
+}
+
+/* ── SVG overlay ─────────────────────────────────────────────────────── */
+.map-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  overflow: visible;
+}
+
+/* Spawn markers */
+.spawn-creature {
+  fill: rgba(96, 165, 250, 0.7);
+  stroke: #3b82f6;
+  stroke-width: 1;
+  cursor: pointer;
+  transition: r 0.1s;
+}
+.spawn-creature:hover { fill: #60a5fa; stroke-width: 1.5; }
+.spawn-creature.sel   { fill: #bfdbfe; stroke: #93c5fd; stroke-width: 2; }
+
+.spawn-go {
+  fill: rgba(251, 191, 36, 0.65);
+  stroke: #f59e0b;
+  stroke-width: 1;
+  cursor: pointer;
+}
+.spawn-go:hover { fill: #fbbf24; stroke-width: 1.5; }
+.spawn-go.sel   { fill: #fef08a; stroke: #fde047; stroke-width: 2; }
+
+/* Waypoints */
+.wp-line {
+  stroke: rgba(167, 139, 250, 0.6);
+  stroke-width: 1.5;
+  stroke-dasharray: 4 3;
+  pointer-events: none;
+}
+.wp-node {
+  fill: rgba(167, 139, 250, 0.5);
+  stroke: #a78bfa;
+  stroke-width: 1.5;
+  cursor: move;
+}
+.wp-node-group:hover .wp-node { fill: #a78bfa; }
+.wp-label {
+  fill: rgba(167, 139, 250, 0.9);
+  font-size: 9px;
+  font-family: monospace;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* ── Inspector panel ─────────────────────────────────────────────────── */
+.spawn-inspector {
+  width: 240px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.insp-header {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+  flex-shrink: 0;
+}
+.insp-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.insp-badge.creature  { background: rgba(59,130,246,0.2); color: #93c5fd; }
+.insp-badge.go        { background: rgba(245,158,11,0.2); color: #fcd34d; }
+.insp-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  font-weight: 500;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.insp-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 2px 4px;
+  line-height: 1;
+  border-radius: 3px;
+}
+.insp-close:hover { color: var(--text-primary); background: var(--bg-hover); }
+
+.insp-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 0;
+}
+
+.insp-section {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--gold);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 8px 12px 4px;
+}
+.insp-section:first-child { padding-top: 4px; }
+
+.insp-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 12px;
+  gap: 8px;
+}
+.insp-key {
+  font-size: 11px;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.insp-val {
+  font-size: 11px;
+  color: var(--text-primary);
+  text-align: right;
+  word-break: break-all;
+}
