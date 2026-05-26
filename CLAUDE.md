@@ -14,3 +14,4 @@ Voorkeuren:
 - Gebruik bestaande patronen uit de codebase, introduceer geen nieuwe libraries tenzij gevraagd
 - Sla kleine wijzigingen direct op in de map, geen tussentijdse bevestiging nodig
 - Als je vragen hebt over de database structuur. vraag mij dit dan. Ik kan het voor je ophalen.
+- Als cache files vergrendeld zijn door npm dev. vraag mij dan eerst om het te stoppen in plaats van het hele file opnieuw te schrijven

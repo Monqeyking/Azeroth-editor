@@ -33,11 +33,14 @@
 ### ✅ 4. Worldmap tiles vanuit WoW client (Optie A) — `Haiku` 🔶 medium
 ~~Configureerbaar pad in Settings dat naar een al-geëxtracteerde WORLDMAP-map wijst buiten het project. Verkleint de repo aanzienlijk en geeft de gebruiker controle over de versie.~~ **KLAAR** — Settings panel "Worldmap Tiles" met optioneel pad-invoer, Validate Path button (telt zones), fallback naar ingebedde `src/background/WORLDMAP`. Ondersteunt PNG en BLP formaten, zone-gebaseerde structuur (Azeroth/, Blackrock/, etc.). IPC handlers: `getTile()`, `listZones()`, `validatePath()`.
 
-### 5. Continent-overzicht met klikbare zone-overlays — `Sonnet` 🔶 medium
-Zone-grenzen tekenen als klikbare overlays op het continent-overzicht, berekend vanuit WorldMapArea.dbc bounds. Hover = tooltip met naam, klik = naar zone navigeren zonder dropdown.
+### ✅ 5. Continent-overzicht met klikbare zone-overlays — `Sonnet` 🔶 medium
+~~Zone-grenzen tekenen als klikbare overlays op het continent-overzicht, berekend vanuit WorldMapArea.dbc bounds. Hover = tooltip met naam, klik = naar zone navigeren zonder dropdown.~~ **KLAAR** — SVG `<rect>` overlays per zone berekend vanuit `WorldMapArea.dbc` bounds (via `continentArea` als referentie-frame). Hover toont goud-gekleurde tooltip met zone-naam (fixed positioned), klik navigeert direct naar de zone. Pan werkt door op de achtergrond te klikken, `onMouseDown` op overlays stopt event-propagatie zodat pan niet activeert.
 
-### 6. Rechtsklik context-menu — `Sonnet` 🔵 laag
-Rechtsklik op lege plek: spawn toevoegen. Rechtsklik op marker: coördinaten kopiëren, teleporteer via SOAP (`.go xyz`), spawn verwijderen.
+### ✅ 6. Rechtsklik context-menu — `Sonnet` 🔵 laag
+~~Rechtsklik op lege plek: spawn toevoegen. Rechtsklik op marker: coördinaten kopiëren, teleporteer via SOAP (`.go xyz`), spawn verwijderen.~~ **KLAAR** — context-menu op lege kaart (spawn toevoegen via modal met type + entry ID, INSERT + state-update), op marker (coördinaten kopiëren naar klembord, teleporteer via `.go xyz`, spawn verwijderen met DELETE + state-update). Click-outside sluit het menu.
+
+### 6b. Spawn toevoegen — uitgebreide modal — `Sonnet` 🔵 laag
+Huidige modal vraagt alleen entry ID + type. Uitbreiden met de velden die AzerothCore nodig heeft voor een bruikbare spawn: **SpawnMask** (welke difficulty), **MovementType** (Idle/Random/Waypoint), **orientation**, **spawntimesecs** (respawn-timer), optioneel **wander_distance** en **phaseMask**. Creature-template naam live ophalen zodra entry ID is ingevoerd (feedback of de entry bestaat). GO's hebben extra velden: **rotation** (quaternion) en **state** (open/closed/activated).
 
 ### ✅ 7. Worldmap tiles vanuit WoW client (Optie B — MPQ) — `Sonnet` 🔵 laag / complex
 ~~Pure JS MPQ-archief reader in main.js zodat BLP-bestanden direct uit `Data/*.mpq` van de WoW-installatie gelezen worden. Dynamisch zoals de client zelf. Zwaar werk, alleen zinvol als optie A niet voldoet.~~ **KLAAR** — `@wowserhq/stormjs` (StormLib via WASM) geïntegreerd als `electron/mpq-reader.js`. User geeft `Data`-root op in Settings; app zoekt automatisch in root + `enUS/` submappen, sorteert op patch-prioriteit, leest tiles direct uit MPQ via listfile-discovery. Herbruikbaar voor toekomstige 3D-model lookups.

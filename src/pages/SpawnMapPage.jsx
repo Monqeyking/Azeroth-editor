@@ -6,16 +6,31 @@ import './SpawnMapPage.css';
 const IMG_W = 2048, IMG_H = 1536;
 
 const CONTINENTS = [
-	{ mapId: 0,   name: 'Eastern Kingdoms', folder: 'Azeroth',     base: 'Azeroth' },
-	{ mapId: 1,   name: 'Kalimdor',         folder: 'Kalimdor',    base: 'Kalimdor' },
-	{ mapId: 530, name: 'Outland',          folder: 'Expansion01', base: 'Expansion01' },
-	{ mapId: 571, name: 'Northrend',        folder: 'Northrend',   base: 'Northrend' },
+	{ mapId: 0, name: 'Eastern Kingdoms', folder: 'Azeroth', base: 'Azeroth' },
+	{ mapId: 1, name: 'Kalimdor', folder: 'Kalimdor', base: 'Kalimdor' },
+	{ mapId: 530, name: 'Outland', folder: 'Expansion01', base: 'Expansion01' },
+	{ mapId: 571, name: 'Northrend', folder: 'Northrend', base: 'Northrend' },
 ];
+
+const CONTINENT_CAL_KEY  = 'azeroth-continent-cal';
+const DEFAULT_CAL        = { x: 0, y: 0, sx: 1, sy: 1 };
+const CAL_VERSION        = 2;
+
+function loadCal() {
+	try {
+		const raw = JSON.parse(localStorage.getItem(CONTINENT_CAL_KEY)) || {};
+		if (raw._v !== CAL_VERSION) return { _v: CAL_VERSION };
+		return raw;
+	} catch { return { _v: CAL_VERSION }; }
+}
+function saveCal(cal) {
+	localStorage.setItem(CONTINENT_CAL_KEY, JSON.stringify(cal));
+}
 
 const RANK_NAMES = ['Normal', 'Elite', 'Rare Elite', 'Boss', 'Rare'];
 const MOVE_NAMES = ['Idle', 'Random', 'Waypoint'];
 
-const CLUSTER_PX        = 64;
+const CLUSTER_PX = 64;
 const CLUSTER_MAX_SCALE = 1.5;
 
 const HORDE_FACTIONS = new Set([
@@ -33,23 +48,23 @@ const NEUTRAL_FACTIONS = new Set([
 ]);
 
 function creatureClass(spawn) {
-	if (spawn.type === 8)                     return 'critter';
-	if (HORDE_FACTIONS.has(spawn.faction))    return 'horde';
+	if (spawn.type === 8) return 'critter';
+	if (HORDE_FACTIONS.has(spawn.faction)) return 'horde';
 	if (ALLIANCE_FACTIONS.has(spawn.faction)) return 'alliance';
-	if (NEUTRAL_FACTIONS.has(spawn.faction))  return 'neutral';
+	if (NEUTRAL_FACTIONS.has(spawn.faction)) return 'neutral';
 	return 'hostile';
 }
 
 function worldToZonePx(wx, wy, area) {
 	return {
-		px: (area.locLeft - wy)  / (area.locLeft  - area.locRight)  * IMG_W,
-		py: (area.locTop  - wx)  / (area.locTop   - area.locBottom) * IMG_H,
+		px: (area.locLeft - wy) / (area.locLeft - area.locRight) * IMG_W,
+		py: (area.locTop - wx) / (area.locTop - area.locBottom) * IMG_H,
 	};
 }
 
 function zonePxToWorld(px, py, area) {
 	return {
-		wx: area.locTop  - (py / IMG_H) * (area.locTop  - area.locBottom),
+		wx: area.locTop - (py / IMG_H) * (area.locTop - area.locBottom),
 		wy: area.locLeft - (px / IMG_W) * (area.locLeft - area.locRight),
 	};
 }
@@ -99,23 +114,23 @@ function clusterSpawns(spawns, show, zone, scale, forceFlat) {
 }
 
 export default function SpawnMapPage() {
-	const { query, dbcPath, worldmapMpqPath } = useConnection();
+	const { query, dbcPath, worldmapMpqPath, soapCommand } = useConnection();
 
 	const [worldAreas, setWorldAreas] = useState([]);
 	const [areasError, setAreasError] = useState('');
 
 	const [continent, setContinent] = useState(CONTINENTS[0]);
-	const [zone, setZone]           = useState(null);
+	const [zone, setZone] = useState(null);
 
-	const [bgImage, setBgImage]       = useState(null);
+	const [bgImage, setBgImage] = useState(null);
 	const [imgLoading, setImgLoading] = useState(false);
 
-	const [creatures,   setCreatures]   = useState([]);
+	const [creatures, setCreatures] = useState([]);
 	const [gameobjects, setGameobjects] = useState([]);
-	const [waypoints,   setWaypoints]   = useState([]);
+	const [waypoints, setWaypoints] = useState([]);
 	const [showCreatures, setShowCreatures] = useState(true);
-	const [showGOs,       setShowGOs]       = useState(true);
-	const [spawnLoading,  setSpawnLoading]  = useState(false);
+	const [showGOs, setShowGOs] = useState(true);
+	const [spawnLoading, setSpawnLoading] = useState(false);
 
 	const [creatureFilter, setCreatureFilter] = useState(
 		new Set(['hostile', 'horde', 'alliance', 'neutral', 'critter'])
@@ -129,22 +144,54 @@ export default function SpawnMapPage() {
 
 	const [selected, setSelected] = useState(null);
 
-	const [pan,   setPan]   = useState({ x: 0, y: 0 });
-	const [scale, setScale] = useState(1);
-	const viewRef  = useRef(null);
-	const panRef   = useRef({ active: false, sx: 0, sy: 0, px: 0, py: 0 });
-	const scaleRef = useRef(1);
-	const zoneRef  = useRef(null);
+	const [hoveredZone, setHoveredZone] = useState(null);
+	const [tooltipPos, setTooltipPos] = useState({ x: 0, y: 0 });
 
-	const dragRef    = useRef(null);
+	const [continentCal, setContinentCal] = useState(loadCal);
+	const [calOpen, setCalOpen] = useState(false);
+	const calRef = useRef(null);
+
+	const getCal = useCallback((mapId) =>
+		continentCal[mapId] ?? DEFAULT_CAL,
+	[continentCal]);
+
+	const updateCal = useCallback((mapId, field, val) => {
+		setContinentCal(prev => {
+			const next = { ...prev, _v: CAL_VERSION, [mapId]: { ...(prev[mapId] ?? DEFAULT_CAL), [field]: val } };
+			saveCal(next);
+			return next;
+		});
+	}, []);
+
+	const resetCal = useCallback((mapId) => {
+		setContinentCal(prev => {
+			const next = { ...prev, _v: CAL_VERSION, [mapId]: { ...DEFAULT_CAL } };
+			saveCal(next);
+			return next;
+		});
+	}, []);
+
+	const [pan, setPan] = useState({ x: 0, y: 0 });
+	const [scale, setScale] = useState(1);
+	const viewRef = useRef(null);
+	const panRef = useRef({ active: false, sx: 0, sy: 0, px: 0, py: 0 });
+	const scaleRef = useRef(1);
+	const zoneRef = useRef(null);
+
+	const dragRef = useRef(null);
 	const [dragPos, setDragPos] = useState(null);
 	const dragPosRef = useRef(null);
 	const DRAG_THRESHOLD = 5;
 
-	useEffect(() => { scaleRef.current = scale; }, [scale]);
-	useEffect(() => { zoneRef.current  = zone;  }, [zone]);
+	const [contextMenu, setContextMenu] = useState(null);
+	const contextMenuRef = useRef(null);
+	const [addModal, setAddModal] = useState(null);
+	const [addEntry, setAddEntry] = useState('');
+	const [addType, setAddType] = useState('creature');
 
-	// Click-outside: type filter
+	useEffect(() => { scaleRef.current = scale; }, [scale]);
+	useEffect(() => { zoneRef.current = zone; }, [zone]);
+
 	useEffect(() => {
 		if (!filterOpen) return;
 		const h = (e) => { if (!filterRef.current?.contains(e.target)) setFilterOpen(false); };
@@ -152,13 +199,26 @@ export default function SpawnMapPage() {
 		return () => document.removeEventListener('mousedown', h);
 	}, [filterOpen]);
 
-	// Click-outside: search
 	useEffect(() => {
 		if (!searchOpen) return;
 		const h = (e) => { if (!searchRef.current?.contains(e.target)) setSearchOpen(false); };
 		document.addEventListener('mousedown', h);
 		return () => document.removeEventListener('mousedown', h);
 	}, [searchOpen]);
+
+	useEffect(() => {
+		if (!calOpen) return;
+		const h = (e) => { if (!calRef.current?.contains(e.target)) setCalOpen(false); };
+		document.addEventListener('mousedown', h);
+		return () => document.removeEventListener('mousedown', h);
+	}, [calOpen]);
+
+	useEffect(() => {
+		if (!contextMenu) return;
+		const h = (e) => { if (!contextMenuRef.current?.contains(e.target)) setContextMenu(null); };
+		document.addEventListener('mousedown', h);
+		return () => document.removeEventListener('mousedown', h);
+	}, [contextMenu]);
 
 	const toggleCreatureType = (type) => {
 		setCreatureFilter(prev => {
@@ -168,7 +228,6 @@ export default function SpawnMapPage() {
 		});
 	};
 
-	// ── Load WorldMapArea.dbc ─────────────────────────────────────────────────
 	useEffect(() => {
 		if (!dbcPath) return;
 		window.azeroth.worldmap.readWorldMapAreas(dbcPath).then(res => {
@@ -177,10 +236,9 @@ export default function SpawnMapPage() {
 		});
 	}, [dbcPath]);
 
-	// ── Load background image + auto-fit ─────────────────────────────────────
 	useEffect(() => {
 		const folder = zone ? zone.internalName : continent.folder;
-		const base   = zone ? zone.internalName : continent.base;
+		const base = zone ? zone.internalName : continent.base;
 		setImgLoading(true);
 		setBgImage(null);
 		window.azeroth.worldmap.getZoneImage(folder, base, worldmapMpqPath).then(res => {
@@ -202,7 +260,6 @@ export default function SpawnMapPage() {
 		setSearchTerm('');
 	}, [continent, zone]);
 
-	// ── Load spawns ───────────────────────────────────────────────────────────
 	useEffect(() => {
 		if (!zone) { setCreatures([]); setGameobjects([]); setWaypoints([]); return; }
 		setSpawnLoading(true);
@@ -242,7 +299,6 @@ export default function SpawnMapPage() {
 		});
 	}, [zone]);
 
-	// ── Waypoints voor geselecteerde creature ─────────────────────────────────
 	useEffect(() => {
 		if (!selected || selected.type !== 'creature' || selected.spawn.MovementType !== 2) {
 			setWaypoints([]);
@@ -255,7 +311,6 @@ export default function SpawnMapPage() {
 		).then(res => setWaypoints(res?.data || []));
 	}, [selected]);
 
-	// ── Muis handlers ─────────────────────────────────────────────────────────
 	useEffect(() => {
 		const onMove = (e) => {
 			const p = panRef.current;
@@ -267,7 +322,7 @@ export default function SpawnMapPage() {
 					dragRef.current = null; dragPosRef.current = null; setDragPos(null); return;
 				}
 				const { startX, startY, origPx, origPy, guid, active } = dragRef.current;
-				const dist = Math.sqrt((e.clientX-startX)**2 + (e.clientY-startY)**2);
+				const dist = Math.sqrt((e.clientX - startX) ** 2 + (e.clientY - startY) ** 2);
 				if (!active && dist >= DRAG_THRESHOLD) dragRef.current.active = true;
 				if (active) {
 					const curPx = origPx + (e.clientX - startX) / scaleRef.current;
@@ -283,7 +338,7 @@ export default function SpawnMapPage() {
 			panRef.current.active = false;
 			if (dragRef.current && dragPosRef.current) {
 				const { guid, type } = dragRef.current;
-				const { px, py }     = dragPosRef.current;
+				const { px, py } = dragPosRef.current;
 				const area = zoneRef.current;
 				if (area) {
 					const { wx, wy } = zonePxToWorld(px, py, area);
@@ -304,7 +359,7 @@ export default function SpawnMapPage() {
 		};
 
 		window.addEventListener('mousemove', onMove);
-		window.addEventListener('mouseup',   onUp);
+		window.addEventListener('mouseup', onUp);
 		return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
 	}, [query]);
 
@@ -318,10 +373,10 @@ export default function SpawnMapPage() {
 		e.preventDefault();
 		const vp = viewRef.current?.getBoundingClientRect();
 		if (!vp) return;
-		const cx    = e.clientX - vp.left;
-		const cy    = e.clientY - vp.top;
+		const cx = e.clientX - vp.left;
+		const cy = e.clientY - vp.top;
 		const delta = e.deltaY > 0 ? 0.85 : 1.15;
-		const ns    = Math.min(10, Math.max(0.1, scaleRef.current * delta));
+		const ns = Math.min(10, Math.max(0.1, scaleRef.current * delta));
 		const ratio = ns / scaleRef.current;
 		setPan(p => ({ x: cx - (cx - p.x) * ratio, y: cy - (cy - p.y) * ratio }));
 		setScale(ns);
@@ -338,27 +393,129 @@ export default function SpawnMapPage() {
 		if (!zoneRef.current) return;
 		e.stopPropagation();
 		const { px, py } = worldToZonePx(spawn.wx, spawn.wy, zoneRef.current);
-		dragRef.current    = { guid: spawn.guid, type, startX: e.clientX, startY: e.clientY, origPx: px, origPy: py, active: false };
+		dragRef.current = { guid: spawn.guid, type, startX: e.clientX, startY: e.clientY, origPx: px, origPy: py, active: false };
 		dragPosRef.current = null;
 	}, []);
 
-	// ── Derived ───────────────────────────────────────────────────────────────
+	const onViewContextMenu = useCallback((e) => {
+		e.preventDefault();
+		if (!zone) return;
+		const vp = viewRef.current?.getBoundingClientRect();
+		if (!vp) return;
+		const px = (e.clientX - vp.left - pan.x) / scale;
+		const py = (e.clientY - vp.top - pan.y) / scale;
+		const { wx, wy } = zonePxToWorld(px, py, zone);
+		setContextMenu({ x: e.clientX, y: e.clientY, wx, wy, spawn: null, spawnType: null });
+	}, [zone, pan, scale]);
+
+	const onMarkerContextMenu = useCallback((e, spawn, spawnType) => {
+		e.preventDefault();
+		e.stopPropagation();
+		setContextMenu({ x: e.clientX, y: e.clientY, wx: spawn.wx, wy: spawn.wy, wz: spawn.wz, spawn, spawnType });
+	}, []);
+
+	const ctxCopyCoords = useCallback(() => {
+		const { wx, wy, wz } = contextMenu;
+		navigator.clipboard.writeText(`${wx.toFixed(4)} ${wy.toFixed(4)} ${(wz ?? 0).toFixed(4)}`);
+		setContextMenu(null);
+	}, [contextMenu]);
+
+	const ctxTeleport = useCallback(async () => {
+		const { wx, wy, wz } = contextMenu;
+		await soapCommand(`.go xyz ${wx.toFixed(4)} ${wy.toFixed(4)} ${(wz ?? 0).toFixed(4)} ${zone.mapId}`);
+		setContextMenu(null);
+	}, [contextMenu, zone, soapCommand]);
+
+	const ctxDelete = useCallback(async () => {
+		const { spawn, spawnType } = contextMenu;
+		if (!spawn) return;
+		if (spawnType === 'creature') {
+			await query('DELETE FROM creature WHERE guid=?', [spawn.guid]);
+			setCreatures(prev => prev.filter(c => c.guid !== spawn.guid));
+		} else {
+			await query('DELETE FROM gameobject WHERE guid=?', [spawn.guid]);
+			setGameobjects(prev => prev.filter(g => g.guid !== spawn.guid));
+		}
+		if (selected?.spawn?.guid === spawn.guid) setSelected(null);
+		setContextMenu(null);
+	}, [contextMenu, query, selected]);
+
+	const ctxOpenAdd = useCallback(() => {
+		setAddModal({ wx: contextMenu.wx, wy: contextMenu.wy });
+		setAddEntry('');
+		setAddType('creature');
+		setContextMenu(null);
+	}, [contextMenu]);
+
+	const ctxConfirmAdd = useCallback(async () => {
+		const entry = parseInt(addEntry);
+		if (!entry || !addModal || !zone) return;
+		const table = addType === 'creature' ? 'creature' : 'gameobject';
+		const res = await window.azeroth.db.findNextId({ table, idColumn: 'guid', startId: 1 });
+		if (!res.success) return;
+		const guid = res.nextId;
+		const { wx, wy } = addModal;
+		if (addType === 'creature') {
+			await query(
+				'INSERT INTO creature (guid, id1, map, position_x, position_y, position_z, orientation, spawnMask, phaseMask) VALUES (?,?,?,?,?,?,?,?,?)',
+				[guid, entry, zone.mapId, wx, wy, 0, 0, 1, 1]
+			);
+			const tpl = await query(
+				'SELECT name, minlevel, maxlevel, faction, rank, type, DamageModifier, AIName, ScriptName, MovementType FROM creature_template WHERE entry=?',
+				[entry]
+			);
+			const tmpl = tpl?.data?.[0] || {};
+			setCreatures(prev => [...prev, { guid, entry, wx, wy, wz: 0, orientation: 0, ...tmpl }]);
+		} else {
+			await query(
+				'INSERT INTO gameobject (guid, id, map, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, spawnMask, phaseMask) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+				[guid, entry, zone.mapId, wx, wy, 0, 0, 0, 0, 0, 1, 300, 0, 1, 1, 1]
+			);
+			const tpl = await query('SELECT name FROM gameobject_template WHERE entry=?', [entry]);
+			const name = tpl?.data?.[0]?.name || 'GO ' + entry;
+			setGameobjects(prev => [...prev, { guid, entry, wx, wy, wz: 0, orientation: 0, name }]);
+		}
+		setAddModal(null);
+	}, [addModal, addType, addEntry, zone, query]);
+
 	const zonesForContinent = worldAreas
 		.filter(a => a.mapId === continent.mapId && a.areaId > 0 && a.internalName && a.locLeft !== a.locRight)
 		.sort((a, b) => a.internalName.localeCompare(b.internalName));
 
+	const continentArea = useMemo(() => {
+		const entry = worldAreas.find(a => a.mapId === continent.mapId && a.areaId === 0);
+		if (entry && entry.locLeft !== entry.locRight && entry.locTop !== entry.locBottom) return entry;
+		const zones = worldAreas.filter(a => a.mapId === continent.mapId && a.areaId > 0 && a.locLeft !== a.locRight);
+		if (!zones.length) return null;
+		return {
+			locLeft: Math.max(...zones.map(z => z.locLeft)),
+			locRight: Math.min(...zones.map(z => z.locRight)),
+			locTop: Math.max(...zones.map(z => z.locTop)),
+			locBottom: Math.min(...zones.map(z => z.locBottom)),
+		};
+	}, [worldAreas, continent]);
+
+	const ZONE_DOT_R = 7;
+
+	function zoneCenter(z, cont) {
+		const raw_cx = (cont.locLeft - (z.locLeft + z.locRight) / 2) / (cont.locLeft - cont.locRight) * IMG_W;
+		const raw_cy = (cont.locTop  - (z.locTop  + z.locBottom) / 2) / (cont.locTop  - cont.locBottom) * IMG_H;
+		const cal = getCal(continent.mapId);
+		return { cx: raw_cx * cal.sx + cal.x, cy: raw_cy * cal.sy + cal.y };
+	}
+
 	const searchResults = useMemo(() => {
 		if (!searchTerm.trim() || !zone) return [];
 		const results = [];
-		creatures.forEach(c  => { if (matchesSearch(c, searchTerm)) results.push({ type: 'creature', spawn: c }); });
-		gameobjects.forEach(g => { if (matchesSearch(g, searchTerm)) results.push({ type: 'go',      spawn: g }); });
+		creatures.forEach(c => { if (matchesSearch(c, searchTerm)) results.push({ type: 'creature', spawn: c }); });
+		gameobjects.forEach(g => { if (matchesSearch(g, searchTerm)) results.push({ type: 'go', spawn: g }); });
 		return results.slice(0, 50);
 	}, [searchTerm, creatures, gameobjects, zone]);
 
 	const onSelectResult = useCallback((type, spawn) => {
 		setSelected({ type, spawn });
 		const pos = worldToZonePx(spawn.wx, spawn.wy, zoneRef.current);
-		const vp  = viewRef.current?.getBoundingClientRect();
+		const vp = viewRef.current?.getBoundingClientRect();
 		if (vp) {
 			const ns = Math.max(scaleRef.current, 2);
 			setPan({ x: vp.width / 2 - pos.px * ns, y: vp.height / 2 - pos.py * ns });
@@ -376,7 +533,6 @@ export default function SpawnMapPage() {
 		setScale(ns);
 	}, []);
 
-	// ── Render helpers ────────────────────────────────────────────────────────
 	function spawnPx(spawn) {
 		if (!zone) return { px: -9999, py: -9999 };
 		if (dragPos?.guid === spawn.guid) return { px: dragPos.px, py: dragPos.py };
@@ -386,20 +542,18 @@ export default function SpawnMapPage() {
 	const isSel = (spawn) => selected?.spawn?.guid === spawn.guid;
 	const hasSearch = searchTerm.trim().length > 0;
 
-	// ── Cluster data ──────────────────────────────────────────────────────────
 	const clusterData = useMemo(() => {
 		const filtered = showCreatures
 			? creatures.filter(cr => creatureFilter.has(creatureClass(cr)))
 			: [];
-		const c = clusterSpawns(filtered,    true,    zone, scale, hasSearch);
+		const c = clusterSpawns(filtered, true, zone, scale, hasSearch);
 		const g = clusterSpawns(gameobjects, showGOs, zone, scale, hasSearch);
 		return {
 			creatureClusters: c.clusters, creatureSingles: c.singles,
-			goClusters:       g.clusters, goSingles:       g.singles,
+			goClusters: g.clusters, goSingles: g.singles,
 		};
 	}, [creatures, gameobjects, zone, scale, showCreatures, showGOs, creatureFilter, hasSearch]);
 
-	// ─────────────────────────────────────────────────────────────────────────
 	return (
 		<div className="spawn-map-page">
 
@@ -417,7 +571,6 @@ export default function SpawnMapPage() {
 				</select>
 
 				{zone && <>
-					{/* Search */}
 					<div className="spawn-search-wrap" ref={searchRef}>
 						<input
 							type="text"
@@ -443,7 +596,6 @@ export default function SpawnMapPage() {
 						)}
 					</div>
 
-					{/* Creatures toggle + type filter */}
 					<button className={`spawn-toggle ${showCreatures ? 'active' : ''}`}
 						onClick={() => setShowCreatures(v => !v)}>
 						<span className="spawn-dot creature" /> Creatures
@@ -455,7 +607,7 @@ export default function SpawnMapPage() {
 								className={`spawn-toggle type-filter-btn ${filterOpen ? 'active' : ''}`}
 								onClick={() => setFilterOpen(v => !v)}
 								title="Filter op type">
-								{['hostile','horde','alliance','neutral','critter'].map(t => (
+								{['hostile', 'horde', 'alliance', 'neutral', 'critter'].map(t => (
 									<span key={t} className={`filter-pip ${t} ${creatureFilter.has(t) ? '' : 'off'}`} />
 								))}
 								<span style={{ marginLeft: 2 }}>▾</span>
@@ -463,11 +615,11 @@ export default function SpawnMapPage() {
 							{filterOpen && (
 								<div className="type-filter-panel">
 									{[
-										{ key: 'hostile',  label: 'Hostile',  color: '#f97316' },
-										{ key: 'horde',    label: 'Horde',    color: '#ef4444' },
+										{ key: 'hostile', label: 'Hostile', color: '#f97316' },
+										{ key: 'horde', label: 'Horde', color: '#ef4444' },
 										{ key: 'alliance', label: 'Alliance', color: '#60a5fa' },
-										{ key: 'neutral',  label: 'Neutraal', color: '#eab308' },
-										{ key: 'critter',  label: 'Critter',  color: '#94a3b8' },
+										{ key: 'neutral', label: 'Neutraal', color: '#eab308' },
+										{ key: 'critter', label: 'Critter', color: '#94a3b8' },
 									].map(({ key, label, color }) => (
 										<label key={key} className="type-filter-item"
 											onClick={() => toggleCreatureType(key)}>
@@ -487,6 +639,40 @@ export default function SpawnMapPage() {
 					</button>
 				</>}
 
+				{!zone && (
+					<div className="cal-wrap" ref={calRef}>
+						<button className={`spawn-toggle cal-btn ${calOpen ? 'active' : ''}`}
+							onClick={() => setCalOpen(v => !v)}
+							title="Kalibratie zone-markers">
+							⚙ Kalibratie
+						</button>
+						{calOpen && (() => {
+							const cal = getCal(continent.mapId);
+							return (
+								<div className="cal-panel">
+									<div className="cal-title">{continent.name}</div>
+									{[
+										{ key: 'x',  label: 'Offset X',  step: 1,    min: -500, max: 500 },
+										{ key: 'y',  label: 'Offset Y',  step: 1,    min: -500, max: 500 },
+										{ key: 'sx', label: 'Scale X',   step: 0.01, min: 0.5,  max: 2 },
+										{ key: 'sy', label: 'Scale Y',   step: 0.01, min: 0.5,  max: 2 },
+									].map(({ key, label, step, min, max }) => (
+										<div key={key} className="cal-row">
+											<span className="cal-key">{label}</span>
+											<input type="number" className="cal-input"
+												value={cal[key]} step={step} min={min} max={max}
+												onChange={e => updateCal(continent.mapId, key, +e.target.value)} />
+										</div>
+									))}
+									<button className="cal-reset" onClick={() => resetCal(continent.mapId)}>
+										Reset
+									</button>
+								</div>
+							);
+						})()}
+					</div>
+				)}
+
 				{(imgLoading || spawnLoading) && (
 					<span className="spawn-loading">
 						<Loader size={12} className="spin" />
@@ -494,14 +680,14 @@ export default function SpawnMapPage() {
 					</span>
 				)}
 				{!zone && !imgLoading && (
-					<span className="spawn-hint">Selecteer een zone om spawns te bekijken</span>
+					<span className="spawn-hint">Klik op een zone om in te zoomen</span>
 				)}
 				{areasError && <span className="spawn-hint" style={{ color: 'var(--danger)' }}>DBC: {areasError}</span>}
 			</div>
 
 			{/* ── Body ─────────────────────────────────────────────────────── */}
 			<div className="spawn-map-body">
-				<div className="map-viewport" ref={viewRef} onMouseDown={onViewMouseDown}>
+				<div className="map-viewport" ref={viewRef} onMouseDown={onViewMouseDown} onContextMenu={onViewContextMenu}>
 					<div className="map-world" style={{
 						transform: `translate(${pan.x}px,${pan.y}px) scale(${scale})`,
 						transformOrigin: '0 0',
@@ -514,6 +700,30 @@ export default function SpawnMapPage() {
 						)}
 						{!bgImage && !imgLoading && (
 							<div className="map-no-image">Geen afbeelding gevonden</div>
+						)}
+
+						{!zone && continentArea && (
+							<svg className="map-svg" width={IMG_W} height={IMG_H}
+								onMouseMove={e => setTooltipPos({ x: e.clientX, y: e.clientY })}
+								onMouseLeave={() => setHoveredZone(null)}>
+								{zonesForContinent.map(area => {
+									const { cx, cy } = zoneCenter(area, continentArea);
+									const hovered = hoveredZone?.id === area.id;
+									const r = (hovered ? ZONE_DOT_R * 1.4 : ZONE_DOT_R) / scale;
+									return (
+										<g key={area.id}
+											className="zone-marker"
+											onMouseEnter={() => setHoveredZone(area)}
+											onMouseLeave={() => setHoveredZone(null)}
+											onMouseDown={e => e.stopPropagation()}
+											onClick={() => setZone(area)}>
+											<circle cx={cx} cy={cy} r={r}
+												className={`zone-dot${hovered ? ' hovered' : ''}`}
+												vectorEffect="non-scaling-stroke" />
+										</g>
+									);
+								})}
+							</svg>
 						)}
 
 						{zone && (
@@ -540,6 +750,7 @@ export default function SpawnMapPage() {
 											className={`spawn-go spawn-marker${isSel(go) ? ' sel' : ''}${muted ? ' muted' : ''}`}
 											onClick={() => setSelected({ type: 'go', spawn: go })}
 											onMouseDown={e => startDrag(e, go, 'go')}
+											onContextMenu={e => onMarkerContextMenu(e, go, 'go')}
 										/>
 									);
 								})}
@@ -558,7 +769,7 @@ export default function SpawnMapPage() {
 								{clusterData.creatureSingles.map(({ spawn: c }) => {
 									const pos = spawnPx(c);
 									if (!inBounds(pos)) return null;
-									const cc    = creatureClass(c);
+									const cc = creatureClass(c);
 									const muted = hasSearch && !matchesSearch(c, searchTerm);
 									return (
 										<circle key={`c-${c.guid}`}
@@ -566,6 +777,7 @@ export default function SpawnMapPage() {
 											className={`spawn-creature spawn-marker ${cc}${isSel(c) ? ' sel' : ''}${muted ? ' muted' : ''}`}
 											onClick={() => setSelected({ type: 'creature', spawn: c })}
 											onMouseDown={e => startDrag(e, c, 'creature')}
+											onContextMenu={e => onMarkerContextMenu(e, c, 'creature')}
 										/>
 									);
 								})}
@@ -573,8 +785,8 @@ export default function SpawnMapPage() {
 								{/* Waypoints */}
 								{waypoints.length > 1 && waypoints.map((wp, i) => {
 									const next = waypoints[(i + 1) % waypoints.length];
-									const a    = worldToZonePx(wp.wx,   wp.wy,   zone);
-									const b    = worldToZonePx(next.wx, next.wy, zone);
+									const a = worldToZonePx(wp.wx, wp.wy, zone);
+									const b = worldToZonePx(next.wx, next.wy, zone);
 									return <line key={`wpl-${i}`} x1={a.px} y1={a.py} x2={b.px} y2={b.py} className="wp-line" />;
 								})}
 								{waypoints.map((wp, i) => {
@@ -590,6 +802,59 @@ export default function SpawnMapPage() {
 						)}
 					</div>
 				</div>
+
+				{/* ── Zone tooltip ───────────────────────────────────────── */}
+				{hoveredZone && (
+					<div className="zone-tooltip" style={{ left: tooltipPos.x + 14, top: tooltipPos.y - 10 }}>
+						{hoveredZone.internalName}
+					</div>
+				)}
+
+				{/* ── Context-menu ───────────────────────────────────────── */}
+				{contextMenu && (
+					<div className="ctx-menu" ref={contextMenuRef}
+						style={{ left: contextMenu.x, top: contextMenu.y }}>
+						{contextMenu.spawn ? <>
+							<div className="ctx-item" onClick={ctxCopyCoords}>Coördinaten kopiëren</div>
+							<div className="ctx-item" onClick={ctxTeleport}>Teleporteer (.go xyz)</div>
+							<div className="ctx-divider" />
+							<div className="ctx-item ctx-danger" onClick={ctxDelete}>Spawn verwijderen</div>
+						</> : <>
+							<div className="ctx-item" onClick={ctxOpenAdd}>Spawn toevoegen…</div>
+						</>}
+					</div>
+				)}
+
+				{/* ── Spawn toevoegen modal ───────────────────────────────── */}
+				{addModal && (
+					<div className="modal-overlay" onMouseDown={() => setAddModal(null)}>
+						<div className="modal-box" onMouseDown={e => e.stopPropagation()}>
+							<div className="modal-title">Spawn toevoegen</div>
+							<div className="modal-field">
+								<label className="modal-label">Type</label>
+								<select className="modal-select" value={addType} onChange={e => setAddType(e.target.value)}>
+									<option value="creature">Creature</option>
+									<option value="go">Gameobject</option>
+								</select>
+							</div>
+							<div className="modal-field">
+								<label className="modal-label">Entry ID</label>
+								<input type="number" className="modal-input" value={addEntry}
+									onChange={e => setAddEntry(e.target.value)}
+									onKeyDown={e => { if (e.key === 'Enter') ctxConfirmAdd(); if (e.key === 'Escape') setAddModal(null); }}
+									placeholder="bijv. 6"
+									autoFocus />
+							</div>
+							<div className="modal-coords">
+								{addModal.wx?.toFixed(2)}, {addModal.wy?.toFixed(2)}, 0
+							</div>
+							<div className="modal-actions">
+								<button className="modal-btn-cancel" onClick={() => setAddModal(null)}>Annuleren</button>
+								<button className="modal-btn-ok" onClick={ctxConfirmAdd} disabled={!addEntry}>Toevoegen</button>
+							</div>
+						</div>
+					</div>
+				)}
 
 				{/* ── Inspector ──────────────────────────────────────────── */}
 				{selected && (
