@@ -10,6 +10,7 @@ import SpellEditorPage from './pages/SpellEditorPage';
 import TalentEditorPage from './pages/TalentEditorPage';
 import SpawnMapPage from './pages/SpawnMapPage';
 import SettingsPage from './pages/SettingsPage';
+import Editor3DPage from './pages/Editor3DPage';
 
 export default function App() {
   return (
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="spells" element={<SpellEditorPage />} />
             <Route path="talents" element={<TalentEditorPage />} />
             <Route path="map" element={<SpawnMapPage />} />
+            <Route path="editor3d" element={<Editor3DPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

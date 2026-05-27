@@ -10,6 +10,7 @@ const MPQ_STUB = {
   findMpqFiles: () => [],
   listWorldmapZones: async () => [],
   readTileBuffer: async () => null,
+  readAdtBuffer: async () => null,
   validateDataPath: async () => ({ success: false, error: 'MPQ reader niet beschikbaar' }),
 };
 function getMpqReader() {
@@ -1070,6 +1071,103 @@ function resolveWorldmapDir(configuredPath) {
   return fallbacks.find(p => fs.existsSync(p)) || null;
 }
 
+// ─── Spawn loader ─────────────────────────────────────────────────────────────
+ipcMain.handle('spawns:load', async (_, { mapId, limit = 1000 }) => {
+  if (!dbConnection) return { success: false, error: 'Niet verbonden' };
+  try {
+    const m = parseInt(mapId, 10);
+    const lc = parseInt(limit, 10);
+    const lg = Math.floor(lc / 2);
+    const [creatures] = await dbConnection.query(
+      `SELECT CONCAT('c_', c.guid) AS guid, c.id1 AS entry, ct.name,
+              c.position_x AS x, c.position_y AS y, c.position_z AS z,
+              'creature' AS type, ct.faction AS faction
+       FROM creature c
+       JOIN creature_template ct ON c.id1 = ct.entry
+       WHERE c.map = ${m} LIMIT ${lc}`
+    );
+    const [gameobjects] = await dbConnection.query(
+      `SELECT CONCAT('g_', g.guid) AS guid, g.id AS entry, gt.name,
+              g.position_x AS x, g.position_y AS y, g.position_z AS z,
+              'gameobject' AS type, NULL AS faction
+       FROM gameobject g
+       JOIN gameobject_template gt ON g.id = gt.entry
+       WHERE g.map = ${m} LIMIT ${lg}`
+    );
+    return { success: true, data: [...creatures, ...gameobjects] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+// ─── ADT terrain parser ───────────────────────────────────────────────────────
+const UNIT_SIZE = 33.33333 / 8; // = 4.16666 yards per outer vertex step
+
+function parseAdt(buf) {
+  let offset = 0;
+  let mcinData = -1;
+
+  // Zoek MCIN chunk (magic reversed = 'NICM')
+  while (offset + 8 <= buf.length) {
+    const magic = buf.slice(offset, offset + 4).toString('ascii');
+    const size  = buf.readUInt32LE(offset + 4);
+    if (magic === 'NICM') { mcinData = offset + 8; break; }
+    if (size === 0) break;
+    offset += 8 + size;
+  }
+  if (mcinData === -1) return null;
+
+  const chunks = [];
+  for (let i = 0; i < 256; i++) {
+    const mcnkOff = buf.readUInt32LE(mcinData + i * 16);
+    if (!mcnkOff || mcnkOff + 8 > buf.length) { chunks.push(null); continue; }
+
+    const magic = buf.slice(mcnkOff, mcnkOff + 4).toString('ascii');
+    if (magic !== 'KNCM') { chunks.push(null); continue; }
+
+    const ds       = mcnkOff + 8; // MCNK data start
+    const ix       = buf.readUInt32LE(ds + 4);
+    const iy       = buf.readUInt32LE(ds + 8);
+    const offsMCVT = buf.readUInt32LE(ds + 20);
+    const posX     = buf.readFloatLE(ds + 104);
+    const posY     = buf.readFloatLE(ds + 108);
+    const posZ     = buf.readFloatLE(ds + 112);
+
+    if (!offsMCVT || ds + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
+
+    const hStart = ds + offsMCVT + 8; // sla MCVT magic+size over
+    const heights = [];
+    for (let vRow = 0; vRow < 9; vRow++) {
+      for (let vCol = 0; vCol < 9; vCol++) {
+        heights.push(buf.readFloatLE(hStart + (vRow * 17 + vCol) * 4));
+      }
+    }
+    chunks.push({ ix, iy, posX, posY, posZ, heights });
+  }
+  return chunks;
+}
+ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
+  try {
+    const cfgPath = getConfigPath();
+    if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const dataPath = cfg.worldmapMpqPath;
+    if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
+
+    const result = [];
+    for (const { tileX, tileY } of tiles) {
+      const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileX, tileY);
+      if (!buf) continue;
+      const chunks = parseAdt(buf);
+      if (chunks) result.push({ tileX, tileY, chunks });
+    }
+    return { success: true, data: result };
+  } catch (e) {
+    console.error('adt:getTerrain error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath) => {
   try {
     const COLS = 4, ROWS = 3;
@@ -1105,10 +1203,10 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
           for (let x = 0; x < w; x++) {
             const src = (y * w + x) * 4;
             const dst = ((oy + y) * fullW + (ox + x)) * 4;
-            composite[dst]   = rgba[src];
-            composite[dst+1] = rgba[src+1];
-            composite[dst+2] = rgba[src+2];
-            composite[dst+3] = rgba[src+3];
+            composite[dst]     = rgba[src];
+            composite[dst + 1] = rgba[src + 1];
+            composite[dst + 2] = rgba[src + 2];
+            composite[dst + 3] = rgba[src + 3];
           }
         }
       }
@@ -1122,7 +1220,6 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
   }
 });
 
-// Lees WorldMapArea.dbc (11 velden × 4 bytes, veld 3 = string ref)
 ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
   try {
     const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapArea.dbc'));
