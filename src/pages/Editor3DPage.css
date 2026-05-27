@@ -1,0 +1,312 @@
+/* ═══════════════════════════════════════════════
+   3D Editor — Unity-style layout
+   ═══════════════════════════════════════════════ */
+
+.ed3-root {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #12121c;
+  color: #c8c8d8;
+  font-size: 12px;
+  overflow: hidden;
+}
+
+/* ── Toolbar ────────────────────────────────── */
+.ed3-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  background: #1c1c2e;
+  border-bottom: 1px solid #2a2a3e;
+  flex-shrink: 0;
+}
+
+.ed3-tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid #333348;
+  border-radius: 4px;
+  background: #22223a;
+  color: #9090b0;
+  cursor: pointer;
+  font-size: 12px;
+  transition: background 0.12s, color 0.12s;
+}
+
+.ed3-tool-btn:hover {
+  background: #2c2c48;
+  color: #c0c0e0;
+}
+
+.ed3-tool-btn.active {
+  background: #3a3a6a;
+  border-color: #6666cc;
+  color: #aaaaff;
+}
+
+/* ── Workspace (hierarchy | viewport | inspector) ── */
+.ed3-workspace {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+}
+
+/* ── Shared panel styles ────────────────────── */
+.ed3-panel-header {
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #6666aa;
+  border-bottom: 1px solid #2a2a3e;
+  background: #161626;
+}
+
+/* ── Hierarchy (left) ───────────────────────── */
+.ed3-hierarchy {
+  width: 190px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid #2a2a3e;
+  background: #14142a;
+  overflow: hidden;
+}
+
+.ed3-hierarchy-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.ed3-hierarchy-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  cursor: pointer;
+  color: #8888aa;
+  transition: background 0.1s, color 0.1s;
+}
+
+.ed3-hierarchy-item:hover {
+  background: #20203a;
+  color: #c0c0e0;
+}
+
+.ed3-hierarchy-item.active {
+  background: #2a2a50;
+  color: #aaaaff;
+}
+
+.ed3-hi-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ed3-hi-guid {
+  font-size: 10px;
+  color: #444466;
+}
+
+.ed3-hierarchy-empty {
+  padding: 12px 10px;
+  color: #444466;
+  font-style: italic;
+}
+
+/* ── Viewport (center) ──────────────────────── */
+.ed3-viewport {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.ed3-viewport canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+}
+
+/* ── Inspector (right) ──────────────────────── */
+.ed3-inspector {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid #2a2a3e;
+  background: #14142a;
+  overflow-y: auto;
+}
+
+.ed3-inspector-empty {
+  padding: 12px 10px;
+  color: #444466;
+  font-style: italic;
+}
+
+.ed3-inspector-section {
+  padding: 8px 10px;
+  border-bottom: 1px solid #1e1e36;
+}
+
+.ed3-inspector-title {
+  font-weight: 600;
+  color: #aaaaff;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ed3-inspector-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #555577;
+  margin-bottom: 5px;
+}
+
+.ed3-inspector-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 2px 0;
+  color: #8888aa;
+}
+
+.ed3-inspector-row span:last-child {
+  font-family: monospace;
+  font-size: 11px;
+  color: #aaaacc;
+}
+
+/* ── Error boundary ─────────────────────────── */
+.editor3d-error {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 12px;
+  color: #ff6666;
+  background: #1a0a0a;
+  padding: 20px;
+  text-align: center;
+}
+
+.editor3d-error h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.editor3d-error pre {
+  font-size: 11px;
+  color: #cc4444;
+  background: #2a1010;
+  padding: 10px;
+  border-radius: 4px;
+  max-width: 500px;
+  overflow: auto;
+}
+
+.editor3d-error button {
+  padding: 6px 16px;
+  background: #3a1515;
+  border: 1px solid #884444;
+  color: #ff8888;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+/* ── Toolbar extras ─────────────────────────── */
+.ed3-toolbar-sep {
+  width: 1px;
+  height: 20px;
+  background: #333348;
+  margin: 0 6px;
+  flex-shrink: 0;
+}
+
+.ed3-map-select {
+  background: #22223a;
+  color: #9090b0;
+  border: 1px solid #333348;
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+
+.ed3-map-select:hover:not(:disabled) { background: #2c2c48; color: #c0c0e0; }
+.ed3-map-select:disabled              { opacity: 0.5; cursor: not-allowed; }
+
+.ed3-spawn-count {
+  font-size: 11px;
+  color: #555577;
+  margin-left: 4px;
+  flex-shrink: 0;
+}
+
+.ed3-loading-spin {
+  color: #6666cc;
+  flex-shrink: 0;
+  animation: ed3spin 1s linear infinite;
+}
+
+@keyframes ed3spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Error bar ──────────────────────────────── */
+.ed3-error-bar {
+  padding: 5px 12px;
+  background: #2a0a0a;
+  border-bottom: 1px solid #662222;
+  color: #ff7777;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+/* ── Vec3 rij in inspector ──────────────────── */
+.ed3-inspector-vec3 {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 2px 0;
+}
+
+.ed3-inspector-vec3-label {
+  font-size: 10px;
+  color: #555577;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.ed3-inspector-vec3-vals {
+  display: grid;
+  grid-template-columns: 12px 1fr 12px 1fr 12px 1fr;
+  gap: 3px;
+  align-items: center;
+  font-family: monospace;
+  font-size: 11px;
+  color: #aaaacc;
+}
+
+.ed3-axis {
+  font-weight: 700;
+  font-size: 10px;
+  text-align: center;
+}
+.ed3-axis.x { color: #e74c3c; }
+.ed3-axis.y { color: #2ecc71; }
+.ed3-axis.z { color: #3498db; }

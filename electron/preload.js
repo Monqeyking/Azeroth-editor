@@ -52,5 +52,13 @@ contextBridge.exposeInMainWorld('azeroth', {
   config: {
     load: () => ipcRenderer.invoke('config:load'),
     save: (config) => ipcRenderer.invoke('config:save', config),
-  }
+  },
+  // Spawn loader (3D editor)
+  spawns: {
+    load: (opts) => ipcRenderer.invoke('spawns:load', opts),
+  },
+  // ADT terrain (3D editor)
+  adt: {
+    getTerrain: (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
+  },
 });
