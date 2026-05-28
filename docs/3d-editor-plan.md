@@ -85,13 +85,15 @@ three
 - ✅ Camera centreert automatisch op zwaartepunt van geladen spawns
 - ✅ MPQ prioriteit: hogere patch-nummers/letters winnen (patch-3 > patch-2 > patch-a > patch), locale patches (enUS) hoogste prioriteit
 
-### 2c — Database writes ⬜
-- ⬜ Move gizmo update → `UPDATE creature SET position_x = ?, position_y = ?, position_z = ? WHERE guid = ?`
-- ⬜ Rotatie update → zelfde principe
-- ⬜ Confirmatie voor writes (undo mogelijkheid)
+### 2c — Database writes ✅
+- ✅ Move gizmo update → `UPDATE creature SET position_x = ?, position_y = ?, position_z = ? WHERE guid = ?`
+- ✅ Rotatie update → zelfde principe (orientation via Three.js Y-as euler)
+- ✅ Confirmatie voor writes: floating save-balk + undo (remount via resetKey)
 
-### 2d — SOAP integratie ⬜
-- ⬜ `.go xyz` commando voor teleport naar geselecteerde spawn
+### 2d — SOAP integratie ✅
+- ✅ Teleport naar geselecteerde spawn via `.go xyz` poging + SOAP fallback
+- ✅ Fallback: tijdelijke `game_tele` entry aanmaken, `.reload game_tele`, daarna `.tele name <GM character> <temp locatie>`
+- ✅ Settings bewaren SOAP GM account + GM Character Name; config-save merge voorkomt verlies van SOAP settings
 - ⬜ `.npc add` / `.gobject add` voor nieuwe spawns plaatsen
 
 ---
@@ -176,4 +178,4 @@ De meest logische vervolgstap is **2c (database writes)** — zodat verplaatste 
 ---
 
 *Opgesteld: 26 mei 2026*
-*Bijgewerkt: 27 mei 2026 — Fase 1 volledig ✅, Fase 2a + 2b volledig ✅*
+*Bijgewerkt: 27 mei 2026 — Fase 1 volledig ✅, Fase 2a + 2b + 2c volledig ✅*

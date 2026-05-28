@@ -56,6 +56,8 @@ contextBridge.exposeInMainWorld('azeroth', {
   // Spawn loader (3D editor)
   spawns: {
     load: (opts) => ipcRenderer.invoke('spawns:load', opts),
+    update: (opts) => ipcRenderer.invoke('spawns:update', opts),
+    search: (opts) => ipcRenderer.invoke('spawns:search', opts),
   },
   // ADT terrain (3D editor)
   adt: {
