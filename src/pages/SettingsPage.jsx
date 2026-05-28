@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Save, Zap, Hash } from 'lucide-react';
 import './DashboardPage.css';
@@ -32,21 +32,42 @@ export default function SettingsPage() {
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
 
-  const persistConfig = (patch) => {
-    const current = { soap: soapConfig, dbcPath, minimapPath, worldmapMpqPath, idRanges, ...patch };
-    window.azeroth.config.save(current);
+  useEffect(() => {
+    setForm(soapConfig);
+  }, [soapConfig]);
+
+  useEffect(() => {
+    setDbcForm(dbcPath);
+  }, [dbcPath]);
+
+  useEffect(() => {
+    setMinimapForm(minimapPath);
+  }, [minimapPath]);
+
+  useEffect(() => {
+    setWorldmapForm(worldmapMpqPath);
+  }, [worldmapMpqPath]);
+
+  useEffect(() => {
+    setIdRangesForm(idRanges);
+  }, [idRanges]);
+
+  const persistConfig = async (patch) => {
+    const result = await window.azeroth.config.load();
+    const current = (result.success && result.data) ? result.data : {};
+    await window.azeroth.config.save({ ...current, ...patch });
   };
 
-  const handleMinimapSave = () => {
+  const handleMinimapSave = async () => {
     setMinimapPath(minimapForm);
-    persistConfig({ minimapPath: minimapForm });
+    await persistConfig({ minimapPath: minimapForm });
     setMinimapSaved(true);
     setTimeout(() => setMinimapSaved(false), 2000);
   };
 
-  const handleWorldmapSave = () => {
+  const handleWorldmapSave = async () => {
     setWorldmapMpqPath(worldmapForm);
-    persistConfig({ worldmapMpqPath: worldmapForm });
+    await persistConfig({ worldmapMpqPath: worldmapForm });
     setWorldmapSaved(true);
     setTimeout(() => setWorldmapSaved(false), 2000);
   };
@@ -63,27 +84,27 @@ export default function SettingsPage() {
     setWorldmapValidating(false);
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     setSoapConfig(form);
-    persistConfig({ soap: form });
+    await persistConfig({ soap: form });
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
 
-  const handleDbcSave = () => {
+  const handleDbcSave = async () => {
     setDbcPath(dbcForm);
-    persistConfig({ dbcPath: dbcForm });
+    await persistConfig({ dbcPath: dbcForm });
     setDbcSaved(true);
     setTimeout(() => setDbcSaved(false), 2000);
   };
 
-  const handleIdRangesSave = () => {
+  const handleIdRangesSave = async () => {
     const parsed = {};
     for (const { key } of ID_RANGE_EDITORS) {
       parsed[key] = parseInt(idRangesForm[key]) || 4000000;
     }
     setIdRanges(parsed);
-    persistConfig({ idRanges: parsed });
+    await persistConfig({ idRanges: parsed });
     setIdRangesSaved(true);
     setTimeout(() => setIdRangesSaved(false), 2000);
   };
@@ -145,6 +166,11 @@ export default function SettingsPage() {
                 <label>Password</label>
                 <input name="password" type="password" value={form.password} onChange={handleChange} placeholder="••••••••" />
               </div>
+            </div>
+
+            <div className="field-group" style={{ marginBottom: 16 }}>
+              <label>GM Character Name (for SOAP teleport)</label>
+              <input name="characterName" value={form.characterName ?? ''} onChange={handleChange} placeholder="Redleaf" />
             </div>
 
             {testResult && (

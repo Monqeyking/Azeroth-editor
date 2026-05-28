@@ -116,11 +116,99 @@
   color: #444466;
 }
 
+.ed3-hierarchy-search {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  background: #16162a;
+  border-bottom: 1px solid #1e1e36;
+  flex-shrink: 0;
+}
+
+.ed3-hierarchy-search-icon {
+  color: #444466;
+  flex-shrink: 0;
+}
+
+.ed3-hierarchy-search-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #c0c0d8;
+  font-size: 11px;
+  min-width: 0;
+}
+
+.ed3-hierarchy-search-input::placeholder { color: #333355; }
+
+.ed3-hierarchy-search-clear {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: #444466;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+.ed3-hierarchy-search-clear:hover { color: #8888aa; }
+
 .ed3-hierarchy-empty {
   padding: 12px 10px;
   color: #444466;
   font-style: italic;
 }
+
+.ed3-hierarchy-db-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 7px 10px;
+  background: #14142a;
+  border: none;
+  border-top: 1px dashed #2a2a44;
+  color: #6666cc;
+  font-size: 11px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s, color 0.12s;
+}
+.ed3-hierarchy-db-btn:hover { background: #1c1c38; color: #9999ee; }
+
+.ed3-hierarchy-db-loading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  color: #555577;
+  font-size: 11px;
+}
+
+.ed3-hierarchy-db-error {
+  padding: 7px 10px;
+  color: #cc5555;
+  font-size: 11px;
+}
+
+.ed3-hierarchy-db-header {
+  padding: 4px 10px 3px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: #444466;
+  background: #12121e;
+  border-top: 1px solid #1e1e36;
+  flex-shrink: 0;
+}
+
+.ed3-hierarchy-item-db {
+  opacity: 0.75;
+  border-left: 2px solid #333366;
+}
+.ed3-hierarchy-item-db:hover { opacity: 1; }
 
 /* ── Viewport (center) ──────────────────────── */
 .ed3-viewport {
@@ -187,6 +275,47 @@
   font-size: 11px;
   color: #aaaacc;
 }
+
+.ed3-inspector-teleport-btn {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 6px 0;
+  background: #12203a;
+  color: #88aaee;
+  border: 1px solid #1e3a6e;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.ed3-inspector-teleport-btn:hover:not(:disabled) { background: #1a2e52; }
+.ed3-inspector-teleport-btn:disabled              { opacity: 0.5; cursor: not-allowed; }
+
+.ed3-inspector-teleport-msg {
+  margin-top: 5px;
+  font-size: 11px;
+  color: #88ddaa;
+  text-align: center;
+}
+
+.ed3-inspector-save-btn {
+  width: 100%;
+  padding: 6px 0;
+  background: #1a5a1a;
+  color: #99ee99;
+  border: 1px solid #2a8a2a;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+.ed3-inspector-save-btn:hover:not(:disabled) { background: #226622; }
+.ed3-inspector-save-btn:disabled              { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Error boundary ─────────────────────────── */
 .editor3d-error {
@@ -266,6 +395,53 @@
   from { transform: rotate(0deg); }
   to   { transform: rotate(360deg); }
 }
+
+/* ── Save bar ───────────────────────────────── */
+.ed3-save-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: #1a1a10;
+  border-top: 1px solid #554400;
+  flex-shrink: 0;
+}
+
+.ed3-save-bar-msg {
+  font-size: 11px;
+  color: #ccaa44;
+  flex: 1;
+}
+
+.ed3-save-bar-error {
+  font-size: 11px;
+  color: #ff7777;
+}
+
+.ed3-save-bar-btn {
+  padding: 4px 12px;
+  border-radius: 4px;
+  border: none;
+  font-size: 12px;
+  cursor: pointer;
+  font-weight: 500;
+  transition: background 0.15s;
+}
+
+.ed3-save-bar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.ed3-save-bar-btn.undo {
+  background: #2a2a3e;
+  color: #9090b8;
+  border: 1px solid #333348;
+}
+.ed3-save-bar-btn.undo:hover:not(:disabled) { background: #333350; }
+
+.ed3-save-bar-btn.save {
+  background: #1a7a1a;
+  color: #ccffcc;
+}
+.ed3-save-bar-btn.save:hover:not(:disabled) { background: #228822; }
 
 /* ── Error bar ──────────────────────────────── */
 .ed3-error-bar {

@@ -15,7 +15,8 @@ export function ConnectionProvider({ children }) {
     host: '127.0.0.1',
     port: 7878,
     user: '',
-    password: ''
+    password: '',
+    characterName: ''
   });
 
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');

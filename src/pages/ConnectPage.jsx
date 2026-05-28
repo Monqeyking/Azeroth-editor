@@ -35,7 +35,9 @@ export default function ConnectPage() {
     // Save config if rememberMe is checked
     if (rememberMe) {
       try {
-        await window.azeroth.config.save({ db: form, rememberMe });
+        const loadedConfig = await window.azeroth.config.load();
+        const current = loadedConfig.success && loadedConfig.data ? loadedConfig.data : {};
+        await window.azeroth.config.save({ ...current, db: form, rememberMe });
       } catch (e) {}
     }
     const result = await connectDb(form);

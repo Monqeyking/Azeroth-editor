@@ -1,7 +1,14 @@
+import { useState } from 'react';
+import { Navigation } from 'lucide-react';
+
 const RAD2DEG = 180 / Math.PI;
 
 function fmt(v, decimals = 3) {
   return typeof v === 'number' ? v.toFixed(decimals) : '—';
+}
+
+function threeToWow(tx, ty, tz) {
+  return { x: tz, y: -tx, z: ty };
 }
 
 function Vec3Row({ label, x, y, z, decimals = 3 }) {
@@ -17,7 +24,41 @@ function Vec3Row({ label, x, y, z, decimals = 3 }) {
   );
 }
 
-export default function Editor3DInspector({ spawn, transform }) {
+export default function Editor3DInspector({ spawn, transform, dirty, onSave, saving, mapId, onTeleport }) {
+  const [teleporting, setTeleporting] = useState(false);
+  const [teleportMsg, setTeleportMsg] = useState(null);
+
+  async function handleTeleport() {
+    if (!spawn || !onTeleport) return;
+    setTeleporting(true);
+    setTeleportMsg(null);
+
+    const target = transform?.pos
+      ? threeToWow(transform.pos.x, transform.pos.y, transform.pos.z)
+      : { x: spawn.x, y: spawn.y, z: spawn.z };
+    const cmd = `.go xyz ${target.x} ${target.y} ${target.z} ${mapId ?? 0}`;
+    console.log('[3D Teleport] spawn:', {
+      guid: spawn.guid,
+      entry: spawn.entry ?? spawn.id,
+      type: spawn.type,
+      name: spawn.name,
+      mapId,
+      original: { x: spawn.x, y: spawn.y, z: spawn.z },
+      target,
+      command: cmd,
+      usingLiveTransform: Boolean(transform?.pos),
+    });
+    try {
+      const res = await onTeleport(cmd);
+      setTeleportMsg(res.success ? 'Geteleporteerd ✓' : `Fout: ${res.error ?? res.result}`);
+    } catch (e) {
+      setTeleportMsg(`Fout: ${e.message}`);
+    } finally {
+      setTeleporting(false);
+      setTimeout(() => setTeleportMsg(null), 3000);
+    }
+  }
+
   if (!spawn) {
     return (
       <div className="ed3-inspector">
@@ -85,6 +126,34 @@ export default function Editor3DInspector({ spawn, transform }) {
             z={rot.z * RAD2DEG}
             decimals={1}
           />
+        </section>
+      )}
+
+      {/* Teleport */}
+      <section className="ed3-inspector-section">
+        <button
+          className="ed3-inspector-teleport-btn"
+          onClick={handleTeleport}
+          disabled={teleporting}
+        >
+          <Navigation size={12} />
+          {teleporting ? 'Teleporteren…' : 'Teleport naar spawn'}
+        </button>
+        {teleportMsg && (
+          <div className="ed3-inspector-teleport-msg">{teleportMsg}</div>
+        )}
+      </section>
+
+      {/* Save knop */}
+      {dirty && (
+        <section className="ed3-inspector-section">
+          <button
+            className="ed3-inspector-save-btn"
+            onClick={onSave}
+            disabled={saving}
+          >
+            {saving ? 'Opslaan…' : '💾 Wijzigingen opslaan'}
+          </button>
         </section>
       )}
     </div>

@@ -115,7 +115,7 @@ function TerrainMesh({ terrainTiles }) {
   );
 }
 
-export default function Editor3DScene({ spawns, selectedId, onSelect, activeTool, onTransform, terrain, initialTarget }) {
+export default function Editor3DScene({ spawns, selectedId, onSelect, activeTool, onTransform, terrain, initialTarget, resetKeys = {} }) {
   return (
     <Canvas
       camera={{ position: [0, 60, 80], fov: 60, near: 0.1, far: 10000 }}
@@ -132,7 +132,7 @@ export default function Editor3DScene({ spawns, selectedId, onSelect, activeTool
       <Suspense fallback={null}>
         {spawns.map(spawn => (
           <Editor3DSpawn
-            key={spawn.guid}
+            key={`${spawn.guid}_${resetKeys[spawn.guid] ?? 0}`}
             spawn={spawn}
             selected={spawn.guid === selectedId}
             onSelect={onSelect}

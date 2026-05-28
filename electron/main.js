@@ -2,7 +2,7 @@ const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const mysql = require('mysql2/promise');
-const { createClient } = require('node-soap');
+const http = require('http');
 const AdmZip = require('adm-zip');
 let mpqReader = null;
 const MPQ_STUB = {
@@ -31,6 +31,7 @@ let dbConnection = null;
 let iconsZip = null;
 let iconCache = {};
 let spellDbcCache = null;
+let soapRequestId = 0;
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
 // Offset = MySQL column index × 4 (each DBC field is 4 bytes)
@@ -105,7 +106,12 @@ ipcMain.handle('config:load', () => {
 
 ipcMain.handle('config:save', (_, config) => {
   try {
-    fs.writeFileSync(getConfigPath(), JSON.stringify(config, null, 2), 'utf8');
+    const configPath = getConfigPath();
+    let current = {};
+    if (fs.existsSync(configPath)) {
+      current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    }
+    fs.writeFileSync(configPath, JSON.stringify({ ...current, ...config }, null, 2), 'utf8');
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -184,19 +190,87 @@ ipcMain.handle('db:disconnect', async () => {
 // ─── SOAP ───────────────────────────────────────────────────────────────────
 ipcMain.handle('soap:command', async (_, { host, port, user, password, command }) => {
   return new Promise((resolve) => {
-    const url = `http://${host}:${port}/RPC2`;
+    const requestId = ++soapRequestId;
+    const soapCommand = String(command ?? '').trim();
     const auth = Buffer.from(`${user}:${password}`).toString('base64');
 
-    createClient(url, {
-      wsdl_headers: { Authorization: `Basic ${auth}` }
-    }, (err, client) => {
-      if (err) return resolve({ success: false, error: err.message });
+    function escapeXml(value) {
+      return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&apos;');
+    }
 
-      client.executeCommand({ command }, (err2, result) => {
-        if (err2) return resolve({ success: false, error: err2.message });
-        resolve({ success: true, result: result?.result || 'OK' });
+    function sendSoapCommand(attemptCommand, attempt) {
+      const escapedCommand = escapeXml(attemptCommand);
+      const body = `<?xml version="1.0" encoding="UTF-8"?>
+<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="urn:AC">
+  <SOAP-ENV:Body>
+    <ns1:executeCommand><command>${escapedCommand}</command></ns1:executeCommand>
+  </SOAP-ENV:Body>
+</SOAP-ENV:Envelope>`;
+
+      console.log(`[SOAP ${requestId}.${attempt}] target:`, `${host}:${port}`, 'user:', user || '(empty)');
+      console.log(`[SOAP ${requestId}.${attempt}] raw command:`, JSON.stringify(command));
+      console.log(`[SOAP ${requestId}.${attempt}] command:`, attemptCommand);
+      console.log(`[SOAP ${requestId}.${attempt}] command length:`, attemptCommand.length);
+      console.log(`[SOAP ${requestId}.${attempt}] command chars:`, [...attemptCommand].map(ch => `${ch}:${ch.charCodeAt(0)}`).join(' '));
+      console.log(`[SOAP ${requestId}.${attempt}] request body:`, body);
+
+      const req = http.request({
+        hostname: host,
+        port: Number(port),
+        path: '/RPC2',
+        method: 'POST',
+        headers: {
+          'Content-Type': 'text/xml;charset=UTF-8',
+          'SOAPAction': 'urn:AC#executeCommand',
+          'Authorization': `Basic ${auth}`,
+          'Content-Length': Buffer.byteLength(body),
+        }
+      }, (res) => {
+        let data = '';
+        res.on('data', chunk => data += chunk);
+        res.on('end', () => {
+          console.log(`[SOAP ${requestId}.${attempt}] status:`, res.statusCode);
+          console.log(`[SOAP ${requestId}.${attempt}] response:`, data);
+          const result = data.match(/<result>([\s\S]*?)<\/result>/);
+          const fault  = data.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
+          const parsedFault = fault ? fault[1].replace(/&#xD;/g, '\r').trim() : null;
+          if (result) console.log(`[SOAP ${requestId}.${attempt}] parsed result:`, result[1].trim());
+          if (parsedFault) console.log(`[SOAP ${requestId}.${attempt}] parsed fault:`, parsedFault);
+
+          const shouldRetryWithoutDot =
+            attempt === 1 &&
+            attemptCommand.startsWith('.go ') &&
+            parsedFault?.includes('.gobject');
+          if (shouldRetryWithoutDot) {
+            const retryCommand = attemptCommand.slice(1);
+            console.log(`[SOAP ${requestId}.${attempt}] .go matched .gobject; retrying as:`, retryCommand);
+            sendSoapCommand(retryCommand, attempt + 1);
+            return;
+          }
+
+          if (res.statusCode === 200) {
+            resolve({ success: true, result: result ? result[1].trim() : 'OK' });
+          } else {
+            const msg = parsedFault ?? (result ? result[1].trim() : data);
+            resolve({ success: false, error: `HTTP ${res.statusCode}: ${msg}` });
+          }
+        });
       });
-    });
+
+      req.on('error', (e) => {
+        console.log(`[SOAP ${requestId}.${attempt}] request error:`, e.message);
+        resolve({ success: false, error: e.message });
+      });
+      req.write(body);
+      req.end();
+    }
+
+    sendSoapCommand(soapCommand, 1);
   });
 });
 
@@ -1095,6 +1169,57 @@ ipcMain.handle('spawns:load', async (_, { mapId, limit = 1000 }) => {
        WHERE g.map = ${m} LIMIT ${lg}`
     );
     return { success: true, data: [...creatures, ...gameobjects] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('spawns:search', async (_, { query, mapId, limit = 50 }) => {
+  if (!dbConnection) return { success: false, error: 'Niet verbonden' };
+  try {
+    const m  = parseInt(mapId, 10);
+    const lm = parseInt(limit, 10);
+    const lh = Math.floor(lm / 2);
+    const like = `%${query}%`;
+    const entryNum = parseInt(query, 10);
+    const entryFilter = Number.isFinite(entryNum) ? entryNum : -1;
+
+    const [creatures] = await dbConnection.query(
+      `SELECT CONCAT('c_', c.guid) AS guid, c.id1 AS entry, ct.name,
+              c.position_x AS x, c.position_y AS y, c.position_z AS z,
+              'creature' AS type, ct.faction AS faction
+       FROM creature c
+       JOIN creature_template ct ON c.id1 = ct.entry
+       WHERE c.map = ? AND (ct.name LIKE ? OR c.id1 = ?)
+       LIMIT ?`,
+      [m, like, entryFilter, lm]
+    );
+    const [gameobjects] = await dbConnection.query(
+      `SELECT CONCAT('g_', g.guid) AS guid, g.id AS entry, gt.name,
+              g.position_x AS x, g.position_y AS y, g.position_z AS z,
+              'gameobject' AS type, NULL AS faction
+       FROM gameobject g
+       JOIN gameobject_template gt ON g.id = gt.entry
+       WHERE g.map = ? AND (gt.name LIKE ? OR g.id = ?)
+       LIMIT ?`,
+      [m, like, entryFilter, lh]
+    );
+    return { success: true, data: [...creatures, ...gameobjects] };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('spawns:update', async (_, { guid, type, x, y, z, orientation }) => {
+  if (!dbConnection) return { success: false, error: 'Niet verbonden' };
+  try {
+    const numGuid = parseInt(String(guid).replace(/^[cg]_/, ''), 10);
+    const table   = type === 'gameobject' ? 'gameobject' : 'creature';
+    await dbConnection.execute(
+      `UPDATE ${table} SET position_x=?, position_y=?, position_z=?, orientation=? WHERE guid=?`,
+      [x, y, z, orientation, numGuid]
+    );
+    return { success: true };
   } catch (err) {
     return { success: false, error: err.message };
   }
