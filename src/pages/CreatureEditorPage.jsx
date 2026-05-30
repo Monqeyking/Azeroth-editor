@@ -10,9 +10,10 @@ import './EditorPage.css';
 const NPC_FLAG = { TRAINER: 16, CLASS_TRAINER: 32, PROFESSION_TRAINER: 64, VENDOR: 128 };
 
 const TRAINER_TYPES = [
-  { value: 0, label: 'General Trainer' },
-  { value: 1, label: 'Class Trainer' },
-  { value: 2, label: 'Profession Trainer' },
+  { value: 0, label: 'Class' },
+  { value: 1, label: 'Mount' },
+  { value: 2, label: 'Tradeskill' },
+  { value: 3, label: 'Pet' },
 ];
 
 const TRAINER_CLASSES = [
@@ -119,7 +120,7 @@ const FIELD_SECTIONS = [
   { id: 'behavior', title: 'Behavior', keys: ['AIName', 'MovementType', 'RegenHealth', 'detection_range', 'ScriptName'] },
 ];
 
-const EMPTY_TRAINER_ROW = () => ({ spell: 0, spellcost: 0, reqskill: 0, reqskillvalue: 0, reqlevel: 0 });
+const EMPTY_TRAINER_SPELL = () => ({ SpellID: 0, MoneyCost: 0, ReqSkillLine: 0, ReqSkillRank: 0, ReqLevel: 0, ReqSpell: 0 });
 const EMPTY_VENDOR_ROW = () => ({ item: 0, maxcount: 0, incrtime: 0, ExtendedCost: 0 });
 const EMPTY_SPAWN = () => ({
   guid: null, map: 1, zoneId: 0, position_x: -2316.5, position_y: -396.2, position_z: -9.4,
@@ -162,6 +163,10 @@ export default function CreatureEditorPage() {
   const [roles, setRoles] = useState({ trainer: false, vendor: false, spawn: false });
   const [trainerMeta, setTrainerMeta] = useState({ type: 0, class: 2 });
   const [trainerSpells, setTrainerSpells] = useState([]);
+  const [templateMeta, setTemplateMeta] = useState({});
+  const [trainerDef, setTrainerDef] = useState(null);
+  const [refTrainerDef, setRefTrainerDef] = useState(null);
+  const [trainerDefMode, setTrainerDefMode] = useState(null); // null | 'create' | 'link'
   const [vendorItems, setVendorItems] = useState([]);
   const [spawnData, setSpawnData] = useState(EMPTY_SPAWN());
   const [addonData, setAddonData] = useState(EMPTY_ADDON());
@@ -227,13 +232,14 @@ export default function CreatureEditorPage() {
   }, [query]);
 
   const loadRelatedData = useCallback(async (entry) => {
-    const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes] = await Promise.all([
-      query('SELECT spell, spellcost, reqskill, reqskillvalue, reqlevel FROM npc_trainer WHERE entry = ?', [entry]),
+    const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes, trainerDefRes] = await Promise.all([
+      query('SELECT SpellID, MoneyCost, ReqSkillLine, ReqSkillRank, ReqLevel, ReqSpell FROM npc_trainer WHERE ID = ?', [entry]),
       query('SELECT item, maxcount, incrtime, ExtendedCost FROM npc_vendor WHERE entry = ? ORDER BY slot', [entry]),
       query('SELECT guid, map, position_x, position_y, position_z, orientation, spawnMask, phaseMask FROM creature WHERE id1 = ? LIMIT 1', [entry]),
       query('SELECT path_id, mount, bytes1, bytes2, emote, aiAnimKit, movementAnimKit, meleeAnimKit, visibilityDistanceType, auras FROM creature_template_addon WHERE entry = ?', [entry]),
       query('SELECT Idx, CreatureDisplayID, DisplayScale, Probability, VerifiedBuild FROM creature_template_model WHERE CreatureID = ? ORDER BY Idx', [entry]),
       query('SELECT ItemID1, ItemID2, ItemID3 FROM creature_equip_template WHERE CreatureID = ? AND ID = 1 LIMIT 1', [entry]),
+      query('SELECT cdt.TrainerId, t.Type, t.Requirement, t.Greeting FROM creature_default_trainer cdt JOIN trainer t ON t.Id = cdt.TrainerId WHERE cdt.CreatureId = ? LIMIT 1', [entry]),
     ]);
     return {
       trainerSpells: trainerRes.data || [],
@@ -242,6 +248,7 @@ export default function CreatureEditorPage() {
       addon: addonRes.data?.[0] || null,
       models: modelRes.data || [],
       equip: equipRes.data?.[0] || null,
+      trainerDef: trainerDefRes.data?.[0] || null,
     };
   }, [query]);
 
@@ -263,7 +270,9 @@ export default function CreatureEditorPage() {
     setForm(row);
     setRoles({ ...roleFlags, spawn: !!related.spawn });
     setTrainerMeta(deriveTrainerMeta(row.npcflag));
-    setTrainerSpells(related.trainerSpells.length ? related.trainerSpells : [EMPTY_TRAINER_ROW()]);
+    setTrainerSpells(related.trainerSpells);
+    setTrainerDef(related.trainerDef);
+    setTrainerDefMode(null);
     setVendorItems(related.vendorItems.length ? related.vendorItems : [EMPTY_VENDOR_ROW()]);
     setSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
     setAddonData(related.addon ? { ...related.addon } : EMPTY_ADDON());
@@ -315,6 +324,7 @@ export default function CreatureEditorPage() {
     setRefForm(row);
     setRefTrainerMeta(deriveTrainerMeta(row.npcflag));
     setRefTrainerSpells(related.trainerSpells);
+    setRefTrainerDef(related.trainerDef);
     setRefVendorItems(related.vendorItems);
     setRefSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
     setRefAddonData(related.addon ? { ...related.addon } : EMPTY_ADDON());
@@ -378,14 +388,26 @@ export default function CreatureEditorPage() {
   };
 
   const saveTrainerData = async (entry) => {
-    await query('DELETE FROM npc_trainer WHERE entry = ?', [entry]);
+    await query('DELETE FROM npc_trainer WHERE ID = ?', [entry]);
     for (const row of trainerSpells) {
-      if (!row.spell) continue;
+      if (!row.SpellID) continue;
       await query(
-        'INSERT INTO npc_trainer (entry, spell, spellcost, reqskill, reqskillvalue, reqlevel) VALUES (?,?,?,?,?,?)',
-        [entry, row.spell, row.spellcost || 0, row.reqskill || 0, row.reqskillvalue || 0, row.reqlevel || 0]
+        'INSERT INTO npc_trainer (ID, SpellID, MoneyCost, ReqSkillLine, ReqSkillRank, ReqLevel, ReqSpell) VALUES (?,?,?,?,?,?,?)',
+        [entry, row.SpellID, row.MoneyCost || 0, row.ReqSkillLine || 0, row.ReqSkillRank || 0, row.ReqLevel || 0, row.ReqSpell || 0]
       );
     }
+  };
+
+  const saveTrainerDef = async (entry) => {
+    if (!trainerDef?.TrainerId) return;
+    await query(
+      'INSERT INTO trainer (Id, Type, Requirement, Greeting, VerifiedBuild) VALUES (?,?,?,?,0) ON DUPLICATE KEY UPDATE Type=VALUES(Type), Requirement=VALUES(Requirement), Greeting=VALUES(Greeting)',
+      [trainerDef.TrainerId, trainerDef.Type || 0, trainerDef.Requirement || 0, trainerDef.Greeting || '']
+    );
+    await query(
+      'INSERT INTO creature_default_trainer (CreatureId, TrainerId) VALUES (?,?) ON DUPLICATE KEY UPDATE TrainerId=VALUES(TrainerId)',
+      [entry, trainerDef.TrainerId]
+    );
   };
 
   const saveVendorData = async (entry) => {
@@ -465,7 +487,10 @@ export default function CreatureEditorPage() {
       const result = await query(`UPDATE creature_template SET ${sets} WHERE entry = ?`, vals);
       if (!result.success) throw new Error(result.error);
 
-      if (roles.trainer) await saveTrainerData(form.entry);
+      if (roles.trainer) {
+        await saveTrainerData(form.entry);
+        await saveTrainerDef(form.entry);
+      }
       if (roles.vendor) await saveVendorData(form.entry);
       if (roles.spawn) await saveSpawnData(form.entry);
       await saveAddonData(form.entry);
@@ -488,6 +513,23 @@ export default function CreatureEditorPage() {
     }
     setSaving(false);
   }, [form, roles, trainerSpells, vendorItems, spawnData, addonData, modelRows, query, soapConfig, soapCommand, search, searchCreatures, findNextId]);
+
+  useEffect(() => {
+    const ids = [...new Set(trainerSpells.filter(r => Number(r.SpellID) < 0).map(r => Math.abs(Number(r.SpellID))))];
+    if (!ids.length) return;
+    const missing = ids.filter(id => !templateMeta[id]);
+    if (!missing.length) return;
+    Promise.all(missing.map(id =>
+      query('SELECT MIN(ReqLevel) as minLvl, MAX(ReqLevel) as maxLvl, COUNT(*) as cnt FROM npc_trainer WHERE ID = ?', [id])
+        .then(res => ({ id, ...(res.data?.[0] || {}) }))
+    )).then(results => {
+      setTemplateMeta(prev => {
+        const next = { ...prev };
+        results.forEach(r => { next[r.id] = r; });
+        return next;
+      });
+    });
+  }, [trainerSpells, query]);
 
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -539,7 +581,7 @@ export default function CreatureEditorPage() {
   const copySectionFromRef = (sectionId) => {
     if (!refForm.entry) return;
     if (sectionId === 'trainer') {
-      setTrainerSpells(refTrainerSpells.length ? refTrainerSpells.map(r => ({ ...r })) : [EMPTY_TRAINER_ROW()]);
+      setTrainerSpells(refTrainerSpells.map(r => ({ ...r })));
       setTrainerMeta({ ...refTrainerMeta });
       setRoles(r => ({ ...r, trainer: true }));
       setForm(f => ({ ...f, npcflag: applyTrainerFlags(f.npcflag, refTrainerMeta) }));
@@ -643,68 +685,213 @@ export default function CreatureEditorPage() {
     </>
   );
 
-  const renderTrainerPanel = (spells, meta, setSpells, setMeta, readOnly, onCopySection) => (
-    <div className="creature-section-block">
-      <div className="creature-section-head">
-        <h4 className="field-section-title">Trainer Configuration</h4>
-        {readOnly && onCopySection && (
-          <button type="button" className="btn-ghost creature-copy-section" onClick={() => onCopySection('trainer')} title="Copy trainer data to draft">
-            <ClipboardCopy size={12} />
+  const renderTrainerPanel = (spells, meta, setSpells, setMeta, readOnly, onCopySection, tmplMeta = {}, tDef = null, setTDef = null, defMode = null, setDefMode = null) => {
+    const templateRefs = spells.filter(r => Number(r.SpellID) < 0);
+    const directSpells = spells.filter(r => Number(r.SpellID) > 0);
+
+    const updateRow = (idx, patch) => {
+      const next = [...spells];
+      next[idx] = { ...next[idx], ...patch };
+      setSpells(next);
+      markDirty();
+    };
+    const removeRow = (idx) => { setSpells(spells.filter((_, j) => j !== idx)); markDirty(); };
+
+    const templateGlobalIdx = (tRef) => spells.indexOf(tRef);
+    const spellGlobalIdx = (sRef) => spells.indexOf(sRef);
+
+    return (
+      <div className="creature-section-block">
+        <div className="creature-section-head">
+          <h4 className="field-section-title">Trainer Configuration</h4>
+          {readOnly && onCopySection && (
+            <button type="button" className="btn-ghost creature-copy-section" onClick={() => onCopySection('trainer')} title="Copy trainer data to draft">
+              <ClipboardCopy size={12} />
+            </button>
+          )}
+        </div>
+        {tDef && (
+          <>
+            <h5 className="field-subsection-title">
+              Trainer Definition
+              {tDef._isNew && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>NEW — wordt aangemaakt bij Save</span>}
+            </h5>
+            <div className="creature-meta-row">
+              <div className="field-group">
+                <label>Trainer ID</label>
+                <input type="text" inputMode="numeric" value={tDef.TrainerId} readOnly={readOnly || !!tDef._isNew}
+                  style={tDef._isNew ? { opacity: 0.6 } : {}}
+                  onChange={e => setTDef?.({ ...tDef, TrainerId: parseInt(e.target.value) || 0 })} />
+              </div>
+              <div className="field-group">
+                <label>Type</label>
+                <select value={tDef.Type ?? 0} disabled={readOnly}
+                  onChange={e => { setTDef?.({ ...tDef, Type: Number(e.target.value) }); markDirty(); }}>
+                  {TRAINER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+              </div>
+              {(tDef.Type === 0 || tDef.Type === 3) && (
+                <div className="field-group">
+                  <label>Required Class</label>
+                  <select value={tDef.Requirement ?? 0} disabled={readOnly}
+                    onChange={e => { setTDef?.({ ...tDef, Requirement: Number(e.target.value) }); markDirty(); }}>
+                    <option value={0}>—</option>
+                    {TRAINER_CLASSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </div>
+              )}
+              {tDef.Type === 1 && (
+                <div className="field-group">
+                  <label>Required Race</label>
+                  <input type="text" inputMode="numeric" value={tDef.Requirement ?? 0} readOnly={readOnly}
+                    onChange={e => { setTDef?.({ ...tDef, Requirement: parseInt(e.target.value) || 0 }); markDirty(); }} />
+                </div>
+              )}
+              {tDef.Type === 2 && (
+                <div className="field-group">
+                  <label>Required Spell ID</label>
+                  <input type="text" inputMode="numeric" value={tDef.Requirement ?? 0} readOnly={readOnly}
+                    onChange={e => { setTDef?.({ ...tDef, Requirement: parseInt(e.target.value) || 0 }); markDirty(); }} />
+                </div>
+              )}
+            </div>
+            <div className="creature-meta-row">
+              <div className="field-group" style={{ flex: 1 }}>
+                <label>Greeting</label>
+                <input type="text" value={tDef.Greeting ?? ''} readOnly={readOnly}
+                  onChange={e => { setTDef?.({ ...tDef, Greeting: e.target.value }); markDirty(); }} />
+              </div>
+            </div>
+          </>
+        )}
+        {!tDef && !readOnly && defMode === null && (
+          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+            <button type="button" className="btn-ghost creature-add-row" onClick={async () => {
+              const res = await query('SELECT COALESCE(MAX(Id),0)+1 AS nextId FROM trainer');
+              const nextId = res.data?.[0]?.nextId || 1;
+              setTDef({ TrainerId: nextId, Type: 0, Requirement: 0, Greeting: '', _isNew: true });
+              setDefMode('create');
+              markDirty();
+            }}>
+              <Plus size={12} /> Create New Trainer
+            </button>
+            <button type="button" className="btn-ghost creature-add-row" onClick={() => setDefMode('link')}>
+              Link Existing Trainer
+            </button>
+          </div>
+        )}
+        {!tDef && !readOnly && defMode === 'link' && (
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', marginBottom: '8px' }}>
+            <div className="field-group">
+              <label>Trainer ID</label>
+              <input type="text" inputMode="numeric" placeholder="bijv. 3"
+                onBlur={async e => {
+                  const id = parseInt(e.target.value);
+                  if (!id) return;
+                  const res = await query('SELECT Id, Type, Requirement, Greeting FROM trainer WHERE Id = ?', [id]);
+                  if (res.data?.[0]) {
+                    setTDef({ TrainerId: res.data[0].Id, Type: res.data[0].Type, Requirement: res.data[0].Requirement, Greeting: res.data[0].Greeting });
+                    setDefMode(null);
+                    markDirty();
+                  }
+                }}
+              />
+            </div>
+            <button type="button" className="btn-ghost" onClick={() => setDefMode(null)}>Cancel</button>
+          </div>
+        )}
+
+        <h5 className="field-subsection-title">Trainer Templates</h5>
+        <p className="field-hint">Negative SpellID references — links this trainer to a shared spell group.</p>
+        <table className="creature-data-table">
+          <thead>
+            <tr><th>Template ID</th><th>Info</th>{!readOnly && <th></th>}</tr>
+          </thead>
+          <tbody>
+            {templateRefs.length === 0 && (
+              <tr><td colSpan={readOnly ? 2 : 3} style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No templates assigned</td></tr>
+            )}
+            {templateRefs.map((row, i) => {
+              const gi = templateGlobalIdx(row);
+              const tid = Math.abs(Number(row.SpellID));
+              const tm = tmplMeta[tid];
+              const desc = tm ? `${tm.cnt} spell${tm.cnt !== 1 ? 's' : ''} · Lvl ${tm.minLvl}–${tm.maxLvl}` : null;
+              return (
+                <tr key={i}>
+                  <td>
+                    <input
+                      type="text" inputMode="numeric"
+                      value={tid}
+                      readOnly={readOnly}
+                      onChange={e => {
+                        const v = parseInt(e.target.value, 10);
+                        updateRow(gi, { SpellID: isNaN(v) ? 0 : -Math.abs(v) });
+                      }}
+                    />
+                  </td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap' }}>
+                    {desc ?? '—'}
+                  </td>
+                  {!readOnly && (
+                    <td>
+                      <button type="button" className="btn-ghost icon-btn" onClick={() => removeRow(gi)}>
+                        <Trash2 size={12} />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!readOnly && (
+          <button type="button" className="btn-ghost creature-add-row"
+            onClick={() => { setSpells([...spells, { SpellID: -200000, MoneyCost: 0, ReqSkillLine: 0, ReqSkillRank: 0, ReqLevel: 0, ReqSpell: 0 }]); markDirty(); }}>
+            <Plus size={12} /> Add Template
+          </button>
+        )}
+
+        <h5 className="field-subsection-title" style={{ marginTop: '1rem' }}>Direct Spells</h5>
+        <p className="field-hint">Individual spells added directly to this trainer (positive SpellID).</p>
+        <table className="creature-data-table">
+          <thead>
+            <tr><th>SpellID</th><th>Cost</th><th>Req Skill</th><th>Skill Rank</th><th>Req Lvl</th><th>Req Spell</th>{!readOnly && <th></th>}</tr>
+          </thead>
+          <tbody>
+            {directSpells.length === 0 && (
+              <tr><td colSpan={readOnly ? 6 : 7} style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No direct spells</td></tr>
+            )}
+            {directSpells.map((row, i) => {
+              const gi = spellGlobalIdx(row);
+              return (
+                <tr key={i}>
+                  {['SpellID', 'MoneyCost', 'ReqSkillLine', 'ReqSkillRank', 'ReqLevel', 'ReqSpell'].map(col => (
+                    <td key={col}>
+                      <input type="text" inputMode="numeric" value={row[col] ?? 0} readOnly={readOnly}
+                        onChange={e => updateRow(gi, { [col]: e.target.value })} />
+                    </td>
+                  ))}
+                  {!readOnly && (
+                    <td>
+                      <button type="button" className="btn-ghost icon-btn" onClick={() => removeRow(gi)}>
+                        <Trash2 size={12} />
+                      </button>
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {!readOnly && (
+          <button type="button" className="btn-ghost creature-add-row"
+            onClick={() => { setSpells([...spells, EMPTY_TRAINER_SPELL()]); markDirty(); }}>
+            <Plus size={12} /> Add Spell
           </button>
         )}
       </div>
-      <div className="creature-meta-row">
-        <div className="field-group">
-          <label>Trainer Type</label>
-          <select value={meta.type} disabled={readOnly} onChange={e => setMeta({ type: Number(e.target.value) })}>
-            {TRAINER_TYPES.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-          </select>
-        </div>
-        {meta.type === 1 && (
-          <div className="field-group">
-            <label>Trainer Class</label>
-            <select value={meta.class} disabled={readOnly} onChange={e => setMeta({ class: Number(e.target.value) })}>
-              {TRAINER_CLASSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-            </select>
-          </div>
-        )}
-      </div>
-      <table className="creature-data-table">
-        <thead>
-          <tr><th>Spell</th><th>Cost</th><th>Req Skill</th><th>Skill Val</th><th>Req Lvl</th>{!readOnly && <th></th>}</tr>
-        </thead>
-        <tbody>
-          {spells.map((row, i) => (
-            <tr key={i}>
-              {['spell', 'spellcost', 'reqskill', 'reqskillvalue', 'reqlevel'].map(col => (
-                <td key={col}>
-                  <input type="number" value={row[col] ?? 0} readOnly={readOnly}
-                    onChange={e => {
-                      const next = [...spells];
-                      next[i] = { ...next[i], [col]: e.target.value };
-                      setSpells(next);
-                      markDirty();
-                    }} />
-                </td>
-              ))}
-              {!readOnly && (
-                <td>
-                  <button type="button" className="btn-ghost icon-btn" onClick={() => { setSpells(spells.filter((_, j) => j !== i)); markDirty(); }}>
-                    <Trash2 size={12} />
-                  </button>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      {!readOnly && (
-        <button type="button" className="btn-ghost creature-add-row" onClick={() => { setSpells([...spells, EMPTY_TRAINER_ROW()]); markDirty(); }}>
-          <Plus size={12} /> Add Spell
-        </button>
-      )}
-    </div>
-  );
+    );
+  };
 
   const renderVendorPanel = (items, setItems, readOnly, onCopySection) => (
     <div className="creature-section-block">
@@ -1001,7 +1188,12 @@ export default function CreatureEditorPage() {
             readOnly ? () => {} : setTrainerSpells,
             readOnly ? () => {} : updateTrainerMeta,
             readOnly,
-            readOnly ? copyHandler : null
+            readOnly ? copyHandler : null,
+            templateMeta,
+            readOnly ? refTrainerDef : trainerDef,
+            readOnly ? null : (v) => { setTrainerDef(v); markDirty(); },
+            trainerDefMode,
+            readOnly ? null : setTrainerDefMode
           )}
         </div>
         <div className="creature-subtab-panel" hidden={!show('vendor', 'vendor')}>

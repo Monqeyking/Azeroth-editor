@@ -2050,3 +2050,43 @@ ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
     return { success: false, error: e.message };
   }
 });
+
+// ─── CharBaseInfo.dbc ──────────────────────────────────────────────────────────
+// Structure: WDBC header (20 bytes) + N records of 2 bytes (uint8 race, uint8 class) + 1 byte string block
+
+ipcMain.handle('dbc:readCharBaseInfo', async (_, dbcPath) => {
+  try {
+    const filePath = path.join(dbcPath, 'CharBaseInfo.dbc');
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Invalid DBC header' };
+    const recordCount = buffer.readUInt32LE(4);
+    const combos = [];
+    for (let i = 0; i < recordCount; i++) {
+      combos.push({ race: buffer[20 + i * 2], class: buffer[20 + i * 2 + 1] });
+    }
+    return { success: true, combos };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeCharBaseInfo', async (_, dbcPath, combos) => {
+  try {
+    const filePath = path.join(dbcPath, 'CharBaseInfo.dbc');
+    const buf = Buffer.alloc(20 + combos.length * 2 + 1);
+    buf.write('WDBC', 0, 'ascii');
+    buf.writeUInt32LE(combos.length, 4);
+    buf.writeUInt32LE(2, 8);
+    buf.writeUInt32LE(2, 12);
+    buf.writeUInt32LE(1, 16);
+    for (let i = 0; i < combos.length; i++) {
+      buf[20 + i * 2]     = combos[i].race;
+      buf[20 + i * 2 + 1] = combos[i].class;
+    }
+    buf[20 + combos.length * 2] = 0;
+    fs.writeFileSync(filePath, buf);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});

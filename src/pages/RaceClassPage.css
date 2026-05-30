@@ -1,0 +1,470 @@
+.rc-page {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.rc-msg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 20px;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+.rc-msg.success { background: rgba(76,175,80,0.12); color: #4caf50; border-bottom: 1px solid rgba(76,175,80,0.25); }
+.rc-msg.error   { background: rgba(244,67,54,0.12);  color: #f44336; border-bottom: 1px solid rgba(244,67,54,0.25); }
+.rc-msg button  { background: none; border: none; color: inherit; cursor: pointer; padding: 0; display: flex; }
+
+/* ── Race bar ────────────────────────────────────────────────── */
+.rc-race-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+  flex-shrink: 0;
+  padding: 10px 16px 0;
+}
+
+.rc-faction-strip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 10px;
+}
+
+.rc-faction-label {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  width: 52px;
+  flex-shrink: 0;
+}
+.rc-faction-label.alliance { color: #4fc3f7; }
+.rc-faction-label.horde    { color: #ef5350; }
+
+.rc-race-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: opacity 0.15s, border-color 0.15s, background 0.15s;
+  min-width: 62px;
+}
+.rc-race-btn.dimmed { opacity: 0.35; }
+.rc-race-btn:hover  { opacity: 1 !important; background: var(--bg-hover); }
+
+.rc-race-btn.active.alliance {
+  opacity: 1;
+  border-color: rgba(79,195,247,0.5);
+  background: rgba(79,195,247,0.08);
+}
+.rc-race-btn.active.horde {
+  opacity: 1;
+  border-color: rgba(239,83,80,0.5);
+  background: rgba(239,83,80,0.08);
+}
+
+.rc-race-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  display: block;
+}
+
+.rc-race-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.rc-race-count {
+  font-size: 10px;
+  color: var(--text-muted);
+  background: var(--bg-dark);
+  padding: 0 5px;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+/* ── Main panel ──────────────────────────────────────────────── */
+.rc-main {
+  flex: 1;
+  padding: 20px 24px;
+  overflow-y: auto;
+}
+
+.rc-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+
+.rc-faction-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rc-faction-dot.alliance { background: #4fc3f7; }
+.rc-faction-dot.horde    { background: #ef5350; }
+
+/* ── Class grid ──────────────────────────────────────────────── */
+.rc-class-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 8px;
+  margin-bottom: 24px;
+}
+
+.rc-class-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.1s, border-color 0.1s;
+  background: var(--bg-panel);
+  text-align: center;
+}
+.rc-class-card:hover  { background: var(--bg-hover); }
+.rc-class-card.enabled { border-color: rgba(255,255,255,0.15); background: var(--bg-hover); cursor: pointer; }
+.rc-class-card input  { cursor: pointer; }
+
+.rc-class-name {
+  font-size: 12px;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  width: 100%;
+  text-align: center;
+}
+.rc-class-card.enabled .rc-class-name { color: inherit; }
+
+.rc-class-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  opacity: 0.45;
+  transition: opacity 0.1s;
+}
+.rc-class-card.enabled .rc-class-icon { opacity: 1; }
+.rc-class-card:hover .rc-class-icon   { opacity: 0.75; }
+
+/* ── Class card selected state ───────────────────────────────── */
+.rc-class-card.selected {
+  border-color: var(--gold-dim);
+  background: rgba(198,155,58,0.08);
+}
+
+.rc-section-hint {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 6px;
+}
+
+/* ── Detail panel ────────────────────────────────────────────── */
+.rc-detail {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.rc-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-dark);
+}
+
+.rc-detail-title {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rc-detail-tabs {
+  display: flex;
+  gap: 2px;
+}
+.rc-detail-tabs button {
+  padding: 5px 12px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.rc-detail-tabs button:hover  { color: var(--text-primary); background: var(--bg-hover); }
+.rc-detail-tabs button.active { color: var(--gold-bright); border-color: var(--gold-dim); background: rgba(198,155,58,0.08); }
+
+.rc-tab-count {
+  font-size: 10px;
+  background: var(--bg-panel);
+  padding: 1px 5px;
+  border-radius: 8px;
+  color: var(--text-muted);
+}
+
+.rc-detail-body {
+  padding: 14px;
+}
+
+.rc-detail-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* Action bar table */
+.rc-action-table-wrap {
+  max-height: 300px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+.rc-action-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.rc-action-table th {
+  padding: 7px 10px;
+  text-align: left;
+  color: var(--text-muted);
+  background: var(--bg-dark);
+  border-bottom: 1px solid var(--border);
+  font-weight: 500;
+  position: sticky;
+  top: 0;
+}
+.rc-action-table td {
+  padding: 5px 8px;
+  border-bottom: 1px solid rgba(42,48,64,0.5);
+  color: var(--text-primary);
+  vertical-align: middle;
+}
+.rc-action-table tr:last-child td { border-bottom: none; }
+.rc-action-table tr:hover td { background: var(--bg-hover); }
+
+.rc-action-input {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+}
+.rc-action-input:focus { outline: none; border-color: var(--gold-dim); }
+.rc-action-input.sm { width: 56px; }
+.rc-action-input.md { width: 80px; }
+
+.rc-action-select {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 4px 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  cursor: pointer;
+}
+.rc-action-select:focus { outline: none; border-color: var(--gold-dim); }
+
+.rc-action-spellname {
+  color: var(--text-secondary);
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rc-unknown { color: var(--text-muted); }
+
+.rc-action-del {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px;
+  display: flex;
+  border-radius: 3px;
+}
+.rc-action-del:hover { color: #f44336; background: rgba(244,67,54,0.1); }
+
+.rc-action-add {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  background: none;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  margin-right: auto;
+}
+.rc-action-add:hover { border-color: var(--gold-dim); color: var(--gold-bright); }
+
+.btn-save {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+/* ── Wizard ──────────────────────────────────────────────────── */
+.rc-wizard {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  max-width: 560px;
+}
+
+.rc-wizard-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+  font-size: 13px;
+  color: var(--text-primary);
+  flex-wrap: wrap;
+}
+.rc-wizard-template {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-dark);
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+.rc-wizard-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+}
+
+.rc-wizard-fields {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.rc-wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+.rc-wizard-field input {
+  background: var(--bg-dark);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.rc-wizard-field input:focus { outline: none; border-color: var(--gold-dim); }
+
+.rc-wizard-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+.rc-wizard-note { font-size: 12px; color: var(--text-muted); }
+
+.btn-save {
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--gold);
+  background: rgba(198,155,58,0.15);
+  color: var(--gold-bright);
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+.btn-save:hover    { background: rgba(198,155,58,0.25); }
+.btn-save:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ── Confirm dialog ──────────────────────────────────────────── */
+.rc-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.6);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.rc-dialog {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 24px;
+  max-width: 380px;
+  width: 100%;
+}
+.rc-dialog-icon { color: #ff9800; margin-bottom: 10px; display: block; }
+.rc-dialog p    { font-size: 14px; color: var(--text-primary); margin: 0 0 8px; }
+.rc-dialog code { font-size: 11px; color: var(--text-muted); }
+.rc-dialog-sub  { font-size: 12px; color: var(--text-muted) !important; line-height: 1.5; }
+
+.rc-dialog-btns {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.rc-dialog-btns button {
+  padding: 7px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+.rc-dialog-btns button:hover { background: var(--bg-hover); }
+
+.btn-danger {
+  background: rgba(244,67,54,0.15) !important;
+  border-color: rgba(244,67,54,0.4) !important;
+  color: #f44336 !important;
+}
+.btn-danger:hover { background: rgba(244,67,54,0.25) !important; }
