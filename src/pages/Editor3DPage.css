@@ -217,11 +217,92 @@
   overflow: hidden;
 }
 
-.ed3-viewport canvas {
+.ed3-viewport canvas:not(.ed3-minimap) {
   display: block;
   width: 100% !important;
   height: 100% !important;
 }
+
+.ed3-minimap-wrap {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 10;
+}
+
+.ed3-minimap {
+  display: block;
+  width: 200px !important;
+  height: 150px !important;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.25);
+  pointer-events: auto;
+  opacity: 0.9;
+  cursor: crosshair;
+}
+
+.ed3-minimap-cal-btn {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid rgba(255,255,255,0.25);
+  color: #ccc;
+  font-size: 13px;
+  border-radius: 3px;
+  padding: 1px 4px;
+  cursor: pointer;
+  line-height: 1;
+}
+.ed3-minimap-cal-btn:hover { background: rgba(255,255,255,0.15); }
+
+.ed3-minimap-cal {
+  position: absolute;
+  top: 158px;
+  right: 0;
+  background: #1e1e2e;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 4px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 140px;
+}
+
+.ed3-minimap-cal-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #ccc;
+}
+.ed3-minimap-cal-row span:first-child { width: 12px; }
+.ed3-minimap-cal-row button {
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  color: #fff;
+  border-radius: 3px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+.ed3-minimap-cal-row button:hover { background: rgba(255,255,255,0.2); }
+.ed3-minimap-cal-val { flex: 1; text-align: center; font-size: 11px; }
+
+.ed3-minimap-cal-reset {
+  margin-top: 2px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  color: #aaa;
+  border-radius: 3px;
+  font-size: 11px;
+  padding: 2px 0;
+  cursor: pointer;
+}
+.ed3-minimap-cal-reset:hover { background: rgba(255,100,100,0.2); color: #ff8888; }
 
 /* ── Inspector (right) ──────────────────────── */
 .ed3-inspector {
@@ -274,6 +355,15 @@
   font-family: monospace;
   font-size: 11px;
   color: #aaaacc;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 160px;
+  text-align: right;
+}
+
+.ed3-inspector-val {
+  cursor: help;
 }
 
 .ed3-inspector-teleport-btn {
@@ -377,6 +467,20 @@
 
 .ed3-map-select:hover:not(:disabled) { background: #2c2c48; color: #c0c0e0; }
 .ed3-map-select:disabled              { opacity: 0.5; cursor: not-allowed; }
+
+.ed3-camera-hint {
+  margin-left: auto;
+  padding-left: 12px;
+  color: #555577;
+  font-size: 10px;
+  white-space: nowrap;
+  user-select: none;
+  cursor: default;
+}
+
+.ed3-camera-hint:hover {
+  color: #7777aa;
+}
 
 .ed3-spawn-count {
   font-size: 11px;

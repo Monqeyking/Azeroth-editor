@@ -46,6 +46,13 @@ export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMap
         ? <Loader size={13} className="ed3-loading-spin" />
         : spawnCount != null && <span className="ed3-spawn-count">{spawnCount} spawns</span>
       }
+
+      <span
+        className="ed3-camera-hint"
+        title="Rechtermuis: roteren · Middel/Alt+links: pannen · Scroll: zoomen · Rechtermuis+WASD/QE: vliegen · F: focus op selectie"
+      >
+        RMB draaien · MMB/Alt+LMB pan · RMB+WASD vliegen · F focus
+      </span>
     </div>
   );
 }

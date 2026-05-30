@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Navigation } from 'lucide-react';
+import { getCachedM2Asset, getM2AssetState, subscribeM2Cache } from './m2Loader';
 
 const RAD2DEG = 180 / Math.PI;
 
@@ -24,9 +25,27 @@ function Vec3Row({ label, x, y, z, decimals = 3 }) {
   );
 }
 
+function baseName(p) {
+  if (!p) return null;
+  return p.split(/[\\/]/).pop();
+}
+
 export default function Editor3DInspector({ spawn, transform, dirty, onSave, saving, mapId, onTeleport }) {
   const [teleporting, setTeleporting] = useState(false);
   const [teleportMsg, setTeleportMsg] = useState(null);
+  const [m2Asset,  setM2Asset]  = useState(null);
+  const [m2State,  setM2State]  = useState('none');
+
+  useEffect(() => {
+    const id = spawn?.type === 'creature' ? spawn.displayId : null;
+    if (!id) { setM2Asset(null); setM2State('none'); return; }
+    setM2Asset(getCachedM2Asset(id));
+    setM2State(getM2AssetState(id));
+    return subscribeM2Cache(() => {
+      setM2Asset(getCachedM2Asset(id));
+      setM2State(getM2AssetState(id));
+    });
+  }, [spawn?.displayId, spawn?.type]);
 
   async function handleTeleport() {
     if (!spawn || !onTeleport) return;
@@ -126,6 +145,43 @@ export default function Editor3DInspector({ spawn, transform, dirty, onSave, sav
             z={rot.z * RAD2DEG}
             decimals={1}
           />
+        </section>
+      )}
+
+      {/* M2 debug */}
+      {spawn.type === 'creature' && (
+        <section className="ed3-inspector-section">
+          <div className="ed3-inspector-label">Model debug</div>
+          <div className="ed3-inspector-row">
+            <span>displayId</span><span>{spawn.displayId ?? '—'}</span>
+          </div>
+          {m2Asset ? (
+            <>
+              <div className="ed3-inspector-row" title={m2Asset.modelPath ?? ''}>
+                <span>model</span>
+                <span className="ed3-inspector-val">{baseName(m2Asset.modelPath) ?? '—'}</span>
+              </div>
+              <div className="ed3-inspector-row" title={m2Asset.texturePath ?? ''}>
+                <span>texture</span>
+                <span className="ed3-inspector-val">
+                  {m2Asset.texturePath ? baseName(m2Asset.texturePath) : m2Asset.texture ? '(gecached)' : '—'}
+                </span>
+              </div>
+              {m2Asset.texture && (
+                <div className="ed3-inspector-row">
+                  <span>res</span>
+                  <span>{m2Asset.texture.image?.width ?? '?'}×{m2Asset.texture.image?.height ?? '?'}</span>
+                </div>
+              )}
+            </>
+          ) : spawn.displayId ? (
+            <div className="ed3-inspector-row">
+              <span>model</span>
+              <span style={{ color: m2State === 'failed' ? '#e74c3c' : undefined }}>
+                {m2State === 'failed' ? 'niet gevonden' : 'laden…'}
+              </span>
+            </div>
+          ) : null}
         </section>
       )}
 

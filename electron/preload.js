@@ -63,4 +63,9 @@ contextBridge.exposeInMainWorld('azeroth', {
   adt: {
     getTerrain: (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
   },
+  // M2 model loader (3D editor)
+  m2: {
+    loadModel: (opts) => ipcRenderer.invoke('m2:loadModel', opts),
+    prefetch:  (opts) => ipcRenderer.invoke('m2:prefetch', opts),
+  },
 });
