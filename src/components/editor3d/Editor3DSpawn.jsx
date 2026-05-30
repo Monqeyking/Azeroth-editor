@@ -1,7 +1,29 @@
-import { useRef, useState, useEffect, useCallback, useMemo } from 'react';
+import { useRef, useState, useEffect, useCallback, useMemo, memo } from 'react';
 import { Billboard, Text } from '@react-three/drei';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
+import { wowToThree } from './wowCoords';
+import { useM2Model, getCachedM2Asset, subscribeM2Asset } from './m2Loader';
+import { useSpawnLod } from './spawnLod';
+
+function M2Mesh({ asset, selected, hovered, onClick, onOver, onOut }) {
+  const s = hovered ? 1.15 : 1.0;
+  if (!asset?.geo) return null;
+  return (
+    <mesh
+      geometry={asset.geo}
+      scale={[s, s, s]}
+      onClick={onClick}
+      onPointerOver={onOver}
+      onPointerOut={onOut}
+    >
+      {asset.texture
+        ? <meshLambertMaterial map={asset.texture} side={THREE.DoubleSide} transparent alphaTest={0.1} color={selected ? '#aaddff' : 'white'} />
+        : <meshLambertMaterial color={selected ? '#aaddff' : '#ccaa88'} side={THREE.DoubleSide} />
+      }
+    </mesh>
+  );
+}
 
 const FACTION_COLOR = {
   hostile:  '#e67e22',
@@ -18,10 +40,6 @@ function factionColor(spawn) {
   return FACTION_COLOR[f] ?? FACTION_COLOR.default;
 }
 
-function wowToThree(x, y, z) {
-  return [-y, z, x];
-}
-
 function SpawnPivot({ color, selected, hovered, onClick, onOver, onOut }) {
   const s = hovered ? 1.3 : selected ? 1.15 : 1.0;
   return (
@@ -32,29 +50,32 @@ function SpawnPivot({ color, selected, hovered, onClick, onOver, onOut }) {
   );
 }
 
-function SpawnVisual({ color, selected, hovered, entry, onClick, onOver, onOut }) {
-  const s = hovered ? 1.3 : selected ? 1.15 : 1.0;
+function SpawnVisual({ color, selected, hovered, entry, compact, onClick, onOver, onOut }) {
+  const s = (hovered ? 1.3 : selected ? 1.15 : 1.0) * (compact ? 0.72 : 1);
+  const r = compact ? 0.52 : 0.75;
   return (
     <Billboard>
       <mesh scale={[s * 1.2, s * 1.2, 1]}>
-        <ringGeometry args={[0.75, 0.95, 20]} />
-        <meshBasicMaterial color={selected ? '#fff' : color} transparent opacity={selected ? 0.85 : 0.4} />
+        <ringGeometry args={[r, r + 0.18, 16]} />
+        <meshBasicMaterial color={selected ? '#fff' : color} transparent opacity={selected ? 0.85 : compact ? 0.28 : 0.4} />
       </mesh>
       <mesh scale={[s, s, 1]} onClick={onClick} onPointerOver={onOver} onPointerOut={onOut}>
-        <circleGeometry args={[0.75, 20]} />
-        <meshBasicMaterial color={selected ? '#fff' : color} transparent opacity={0.9} />
+        <circleGeometry args={[r, 16]} />
+        <meshBasicMaterial color={selected ? '#fff' : color} transparent opacity={compact ? 0.65 : 0.9} />
       </mesh>
-      <Text
-        position={[0, 1.3, 0]}
-        fontSize={0.55}
-        color="white"
-        anchorX="center"
-        anchorY="bottom"
-        outlineWidth={0.06}
-        outlineColor="#000000"
-      >
-        {String(entry ?? '?')}
-      </Text>
+      {!compact && (
+        <Text
+          position={[0, 1.3, 0]}
+          fontSize={0.55}
+          color="white"
+          anchorX="center"
+          anchorY="bottom"
+          outlineWidth={0.06}
+          outlineColor="#000000"
+        >
+          {String(entry ?? '?')}
+        </Text>
+      )}
     </Billboard>
   );
 }
@@ -307,11 +328,26 @@ function FixedRotateGizmo({ objectRef, visualRef, controls, onChange }) {
   );
 }
 
-export default function Editor3DSpawn({ spawn, selected, onSelect, activeTool, onTransform }) {
-  const anchorRef = useRef(null);
-  const visualRef = useRef(null);
-  const [hovered, setHovered]           = useState(false);
+function Editor3DSpawn({ spawn, selected, onSelect, activeTool, onTransform }) {
+  const anchorRef    = useRef(null);
+  const visualRef    = useRef(null);
+  const [hovered, setHovered] = useState(false);
   const { gl, controls } = useThree();
+  const lod = useSpawnLod(spawn.guid, selected);
+
+  const isCreature = spawn.type === 'creature';
+  const displayId = isCreature ? spawn.displayId : null;
+  const inModelLod = lod === 'model';
+  const inBillboardLod = lod === 'billboard';
+  const isHidden = lod === 'hidden';
+
+  const [m2Ready, setM2Ready] = useState(() => !!getCachedM2Asset(displayId));
+  useEffect(() => subscribeM2Asset(displayId, () => setM2Ready(!!getCachedM2Asset(displayId))), [displayId]);
+  const m2Asset = useM2Model(displayId, isCreature && inModelLod && selected);
+  const instanced = isCreature && inModelLod && !selected && m2Ready;
+  const renderM2Mesh = !!m2Asset && selected;
+  const showBillboard = inBillboardLod || (inModelLod && !renderM2Mesh && !instanced);
+  const showPivot = inModelLod && !renderM2Mesh && !instanced && isCreature;
 
   const showMoveGizmo = selected && activeTool === 'move';
   const showRotateGizmo = selected && activeTool === 'rotate';
@@ -353,14 +389,16 @@ export default function Editor3DSpawn({ spawn, selected, onSelect, activeTool, o
   return (
     <>
       <group ref={attachAnchor}>
-        <SpawnPivot
-          color={factionColor(spawn)}
-          selected={selected}
-          hovered={hovered}
-          onClick={handleClick}
-          onOver={handleOver}
-          onOut={handleOut}
-        />
+        {showPivot && (
+          <SpawnPivot
+            color={factionColor(spawn)}
+            selected={selected}
+            hovered={hovered}
+            onClick={handleClick}
+            onOver={handleOver}
+            onOut={handleOut}
+          />
+        )}
         {showMoveGizmo && (
           <FixedMoveGizmo
             objectRef={anchorRef}
@@ -379,17 +417,34 @@ export default function Editor3DSpawn({ spawn, selected, onSelect, activeTool, o
         )}
       </group>
 
-      <group ref={attachVisual}>
-        <SpawnVisual
-          color={factionColor(spawn)}
-          selected={selected}
-          hovered={hovered}
-          entry={spawn.entry ?? spawn.id}
-          onClick={handleClick}
-          onOver={handleOver}
-          onOut={handleOut}
-        />
-      </group>
+      {!isHidden && (
+        <group ref={attachVisual}>
+          {renderM2Mesh
+            ? <M2Mesh
+                asset={m2Asset}
+                selected={selected}
+                hovered={hovered}
+                onClick={handleClick}
+                onOver={handleOver}
+                onOut={handleOut}
+              />
+            : showBillboard && !instanced && (
+              <SpawnVisual
+                color={factionColor(spawn)}
+                selected={selected}
+                hovered={hovered}
+                entry={spawn.entry ?? spawn.id}
+                compact={inBillboardLod}
+                onClick={handleClick}
+                onOver={handleOver}
+                onOut={handleOut}
+              />
+            )
+          }
+        </group>
+      )}
     </>
   );
 }
+
+export default memo(Editor3DSpawn);

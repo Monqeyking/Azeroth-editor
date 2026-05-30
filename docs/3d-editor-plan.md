@@ -100,23 +100,74 @@ three
 
 ## Fase 3: Geavanceerde Features (optioneel)
 
-### 3a — M2/WMO model preview ⬜
-- ⬜ DBC `CreatureDisplayInfo.dbc` opzoeken → modelbestandspad per entry
-- ⬜ M2 binair formaat parsen (vertices, indices, UV's, bones) voor 3.3.5
-- ⬜ BLP-texturen decoderen → Three.js textures
-- ⬜ `SkinnedMesh` bouwen per spawn
-- **Huidig:** billboards (gekleurde cirkels + entry ID) als placeholder
+### 3a — M2/WMO model preview ✅
+- ✅ DBC `CreatureDisplayInfo.dbc` opzoeken → modelbestandspad per entry
+- ✅ M2 binair formaat parsen (vertices, indices, UV's) voor 3.3.5
+- ✅ BLP-texturen decoderen → Three.js `DataTexture`
+- ✅ `InstancedMesh` per displayId (1 draw call per modeltype)
+- ✅ Geselecteerde spawn laadt individueel M2-mesh met gizmos
+- ✅ `m2Loader.js`: gedeeld materiaal per textuur, schijfcache v2, incomplete cache-entries worden gewist
+- ✅ BLP-zoekvolgorde: `RaptorSkin.blp` vóór `Raptor.blp`, listfile-discovery als fallback
+- ✅ Instanced hover = lichte schaalvergroting i.p.v. `instanceColor` (voorkomt flat/grijs uiterlijk)
+- ⬜ WMO gebouwen / objecten
+- ⬜ Animaties (bones / skinning)
 
-### 3b — Performance optimalisaties ⬜
-- ⬜ LOD: spawns verder weg renderen als simpele puntjes
-- ⬜ Frustum culling: niet-zichtbare objecten niet renderen
-- ⬜ Instancing: zelfde spawn types delen geometrie
+### 3b — Performance optimalisaties
+- ✅ LOD systeem (`spawnLod.js`): model (0–380) / billboard (380–720) / hidden (>720), gemeten op X/Z
+- ✅ `SpawnLodUpdater.jsx`: één `useFrame` voor alle spawns (geen 1000 losse checks)
+- ✅ `InstancedMesh` instancing: ~200 wolves = 1 draw call i.p.v. 200
+- ✅ Lagere startcamera (+85/+130 offset) → kleiner zichtbaar vlak bij opstarten
+- ✅ Prefetch-radius: 430 units (was 1400)
+- ✅ Schijfcache voor M2-assets (geen herhaalde MPQ-parsing)
+- ✅ **Camera-movement throttle**: LOD-updates en range-checks overslaan wanneer camera <3 units bewoog (XZ); selectieverandering forceert directe update
+- ✅ **Set-hergebruik in M2InstanceLayers.useFrame**: `nextSetRef` hergebruikt, snapshot alleen bij wijziging
+- ✅ **Fix InstancedMesh key**: was `${displayId}-${entries.length}` → nu `displayId`; geen GPU-remount meer bij elke spawn die range in/uit gaat
+- ⬜ **Billboard instancing**: `SpawnVisual`-cirkels zijn nog losse draw calls (200–300 bij mid-range); kunnen gebundeld worden als InstancedMesh net als M2
+- ✅ **Inspector "laden…" vs "niet gevonden"**: `getM2AssetState()` onderscheidt idle/loading/loaded/failed; inspector toont rood "niet gevonden" bij mislukte load
+- ✅ **File-found cache in mpq-reader**: `fileFoundIn` Map onthoudt in welke archive een bestand zit — herhaalde reads (modellen, texturen) slaan de volledige archive-scan over
+- ✅ **DBC warmup op app-start**: `config:load` en `config:save` starten `getM2DbcData()` direct op de achtergrond, zodat DBC al klaar is als de gebruiker de 3D editor opent
+- ⬜ **Persistente file-index**: `fileFoundIn` op schijf bewaren zodat ook de allereerste sessie de archive-scan overslaat (nu: eerste scan duurt nog steeds 30s, daarna instant)
+- ✅ **`React.memo` op `Editor3DSpawn`**: selectieverandering re-rendert nu alleen 1–2 spawns i.p.v. 1000
+- ✅ **`activeTool` alleen naar geselecteerde spawn**: tool-wissel triggert geen re-renders bij niet-geselecteerde spawns
+- ✅ **Per-displayId m2Cache subscriptie (`subscribeM2Asset`)**: 1 model laden triggert alleen state-updates bij spawns met dat displayId
+- ✅ **`frameloop="demand"` op Canvas**: R3F rendert alleen bij camerabeweging, interactie of model-load — niet continu 60fps
+- ✅ **`state.invalidate()` in CameraFlyControls + CameraFrameFocus**: continue frames tijdens vliegen/focus-animatie
+- ⬜ **M2 load throttle**: max 4 gelijktijdige IPC-loads; de rest in een wachtrij — voorkomt IPC-overbelasting bij camerabeweging naar nieuw gebied
 - ⬜ Web Workers: ADT parsing in achtergrond thread
 
-### 3c — Visual upgrades ⬜
+### 3c — Minimap overlay ✅
+- ✅ Worldmap-tegel (2D BLP-afbeelding uit MPQ) als HTML canvas overlay rechtsboven in de 3D viewport
+- ✅ Rode stip die de orbit-target camerapositie op de kaart aangeeft (via `CameraTracker` + `controls.target`)
+- ✅ Muiswiel-zoom op de minimap (1× t/m 16×), gecentreerd op camerapositie
+- ✅ Eigen offset-kalibratie per continent (`azeroth-minimap-offset` in localStorage), los van SpawnMapPage kalibratie
+- ⬜ Klikken op minimap = camera vliegt naar die locatie
+
+### 3d — Waypoint paden in 3D ⬜
+- ⬜ `waypoints` tabel uitlezen per geselecteerde creature guid
+- ⬜ Waypoints renderen als oranje bollen verbonden door lijnen (`<Line>` uit drei)
+- ⬜ Waypoints klikbaar + verplaatsbaar (gizmo per punt)
+- ⬜ Nieuwe waypoints toevoegen / verwijderen + DB write
+- **Waarde**: direct bruikbaar voor AI-pathing editten zonder de game te starten
+
+### 3e — Inspector uitbreiding ⬜
+- ⬜ `creature_template` data tonen: level range, health/mana, creature type, movement type, rank (Normal/Elite/Rare)
+- ⬜ `creature` extra kolommen: `spawndist` (wander radius) als cirkel in 3D weergeven
+- ⬜ Gameobject: `gameobject_template` naam + type tonen
+
+### 3f — Spawn toevoegen / verwijderen ⬜
+- ⬜ Rechtermuisknop op terrain → "Spawn plaatsen" → entry invoeren → `.npc add` / `.gobject add` via SOAP
+- ⬜ Geselecteerde spawn verwijderen → `DELETE FROM creature WHERE guid = ?` + `.npc delete` SOAP
+- Al deels gepland onder 2d
+
+### 3g — Multi-select ⬜
+- ⬜ Box-select (klik-sleep in viewport) + shift-klik
+- ⬜ Geselecteerde groep samen verplaatsen (offset behouden)
+- ⬜ Batch save
+
+### 3h — Visual upgrades ⬜
+- ⬜ Terrain texture layers (MCLY/MCAL alpha maps uit ADT) voor zichtbaar terrein i.p.v. groen vlak
+- ⬜ Wander-radius cirkel rond geselecteerde spawn (uit `spawndist` DB kolom)
 - ⬜ Fog/distance fade
-- ⬜ Minimap overlay
-- ⬜ Waypoint lijnen in 3D
 - ⬜ Day/night cycle
 
 ---
@@ -171,11 +222,19 @@ src/components/editor3d/
 
 ---
 
-## Volgende stap
+## Aanbevolen volgende stap
 
-De meest logische vervolgstap is **2c (database writes)** — zodat verplaatste spawns ook daadwerkelijk opgeslagen worden. Of **3a (M2 models)** als je de visuele weergave wilt verbeteren.
+**Terrain zichtbaarheid debuggen + hoogte-inkleuring**
+
+De ADT hoogte-mesh is geïmplementeerd maar laadt voor het grootste deel niet in. Waarschijnlijke oorzaken: tile-selectie te beperkt (max 16 tiles op basis van spawn-verdeling), spawn-data valt buiten tile-grenzen, of ADT-parsing levert lege chunks. Aanpak:
+1. Debug welke tiles geladen worden vs. welke er zijn
+2. Fix tile-selectie zodat het gebied rondom de camera gedekt is
+3. Optioneel: hoogte-inkleuring op basis van Z-waarde (sneeuw/gras/steen) als snelle visuele verbetering zonder texture-pipeline
+
+Alternatief als je liever feature-waarde toevoegt: **3d (waypoint paden)**.
 
 ---
 
 *Opgesteld: 26 mei 2026*
-*Bijgewerkt: 27 mei 2026 — Fase 1 volledig ✅, Fase 2a + 2b + 2c volledig ✅*
+*Bijgewerkt: 29 mei 2026 — Alle performance-optimalisaties ✅; feature-roadmap uitgebreid met minimap, waypoints, inspector-uitbreiding, spawn add/delete, multi-select*
+*Bijgewerkt: 29 mei 2026 — 3c Minimap overlay ✅ (canvas overlay, zoom, orbit-target tracking, eigen kalibratie per continent)*

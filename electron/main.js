@@ -91,11 +91,25 @@ function getConfigPath() {
   return path.join(app.getPath('userData'), 'azeroth-editor-config.json');
 }
 
+function warmupM2Dbc(cfg) {
+  if (!cfg?.worldmapMpqPath) return;
+  const dp = cfg.worldmapMpqPath;
+  setImmediate(() => {
+    try {
+      if (getMpqReader().isDataPath(dp)) {
+        console.log('[m2 warmup] DBC laden gestart op achtergrond');
+        getM2DbcData(dp).catch(e => console.warn('[m2 warmup] DBC fout:', e.message));
+      }
+    } catch (_) {}
+  });
+}
+
 ipcMain.handle('config:load', () => {
   try {
     const configPath = getConfigPath();
     if (fs.existsSync(configPath)) {
       const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+      warmupM2Dbc(data);
       return { success: true, data };
     }
     return { success: true, data: null };
@@ -111,7 +125,9 @@ ipcMain.handle('config:save', (_, config) => {
     if (fs.existsSync(configPath)) {
       current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     }
-    fs.writeFileSync(configPath, JSON.stringify({ ...current, ...config }, null, 2), 'utf8');
+    const merged = { ...current, ...config };
+    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), 'utf8');
+    warmupM2Dbc(merged);
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -138,6 +154,23 @@ function createWindow() {
       contextIsolation: true,
       nodeIntegration: false
     }
+  });
+
+  mainWindow.webContents.session.webRequest.onHeadersReceived((details, callback) => {
+    callback({
+      responseHeaders: {
+        ...details.responseHeaders,
+        'Content-Security-Policy': [
+          "default-src 'self' 'unsafe-inline' 'unsafe-eval';" +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://wowgaming.altervista.org https://code.jquery.com http://wow.zamimg.com https://wow.zamimg.com;" +
+          "connect-src 'self' https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com ws://localhost:*;" +
+          "img-src 'self' data: blob: https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com;" +
+          "style-src 'self' 'unsafe-inline' https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com https://fonts.googleapis.com;" +
+          "font-src 'self' data: https://fonts.gstatic.com https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com;" +
+          "worker-src 'self' blob:;"
+        ]
+      }
+    });
   });
 
   if (isDev) {
@@ -1023,62 +1056,110 @@ ipcMain.handle('minimap:getTile', async (_, minimapPath, mapId, col, row) => {
   }
 });
 
-// ── BLP2 / DXT1 decoder ───────────────────────────────────────────────────────
+// ── BLP2 decoder (DXT1 / DXT3 / DXT5 / paletted) ────────────────────────────
+function rgb565(c) {
+  return [(c >> 11 & 31) * 255 / 31 | 0, (c >> 5 & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0];
+}
+
+function dxt1Colors(src, bi) {
+  const c0v = src.readUInt16LE(bi);
+  const c1v = src.readUInt16LE(bi + 2);
+  const c0  = rgb565(c0v);
+  const c1  = rgb565(c1v);
+  if (c0v > c1v) {
+    return [c0, c1,
+      [((c0[0]*2+c1[0])/3)|0, ((c0[1]*2+c1[1])/3)|0, ((c0[2]*2+c1[2])/3)|0],
+      [((c0[0]+c1[0]*2)/3)|0, ((c0[1]+c1[1]*2)/3)|0, ((c0[2]+c1[2]*2)/3)|0],
+    ];
+  }
+  return [c0, c1, [((c0[0]+c1[0])/2)|0, ((c0[1]+c1[1])/2)|0, ((c0[2]+c1[2])/2)|0], [0,0,0]];
+}
+
+function writeDXTPixels(src, colorBase, lut, rgba, bx, by, w, h, alphas) {
+  const colors = dxt1Colors(src, colorBase);
+  for (let py = 0; py < 4; py++) {
+    for (let px = 0; px < 4; px++) {
+      const ix = bx * 4 + px; const iy = by * 4 + py;
+      if (ix >= w || iy >= h) continue;
+      const pidx = py * 4 + px;
+      const [r,g,b] = colors[(lut >> (pidx * 2)) & 3];
+      const off = (iy * w + ix) * 4;
+      rgba[off] = r; rgba[off+1] = g; rgba[off+2] = b;
+      rgba[off+3] = alphas ? alphas[pidx] : 255;
+    }
+  }
+}
+
+function decodeDXT1(src, rgba, w, h) {
+  const bw = Math.ceil(w / 4), bh = Math.ceil(h / 4);
+  for (let by = 0; by < bh; by++)
+    for (let bx = 0; bx < bw; bx++) {
+      const bi = (by * bw + bx) * 8;
+      writeDXTPixels(src, bi, src.readUInt32LE(bi + 4), rgba, bx, by, w, h, null);
+    }
+}
+
+function decodeDXT3(src, rgba, w, h) {
+  const bw = Math.ceil(w / 4), bh = Math.ceil(h / 4);
+  for (let by = 0; by < bh; by++)
+    for (let bx = 0; bx < bw; bx++) {
+      const bi = (by * bw + bx) * 16;
+      const alphas = [];
+      for (let i = 0; i < 8; i++) {
+        const b = src[bi + i];
+        alphas.push((b & 0xF) * 17, ((b >> 4) & 0xF) * 17);
+      }
+      writeDXTPixels(src, bi + 8, src.readUInt32LE(bi + 12), rgba, bx, by, w, h, alphas);
+    }
+}
+
+function decodeDXT5(src, rgba, w, h) {
+  const bw = Math.ceil(w / 4), bh = Math.ceil(h / 4);
+  for (let by = 0; by < bh; by++)
+    for (let bx = 0; bx < bw; bx++) {
+      const bi = (by * bw + bx) * 16;
+      const a0 = src[bi], a1 = src[bi + 1];
+      const at = a0 > a1
+        ? [a0, a1,
+            ((6*a0+1*a1)/7+.5)|0, ((5*a0+2*a1)/7+.5)|0,
+            ((4*a0+3*a1)/7+.5)|0, ((3*a0+4*a1)/7+.5)|0,
+            ((2*a0+5*a1)/7+.5)|0, ((1*a0+6*a1)/7+.5)|0]
+        : [a0, a1,
+            ((4*a0+1*a1)/5+.5)|0, ((3*a0+2*a1)/5+.5)|0,
+            ((2*a0+3*a1)/5+.5)|0, ((1*a0+4*a1)/5+.5)|0,
+            0, 255];
+      let aibig = BigInt(0);
+      for (let b = 0; b < 6; b++) aibig |= BigInt(src[bi + 2 + b]) << BigInt(b * 8);
+      const alphas = [];
+      for (let i = 0; i < 16; i++) { alphas.push(at[Number(aibig & 7n)]); aibig >>= 3n; }
+      writeDXTPixels(src, bi + 8, src.readUInt32LE(bi + 12), rgba, bx, by, w, h, alphas);
+    }
+}
+
 function decodeBLP(buffer) {
   if (buffer.toString('ascii', 0, 4) !== 'BLP2') throw new Error('Geen BLP2');
-  const w      = buffer.readUInt32LE(12);
-  const h      = buffer.readUInt32LE(16);
-  const offset = buffer.readUInt32LE(20);
-  const size   = buffer.readUInt32LE(84);
-  const src    = buffer.slice(offset, offset + size);
-  const rgba   = Buffer.alloc(w * h * 4);
+  const encoding      = buffer.readUInt8(8);
+  const alphaDepth    = buffer.readUInt8(9);
+  const alphaEncoding = buffer.readUInt8(10);
+  const w             = buffer.readUInt32LE(12);
+  const h             = buffer.readUInt32LE(16);
+  const offset        = buffer.readUInt32LE(20);
+  const size          = buffer.readUInt32LE(84);
+  const src           = buffer.slice(offset, offset + size);
+  const rgba          = Buffer.alloc(w * h * 4, 255);
 
-  // DXT1: 4×4 blokken, 8 bytes per blok
-  const bw = Math.ceil(w / 4);
-  const bh = Math.ceil(h / 4);
-
-  function rgb565(c) {
-    return [(c >> 11 & 31) * 255 / 31 | 0, (c >> 5 & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0];
-  }
-
-  for (let by = 0; by < bh; by++) {
-    for (let bx = 0; bx < bw; bx++) {
-      const bi  = (by * bw + bx) * 8;
-      const c0v = src.readUInt16LE(bi);
-      const c1v = src.readUInt16LE(bi + 2);
-      const lut = src.readUInt32LE(bi + 4);
-      const c0  = rgb565(c0v);
-      const c1  = rgb565(c1v);
-      let colors;
-      if (c0v > c1v) {
-        colors = [
-          c0,
-          c1,
-          [((c0[0]*2+c1[0])/3)|0, ((c0[1]*2+c1[1])/3)|0, ((c0[2]*2+c1[2])/3)|0],
-          [((c0[0]+c1[0]*2)/3)|0, ((c0[1]+c1[1]*2)/3)|0, ((c0[2]+c1[2]*2)/3)|0],
-        ];
-      } else {
-        colors = [
-          c0,
-          c1,
-          [((c0[0]+c1[0])/2)|0, ((c0[1]+c1[1])/2)|0, ((c0[2]+c1[2])/2)|0],
-          [0,0,0],
-        ];
-      }
-      for (let py = 0; py < 4; py++) {
-        for (let px = 0; px < 4; px++) {
-          const ix = bx * 4 + px;
-          const iy = by * 4 + py;
-          if (ix >= w || iy >= h) continue;
-          const idx = (lut >> ((py * 4 + px) * 2)) & 3;
-          const [r,g,b] = colors[idx];
-          const off = (iy * w + ix) * 4;
-          rgba[off]   = r;
-          rgba[off+1] = g;
-          rgba[off+2] = b;
-          rgba[off+3] = 255;
-        }
-      }
+  if (encoding === 2) {
+    if (alphaEncoding === 7) decodeDXT5(src, rgba, w, h);
+    else if (alphaEncoding === 1) decodeDXT3(src, rgba, w, h);
+    else decodeDXT1(src, rgba, w, h);
+  } else {
+    // Paletted (encoding === 1): palette at offset 148 (256 × uint32 BGRA)
+    for (let i = 0; i < Math.min(w * h, src.length); i++) {
+      const p = 148 + src[i] * 4;
+      rgba[i*4]   = buffer[p+2];
+      rgba[i*4+1] = buffer[p+1];
+      rgba[i*4+2] = buffer[p];
+      rgba[i*4+3] = alphaDepth ? (src[w*h + i] ?? 255) : 255;
     }
   }
   return { rgba, w, h };
@@ -1155,9 +1236,11 @@ ipcMain.handle('spawns:load', async (_, { mapId, limit = 1000 }) => {
     const [creatures] = await dbConnection.query(
       `SELECT CONCAT('c_', c.guid) AS guid, c.id1 AS entry, ct.name,
               c.position_x AS x, c.position_y AS y, c.position_z AS z,
-              'creature' AS type, ct.faction AS faction
+              'creature' AS type, ct.faction AS faction,
+              ctm.CreatureDisplayID AS displayId
        FROM creature c
        JOIN creature_template ct ON c.id1 = ct.entry
+       LEFT JOIN creature_template_model ctm ON ctm.CreatureID = ct.entry AND ctm.Idx = 0
        WHERE c.map = ${m} LIMIT ${lc}`
     );
     const [gameobjects] = await dbConnection.query(
@@ -1260,14 +1343,32 @@ function parseAdt(buf) {
 
     if (!offsMCVT || ds + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
 
-    const hStart = ds + offsMCVT + 8; // sla MCVT magic+size over
-    const heights = [];
-    for (let vRow = 0; vRow < 9; vRow++) {
-      for (let vCol = 0; vCol < 9; vCol++) {
-        heights.push(buf.readFloatLE(hStart + (vRow * 17 + vCol) * 4));
-      }
+    const hStart = ds + offsMCVT + 8;
+    // MCVT: 17 floats per rij: 9 outer + 8 inner (staggered centers)
+    // outer[r][c] = hStart + (r*17 + c) * 4          (r=0..8, c=0..8)
+    // inner[r][c] = hStart + (r*17 + 9 + c) * 4      (r=0..7, c=0..7)
+    const outer = new Float32Array(9 * 9);
+    const inner = new Float32Array(8 * 8);
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        outer[r * 9 + c] = buf.readFloatLE(hStart + (r * 17 + c) * 4);
+    for (let r = 0; r < 8; r++)
+      for (let c = 0; c < 8; c++)
+        inner[r * 8 + c] = buf.readFloatLE(hStart + (r * 17 + 9 + c) * 4);
+    // ── DEBUG HEIGHT OFFSET ──────────────────────────────────────────────────
+    if (ix === 8 && iy === 8) {
+      console.log('[ADT DEBUG] chunk ix=8 iy=8 —',
+        'posX=', posX.toFixed(4),
+        'posY=', posY.toFixed(4),
+        'posZ=', posZ.toFixed(4),
+        '| outer[0]=',   outer[0].toFixed(4),
+        'outer[40]=',  outer[40].toFixed(4),
+        'outer[80]=',  outer[80].toFixed(4),
+        '| posZ+outer[40]=', (posZ + outer[40]).toFixed(4)
+      );
     }
-    chunks.push({ ix, iy, posX, posY, posZ, heights });
+    // ── END DEBUG ────────────────────────────────────────────────────────────
+    chunks.push({ ix, iy, posX, posY, posZ, outer, inner });
   }
   return chunks;
 }
@@ -1281,7 +1382,7 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
 
     const result = [];
     for (const { tileX, tileY } of tiles) {
-      const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileX, tileY);
+      const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
       if (!buf) continue;
       const chunks = parseAdt(buf);
       if (chunks) result.push({ tileX, tileY, chunks });
@@ -1341,6 +1442,574 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
     return { success: true, data: `data:image/png;base64,${png.toString('base64')}` };
   } catch (e) {
     console.error('worldmap:getZoneImage error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ─── M2 model loader ──────────────────────────────────────────────────────────
+const m2DiskCache = require('./m2-disk-cache');
+const { runM2Load } = require('./m2-load-queue');
+const {
+  parseSkinFile, resolveVisibleGeosets, buildGeosetDebugInfo, buildIndicesFromSkin,
+  parseCharHairGeosets, parseFacialHairGeosets, parseCreatureDisplayInfoExtra,
+} = require('./m2-geoset');
+
+function modelNeedsCreatureTexture(geo) {
+  if (!geo?.textures?.length) return false;
+  return geo.textures.some(t => {
+    if (t.type >= 11 && t.type <= 13) return true;
+    if (t.type === 0 && t.filename && !/PARTICLE|REFLECT|ENVIRON|GLOW|SPARKLE/i.test(t.filename))
+      return true;
+    return false;
+  });
+}
+
+function variantHasTexture(result) {
+  return !!(result?.textureRgba && result.textureW > 0 && result.textureH > 0);
+}
+
+function isCompleteVariant(result, geo) {
+  if (!result) return false;
+  if (!modelNeedsCreatureTexture(geo)) return true;
+  return variantHasTexture(result);
+}
+
+function tryLoadM2VariantFromDisk(userData, variantKey, modelPath) {
+  const diskVar = m2DiskCache.readDiskVariant(userData, variantKey);
+  if (!diskVar || diskVar.modelPath !== modelPath || !diskVar.indices?.length) return null;
+
+  let geo = m2GeometryCache.get(modelPath);
+  if (!geo) return null;
+
+  const result = {
+    positions: geo.positions,
+    normals:   geo.normals,
+    uvs:       geo.uvs,
+    indices:   new Uint32Array(diskVar.indices),
+    textureRgba: diskVar.textureRgba,
+    textureW:    diskVar.textureW,
+    textureH:    diskVar.textureH,
+    modelPath,
+    texturePath: null,
+  };
+
+  if (!isCompleteVariant(result, geo)) {
+    m2DiskCache.deleteDiskVariant(userData, variantKey);
+    return null;
+  }
+  return result;
+}
+
+function getM2DataPath() {
+  const cfgPath = getConfigPath();
+  if (!fs.existsSync(cfgPath)) return null;
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const dataPath = cfg.worldmapMpqPath;
+  if (!dataPath || !getMpqReader().isDataPath(dataPath)) return null;
+  return dataPath;
+}
+
+// DBC helpers
+function parseDBC(buf) {
+  if (!buf || buf.toString('ascii', 0, 4) !== 'WDBC') return null;
+  const numRecords   = buf.readUInt32LE(4);
+  const recordSize   = buf.readUInt32LE(12);
+  const strBlockSize = buf.readUInt32LE(16);
+  const dataStart    = 20;
+  const strStart     = dataStart + numRecords * recordSize;
+  return { buf, numRecords, recordSize, strBlockSize, dataStart, strStart };
+}
+
+function dbcStr(dbc, offset, corr = 1) {
+  if (!offset) return '';
+  const pos = dbc.strStart + offset - corr;
+  if (pos < dbc.strStart || pos >= dbc.buf.length) return '';
+  let end = pos;
+  while (end < dbc.buf.length && dbc.buf[end] !== 0) end++;
+  return dbc.buf.toString('utf8', pos, end);
+}
+
+function dbcStrCdi(dbc, offset) {
+  if (!offset) return '';
+  const a = dbcStr(dbc, offset, 0);
+  const b = dbcStr(dbc, offset, 1);
+  if (!a) return b;
+  if (!b) return a;
+  return a.length >= b.length ? a : b;
+}
+
+// DBC index: Map<id, recordOffset>
+function dbcBuildIndex(dbc) {
+  const map = new Map();
+  for (let i = 0; i < dbc.numRecords; i++) {
+    const off = dbc.dataStart + i * dbc.recordSize;
+    map.set(dbc.buf.readUInt32LE(off), off);
+  }
+  return map;
+}
+
+// Module-level caches
+let m2DbcCachePromise = null;
+let m2DbcCachePath    = null;
+const m2ModelCache     = new Map(); // displayId → result|null
+const m2VariantCache   = new Map(); // modelPath|texVars → result
+const m2GeometryCache  = new Map(); // modelPath → { positions, normals, uvs, textures, skin }
+const m2SkinCache      = new Map(); // modelPath → parsed .skin
+const blpTextureCache  = new Map(); // blpPath (lower) → { textureRgba, textureW, textureH }
+const m2VariantInflight  = new Map(); // variantKey → Promise<result|null>
+const m2DisplayInflight  = new Map(); // displayId → Promise<result|null>
+
+function getM2DbcData(dataPath) {
+  if (m2DbcCachePath === dataPath && m2DbcCachePromise) return m2DbcCachePromise;
+
+  m2DbcCachePath    = dataPath;
+  m2DbcCachePromise = (async () => {
+    const reader = getMpqReader();
+    async function readDbc(name) {
+      const buf = await reader.readFileFromMpqs(dataPath, `DBFilesClient\\${name}`);
+      return buf ? parseDBC(buf) : null;
+    }
+
+    const [cdiDbc, cmdDbc, cdieDbc, hairDbc, facialDbc, charSectionsDbc] = await Promise.all([
+      readDbc('CreatureDisplayInfo.dbc'),
+      readDbc('CreatureModelData.dbc'),
+      readDbc('CreatureDisplayInfoExtra.dbc'),
+      readDbc('CharHairGeosets.dbc'),
+      readDbc('CharacterFacialHairStyles.dbc'),
+      readDbc('CharSections.dbc'),
+    ]);
+
+    const displayInfo = new Map();
+    const modelData   = new Map();
+
+    if (cdiDbc) {
+      for (const [id, off] of dbcBuildIndex(cdiDbc)) {
+        displayInfo.set(id, {
+          modelId:  cdiDbc.buf.readUInt32LE(off + 4),
+          extendedDisplayInfoId: cdiDbc.buf.readUInt32LE(off + 12),
+          creatureGeosetData: cdiDbc.buf.readUInt32LE(off + 60),
+          texVar1:  dbcStrCdi(cdiDbc, cdiDbc.buf.readUInt32LE(off + 24)),
+          texVar2:  dbcStrCdi(cdiDbc, cdiDbc.buf.readUInt32LE(off + 28)),
+          texVar3:  dbcStrCdi(cdiDbc, cdiDbc.buf.readUInt32LE(off + 32)),
+        });
+      }
+    }
+
+    if (cmdDbc) {
+      for (const [id, off] of dbcBuildIndex(cmdDbc)) {
+        modelData.set(id, {
+          modelPath: dbcStr(cmdDbc, cmdDbc.buf.readUInt32LE(off + 8), 0),
+        });
+      }
+    }
+
+    const sortedModelIds = [...modelData.keys()].sort((a,b) => a-b);
+    const sortedDisplayIds = [...displayInfo.keys()].sort((a,b) => a-b);
+    console.log(`[m2 DBC] CDI recordSize=${cdiDbc?.recordSize} strBlockSize=${cdiDbc?.strBlockSize}, CMD recordSize=${cmdDbc?.recordSize} strBlockSize=${cmdDbc?.strBlockSize}`);
+    // Raw CMD offset waarden bij record+8 (de modelPath string ref)
+    if (cmdDbc) {
+      const rawOffsets = [];
+      for (let i = 0; i < Math.min(5, cmdDbc.numRecords); i++) {
+        const off = cmdDbc.dataStart + i * cmdDbc.recordSize;
+        rawOffsets.push(`id=${cmdDbc.buf.readUInt32LE(off)} off4=${cmdDbc.buf.readUInt32LE(off+4)} off8=${cmdDbc.buf.readUInt32LE(off+8)}`);
+      }
+      console.log(`[m2 DBC] CMD eerste records (id/off4/off8):`, rawOffsets);
+    }
+    console.log(`[m2 DBC] geladen: ${displayInfo.size} displayInfo, ${modelData.size} modelData`);
+    console.log(`[m2 DBC] eerste modelData IDs:`, sortedModelIds.slice(0, 15));
+    console.log(`[m2 DBC] eerste modelData paden:`, sortedModelIds.slice(0, 5).map(id => `${id}=${modelData.get(id)?.modelPath}`));
+    console.log(`[m2 DBC] eerste displayInfo IDs:`, sortedDisplayIds.slice(0, 5));
+    console.log(`[m2 DBC] eerste displayInfo entries:`, sortedDisplayIds.slice(0, 3).map(id => `${id}=${JSON.stringify(displayInfo.get(id))}`));
+    return {
+      dataPath, displayInfo, modelData,
+      cdieDbc, charHair: parseCharHairGeosets(hairDbc), facialHair: parseFacialHairGeosets(facialDbc),
+      charSections: parseCharSections(charSectionsDbc),
+    };
+  })();
+
+  return m2DbcCachePromise;
+}
+
+function parseM2(buf) {
+  if (!buf || buf.toString('ascii', 0, 4) !== 'MD20') return null;
+
+  const nVertices   = buf.readUInt32LE(0x3C);
+  const ofsVertices = buf.readUInt32LE(0x40);
+  const nTextures   = buf.readUInt32LE(0x50);
+  const ofsTextures = buf.readUInt32LE(0x54);
+
+  const positions = [], normals = [], uvs = [];
+
+  for (let i = 0; i < nVertices; i++) {
+    const v = ofsVertices + i * 48;
+    const px = buf.readFloatLE(v),      py = buf.readFloatLE(v + 4),  pz = buf.readFloatLE(v + 8);
+    const nx = buf.readFloatLE(v + 20), ny = buf.readFloatLE(v + 24), nz = buf.readFloatLE(v + 28);
+    const u  = buf.readFloatLE(v + 32), vv = buf.readFloatLE(v + 36);
+    // M2 → Three.js: [-y, z, x]
+    positions.push(-py, pz, px);
+    normals.push(-ny, nz, nx);
+    uvs.push(u, vv);
+  }
+
+  const textures = [];
+  for (let i = 0; i < nTextures; i++) {
+    const t    = ofsTextures + i * 16;
+    const type = buf.readUInt32LE(t);
+    const nFn  = buf.readUInt32LE(t + 8);
+    const oFn  = buf.readUInt32LE(t + 12);
+    let filename = '';
+    if (nFn > 0 && oFn > 0 && oFn + nFn <= buf.length) {
+      let end = oFn;
+      while (end < buf.length && buf[end] !== 0) end++;
+      filename = buf.toString('ascii', oFn, end).replace(/\//g, '\\');
+    }
+    textures.push({ type, filename });
+  }
+
+  return { positions, normals, uvs, textures };
+}
+
+function parseSkin(buf) {
+  const skin = parseSkinFile(buf);
+  if (!skin) return null;
+  const indices = [];
+  for (const sm of skin.submeshes) {
+    for (let i = 0; i < sm.indexCount; i++) {
+      const triIdx = skin.indexLookup[sm.indexStart + i];
+      indices.push(skin.vertexLookup[triIdx] ?? 0);
+    }
+  }
+  return indices;
+}
+
+async function loadSkinData(reader, dataPath, modelPath) {
+  if (m2SkinCache.has(modelPath)) return m2SkinCache.get(modelPath);
+  const stem = modelPath.replace(/\.m2$/i, '');
+  for (const skinPath of [`${stem}00.skin`, `${stem}01.skin`, `${stem}00.SKIN`]) {
+    const skinBuf = await reader.readFileFromMpqs(dataPath, skinPath);
+    const skin = skinBuf ? parseSkinFile(skinBuf) : null;
+    if (skin?.submeshes?.length) {
+      m2SkinCache.set(modelPath, skin);
+      return skin;
+    }
+  }
+  return null;
+}
+
+function m2ModelStem(modelPath) {
+  const base = modelPath.split('\\').pop() || modelPath.split('/').pop() || '';
+  return base.replace(/\.(m2|mdx)$/i, '');
+}
+
+// CharSections.dbc: ID(0) RaceID(4) SexID(8) BaseSection(12) Tex1(16) Tex2(20) Tex3(24) Flags(28) VariationIndex(32) ColorIndex(36)
+// recordSize = 40
+function parseCharSections(dbc) {
+  if (!dbc) return [];
+  const rows = [];
+  for (let i = 0; i < dbc.numRecords; i++) {
+    const off = dbc.dataStart + i * dbc.recordSize;
+    rows.push({
+      race:      dbc.buf.readUInt32LE(off + 4),
+      sex:       dbc.buf.readUInt32LE(off + 8),
+      section:   dbc.buf.readUInt32LE(off + 12),
+      tex1:      dbcStr(dbc, dbc.buf.readUInt32LE(off + 16), 0),
+      tex2:      dbcStr(dbc, dbc.buf.readUInt32LE(off + 20), 0),
+      variation: dbc.buf.readUInt32LE(off + 32),
+      color:     dbc.buf.readUInt32LE(off + 36),
+    });
+  }
+  return rows;
+}
+
+function charSectionTextureCandidates(charSections, race, sex, skin, face) {
+  const out = [];
+  if (!charSections?.length) return out;
+  const match = (section, variation, color) =>
+    charSections.find(r => r.race === race && r.sex === sex && r.section === section && r.variation === variation && r.color === color);
+
+  const body = match(0, 0, skin);
+  if (body?.tex1) out.push(body.tex1);
+
+  const face1 = match(1, face, skin);
+  if (face1?.tex1) out.push(face1.tex1);
+  if (face1?.tex2) out.push(face1.tex2);
+
+  return out;
+}
+
+function inferCharacterBakeCandidates(modelDir, modelPath, extra) {
+  if (!extra) return [];
+  const stem = m2ModelStem(modelPath);
+  const skin = String(extra.skin ?? 0).padStart(2, '0');
+  const hairColor = String(extra.hairColor ?? 0).padStart(2, '0');
+  // Pattern: VariationIndex=00, ColorIndex=skin (confirmed from CharSections.dbc)
+  const patterns = [
+    `${stem}Skin00_${skin}`,
+    `${stem}Skin${skin}_${hairColor}`,
+    `${stem}Skin${skin}_00`,
+    `${stem}Skin00_${hairColor}`,
+    `${stem}Skin00_00`,
+    `${stem}Skin`,
+  ];
+  return patterns.map(p => `${modelDir}${p}.blp`);
+}
+
+function creatureTextureCandidates(modelDir, modelPath, texVars, m2, discovered = []) {
+  const stem = m2ModelStem(modelPath);
+  const out = [];
+
+  for (const tex of m2.textures) {
+    if (tex.type >= 11 && tex.type <= 13) {
+      const v = texVars[tex.type - 11];
+      if (v) out.push(modelDir + v + '.blp');
+    }
+  }
+  for (const v of texVars) {
+    if (v) out.push(modelDir + v + '.blp');
+  }
+  if (!/skin$/i.test(stem)) out.push(modelDir + stem + 'Skin.blp');
+  for (const p of discovered) out.push(p);
+  for (const tex of m2.textures) {
+    if (tex.type === 0 && tex.filename && !/PARTICLE|REFLECT|ENVIRON|GLOW|SPARKLE/i.test(tex.filename))
+      out.push(tex.filename);
+  }
+  out.push(modelDir + stem + '.blp');
+  return [...new Set(out)];
+}
+
+function blpCacheKey(p) {
+  return p.replace(/\//g, '\\').toLowerCase();
+}
+
+function m2VariantKey(displayId) {
+  return `display:${displayId}`;
+}
+
+async function getOrLoadM2Geometry(reader, dataPath, modelPath, log) {
+  if (m2GeometryCache.has(modelPath)) {
+    log('geometrie cache hit:', modelPath);
+    return m2GeometryCache.get(modelPath);
+  }
+
+  const m2Buf = await reader.readFileFromMpqs(dataPath, modelPath);
+  if (!m2Buf) return null;
+
+  const m2 = parseM2(m2Buf);
+  if (!m2) return null;
+
+  const skin = await loadSkinData(reader, dataPath, modelPath);
+  if (!skin) return null;
+
+  const geo = {
+    positions: new Float32Array(m2.positions),
+    normals:   new Float32Array(m2.normals),
+    uvs:       new Float32Array(m2.uvs),
+    textures:  m2.textures,
+    skin,
+  };
+  m2GeometryCache.set(modelPath, geo);
+  log('geometrie gecached:', modelPath);
+  return geo;
+}
+
+async function loadFirstCreatureBlp(reader, dataPath, candidates, log) {
+  for (const p of candidates) {
+    const key = blpCacheKey(p);
+    if (blpTextureCache.has(key)) {
+      log('textuur cache hit:', p);
+      return blpTextureCache.get(key);
+    }
+
+    const buf = await reader.readFileFromMpqs(dataPath, p);
+    if (!buf) continue;
+    if (buf.length < 4) continue;
+    const magic = buf.toString('ascii', 0, 4);
+    if (magic !== 'BLP2') continue;
+
+    try {
+      const decoded = decodeBLP(buf);
+      const entry = {
+        textureRgba: new Uint8Array(decoded.rgba),
+        textureW: decoded.w,
+        textureH: decoded.h,
+        blpPath: p,
+      };
+      blpTextureCache.set(key, entry);
+      log(`textuur gecached: ${p} (${decoded.w}×${decoded.h})`);
+      return entry;
+    } catch (e) {
+      log('BLP decode fout:', p, e.message);
+    }
+  }
+  return null;
+}
+
+async function loadM2ModelForDisplay(displayId, dataPath, log) {
+  const { displayInfo, modelData, cdieDbc, charHair, facialHair, charSections } = await getM2DbcData(dataPath);
+
+  const cdi = displayInfo.get(displayId);
+  if (!cdi) { log('displayId niet in DBC'); return null; }
+
+  const cmd = modelData.get(cdi.modelId);
+  if (!cmd?.modelPath) { log(`modelData ${cdi.modelId} niet gevonden`); return null; }
+
+  const modelPath = cmd.modelPath.replace(/\//g, '\\').replace(/\.mdx$/i, '.m2');
+  const texVars   = [cdi.texVar1, cdi.texVar2, cdi.texVar3];
+  const variantKey = m2VariantKey(displayId);
+  const extra = parseCreatureDisplayInfoExtra(cdieDbc, cdi.extendedDisplayInfoId);
+
+  const userData = app.getPath('userData');
+
+  if (m2VariantCache.has(variantKey)) {
+    const cached = m2VariantCache.get(variantKey);
+    const geo = m2GeometryCache.get(modelPath);
+    if (isCompleteVariant(cached, geo)) {
+      log('variant cache hit:', variantKey);
+      return cached;
+    }
+    m2VariantCache.delete(variantKey);
+    log('variant cache onvolledig, opnieuw laden:', variantKey);
+  }
+
+  const diskVariant = tryLoadM2VariantFromDisk(userData, variantKey, modelPath);
+  if (diskVariant) {
+    log('variant disk cache hit:', variantKey);
+    m2VariantCache.set(variantKey, diskVariant);
+    return diskVariant;
+  }
+
+  if (m2VariantInflight.has(variantKey)) {
+    log('variant wacht op lopende load');
+    return m2VariantInflight.get(variantKey);
+  }
+
+  const loadWork = (async () => {
+  const reader = getMpqReader();
+  const geo = await getOrLoadM2Geometry(reader, dataPath, modelPath, log);
+  if (!geo?.skin) return null;
+
+  const visible = resolveVisibleGeosets(geo.skin.submeshes, cdi, extra, charHair, facialHair);
+  const geosetDebug = buildGeosetDebugInfo(geo.skin.submeshes, visible, cdi, extra, charHair, facialHair);
+  const indexList = buildIndicesFromSkin(geo.skin, visible);
+  if (!indexList.length) return null;
+
+  const modelDir = modelPath.includes('\\') ? modelPath.substring(0, modelPath.lastIndexOf('\\') + 1) : '';
+  const stem     = m2ModelStem(modelPath);
+  let discovered = [];
+  if (reader.discoverCreatureBlps) {
+    discovered = await reader.discoverCreatureBlps(dataPath, modelDir, stem);
+  }
+
+  const candidates = [];
+  if (extra?.bakeName) {
+    const bake = extra.bakeName.replace(/\.blp$/i, '').replace(/\//g, '\\');
+    candidates.push(bake.includes('\\') ? `${bake}.blp` : `${modelDir}${bake}.blp`);
+  }
+  if (extra) {
+    candidates.push(...charSectionTextureCandidates(charSections, extra.race, extra.sex, extra.skin, extra.face));
+    candidates.push(...inferCharacterBakeCandidates(modelDir, modelPath, extra));
+  }
+  const m2Stub = { textures: geo.textures };
+  candidates.push(...creatureTextureCandidates(modelDir, modelPath, texVars, m2Stub, discovered));
+  const tex = await loadFirstCreatureBlp(reader, dataPath, candidates, log);
+
+  const debugInfo = {
+    ...geosetDebug,
+    modelPath,
+    texVar: texVars.filter(Boolean),
+    triangleCount: Math.floor(indexList.length / 3),
+    textureLoaded: !!tex?.blpPath,
+    texturePath: tex?.blpPath ?? null,
+    textureSize: tex ? `${tex.textureW}x${tex.textureH}` : null,
+    textureCandidates: candidates.slice(0, 20),
+  };
+  log('geoset:', JSON.stringify(debugInfo));
+  if (!tex?.blpPath) log('texture MISS — first candidates:', candidates.slice(0, 8));
+
+  const result = {
+    positions: geo.positions,
+    normals:   geo.normals,
+    uvs:       geo.uvs,
+    indices:   new Uint32Array(indexList),
+    textureRgba: tex?.textureRgba ?? null,
+    textureW:    tex?.textureW ?? 0,
+    textureH:    tex?.textureH ?? 0,
+    modelPath,
+    texturePath: tex?.blpPath ?? null,
+    debug: debugInfo,
+  };
+
+  if (isCompleteVariant(result, geo)) {
+    m2VariantCache.set(variantKey, result);
+    m2DiskCache.writeDiskVariant(userData, variantKey, modelPath, result);
+  } else {
+    log('variant zonder textuur niet gecached:', variantKey, 'candidates:', candidates.slice(0, 8));
+  }
+  return result;
+  })();
+
+  m2VariantInflight.set(variantKey, loadWork);
+  try {
+    return await loadWork;
+  } finally {
+    m2VariantInflight.delete(variantKey);
+  }
+}
+
+ipcMain.handle('m2:loadModel', async (_, { displayId }) => {
+  const log = (...a) => console.log(`[m2:${displayId}]`, ...a);
+  try {
+    if (!displayId) return { success: false, error: 'Geen displayId' };
+
+    const dataPath = getM2DataPath();
+    if (!dataPath) return { success: false, error: 'Geen MPQ pad' };
+
+    if (m2ModelCache.has(displayId)) {
+      const cached = m2ModelCache.get(displayId);
+      if (cached === null) return { success: false, error: 'Model niet beschikbaar (cache)' };
+      if (variantHasTexture(cached)) return { success: true, data: cached };
+      m2ModelCache.delete(displayId);
+      log('display cache zonder textuur gewist, opnieuw laden');
+    }
+
+    const result = await loadM2ForDisplay(displayId, dataPath, log);
+    if (!result) {
+      m2ModelCache.set(displayId, null);
+      return { success: false, error: 'Model laden mislukt' };
+    }
+    if (variantHasTexture(result)) m2ModelCache.set(displayId, result);
+    return { success: true, data: result };
+  } catch (e) {
+    console.error(`[m2:${displayId}] EXCEPTION:`, e);
+    return { success: false, error: e.message };
+  }
+});
+
+function loadM2ForDisplay(displayId, dataPath, log) {
+  if (m2DisplayInflight.has(displayId)) return m2DisplayInflight.get(displayId);
+  const work = runM2Load(() => loadM2ModelForDisplay(displayId, dataPath, log))
+    .finally(() => m2DisplayInflight.delete(displayId));
+  m2DisplayInflight.set(displayId, work);
+  return work;
+}
+
+ipcMain.handle('m2:prefetch', async (_, { displayIds }) => {
+  try {
+    const dataPath = getM2DataPath();
+    if (!dataPath || !Array.isArray(displayIds)) return { success: false };
+
+    const log = () => {};
+    const unique = [...new Set(displayIds.filter(Boolean))].slice(0, 48);
+
+    for (const displayId of unique) {
+      if (m2ModelCache.has(displayId) || m2DisplayInflight.has(displayId)) continue;
+      loadM2ForDisplay(displayId, dataPath, log)
+        .then(result => { m2ModelCache.set(displayId, result ?? null); })
+        .catch(() => { m2ModelCache.set(displayId, null); });
+    }
+
+    return { success: true, queued: unique.length };
+  } catch (e) {
     return { success: false, error: e.message };
   }
 });

@@ -36,6 +36,9 @@ function ensureMounted(dataPath) {
   // Zap caches bij pad-wijziging
   zoneCache.clear();
   tileCache.clear();
+  listfileCache.clear();
+  blpDirCache.clear();
+  fileFoundIn.clear();
 }
 
 // ── MPQ-bestanden zoeken ───────────────────────────────────────────────────────
@@ -87,8 +90,9 @@ function toStormPath(dataPath, mpqAbsPath) {
 }
 
 // ── Caches ─────────────────────────────────────────────────────────────────────
-const zoneCache = new Map();   // dataPath → string[]
-const tileCache = new Map();   // `dataPath|zone|idx` → Buffer
+const zoneCache     = new Map();   // dataPath → string[]
+const tileCache     = new Map();   // `dataPath|zone|idx` → Buffer
+const fileFoundIn   = new Map();   // `${dataPath}|${lcPath}` → mpqAbsPath  (memoïseert welke archive een bestand bevat)
 
 // ── Zones ophalen via listfile ─────────────────────────────────────────────────
 async function listWorldmapZones(dataPath) {
@@ -219,4 +223,128 @@ async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   return null;
 }
 
-module.exports = { isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, validateDataPath };
+function pathVariants(internalPath) {
+  const p = internalPath.replace(/\//g, '\\');
+  const variants = new Set([
+    p,
+    p.toUpperCase(),
+    p.toLowerCase(),
+    p.replace(/\\/g, '/'),
+  ]);
+  return [...variants];
+}
+
+async function readFileFromMpqs(dataPath, internalPath) {
+  ensureMounted(dataPath);
+  for (const variant of pathVariants(internalPath)) {
+    const cacheKey = `${dataPath}|${variant.toLowerCase()}`;
+
+    // Snelpad: we weten al in welke archive dit bestand zit
+    if (fileFoundIn.has(cacheKey)) {
+      const knownMpq = fileFoundIn.get(cacheKey);
+      const buf = await readFileFromMpqEntry(dataPath, knownMpq, variant);
+      if (buf) return buf;
+      fileFoundIn.delete(cacheKey); // ongeldig geworden, opnieuw scannen
+    }
+
+    // Volledige scan — onthoud het resultaat voor volgende aanvraag
+    for (const mpqPath of findMpqFiles(dataPath)) {
+      const buf = await readFileFromMpqEntry(dataPath, mpqPath, variant);
+      if (buf) {
+        fileFoundIn.set(cacheKey, mpqPath);
+        return buf;
+      }
+    }
+  }
+  return null;
+}
+
+const listfileCache = new Map();
+const blpDirCache   = new Map();
+
+function walkDirBlps(dir, prefix, out) {
+  if (!fs.existsSync(dir)) return;
+  for (const entry of fs.readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    let st;
+    try { st = fs.statSync(full); } catch (_) { continue; }
+    if (st.isDirectory()) {
+      walkDirBlps(full, prefix ? `${prefix}\\${entry}` : entry, out);
+    } else if (entry.toLowerCase().endsWith('.blp')) {
+      out.add(prefix ? `${prefix}\\${entry}` : entry);
+    }
+  }
+}
+
+async function collectListfilePaths(dataPath) {
+  if (listfileCache.has(dataPath)) return listfileCache.get(dataPath);
+
+  const paths = new Set();
+  ensureMounted(dataPath);
+
+  for (const mpqPath of findMpqFiles(dataPath)) {
+    let stat;
+    try { stat = fs.statSync(mpqPath); } catch (_) { continue; }
+
+    if (stat.isDirectory()) {
+      walkDirBlps(mpqPath, '', paths);
+      continue;
+    }
+
+    let archive;
+    try { archive = await MPQ.open(toStormPath(dataPath, mpqPath), 'r'); }
+    catch (_) { continue; }
+
+    try {
+      if (archive.hasFile('(listfile)')) {
+        const f   = archive.openFile('(listfile)');
+        const raw = f.read();
+        f.close();
+        for (const line of Buffer.from(raw).toString('utf8').split(/\r?\n/)) {
+          const t = line.trim();
+          if (t) paths.add(t.replace(/\//g, '\\'));
+        }
+      }
+    } catch (_) {}
+    archive.close();
+  }
+
+  const result = [...paths];
+  listfileCache.set(dataPath, result);
+  return result;
+}
+
+function listBlpInDir(allPaths, dirPrefix) {
+  const norm = dirPrefix.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  return allPaths.filter((p) => {
+    const pl = p.replace(/\//g, '\\').toLowerCase();
+    if (!pl.startsWith(norm + '\\') && pl !== norm) return false;
+    return pl.endsWith('.blp');
+  });
+}
+
+function rankCreatureBlp(blpPath, stem) {
+  const name = (blpPath.split(/[\\\/]/).pop() || '').toLowerCase();
+  const stemL = stem.toLowerCase();
+  if (/particle|reflect|glow|environ|sparkle|trail/i.test(name)) return 100;
+  if (name === `${stemL}.blp`) return 0;
+  if (name.startsWith(stemL) && name.includes('skin')) return 1;
+  if (name.includes(stemL)) return 2;
+  return 50;
+}
+
+async function discoverCreatureBlps(dataPath, modelDir, stem) {
+  const dirKey = modelDir.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
+  if (blpDirCache.has(dirKey)) return blpDirCache.get(dirKey);
+
+  const all = await collectListfilePaths(dataPath);
+  const inDir = listBlpInDir(all, modelDir);
+  const sorted = inDir.sort((a, b) => rankCreatureBlp(a, stem) - rankCreatureBlp(b, stem));
+  blpDirCache.set(dirKey, sorted);
+  return sorted;
+}
+
+module.exports = {
+  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer,
+  validateDataPath, readFileFromMpqs, collectListfilePaths, discoverCreatureBlps,
+};
