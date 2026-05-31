@@ -124,8 +124,16 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.copyTalent(dbcPath, sourceId, newId);
   }, [dbcPath]);
 
-  const searchSpellsDbc = useCallback(async (term) => {
-    return window.azeroth.dbc.searchSpells(dbcPath, term);
+  const searchSpellsDbc = useCallback(async (term, options) => {
+    return window.azeroth.dbc.searchSpells(dbcPath, term, options);
+  }, [dbcPath]);
+
+  const readSkillLineAbility = useCallback(async (spellId) => {
+    return window.azeroth.dbc.readSkillLineAbility(dbcPath, spellId);
+  }, [dbcPath]);
+
+  const addSkillLineAbility = useCallback(async (entry) => {
+    return window.azeroth.dbc.addSkillLineAbility(dbcPath, entry);
   }, [dbcPath]);
 
   const readSpellFull = useCallback(async (id) => {
@@ -159,6 +167,7 @@ export function ConnectionProvider({ children }) {
       getIcon, writeTalent, deleteTalent, insertTalent,
       findNextId, findNextTalentId, copyTalentDbc,
       searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
+      readSkillLineAbility, addSkillLineAbility,
       idRanges, setIdRanges
     }}>
       {children}

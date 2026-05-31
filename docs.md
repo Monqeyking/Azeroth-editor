@@ -1,7 +1,7 @@
 # Azeroth Editor — Docs
 
 > Electron 29 + React 18 (Vite) desktoptool voor AzerothCore WoW-serverdata via MySQL en SOAP.
-> **Laatste update:** 2026-05-30 (sessie 2)
+> **Laatste update:** 2026-05-31 (sessie 5)
 
 ---
 
@@ -28,29 +28,21 @@
 MySQL verbinding setup. Form → config.json opslaan. Redirect naar dashboard bij succes.
 
 ### ✅ SettingsPage
-SOAP config (host, port, GM user/pass, test-knop) + DBC-pad instelling.
+SOAP config (host, port, GM user/pass, test-knop) + DBC-pad instelling + Custom ID ranges (start-IDs per systeem, default 4000000).
 
 ### ✅ DashboardPage
 COUNT-stats voor creature/item/quest/spell. Recent creatures tabel.
 
-### ✅ RaceClassPage (`/races`) ← nieuw
+### ✅ RaceClassPage (`/races`)
 Race+class combinatie beheer. Synct naar zowel DB als DBC.
 
 **UI:** Horizontale race-balk (Alliance/Horde) met WoW race-iconen. Klik = selecteer race, rest dimt. Eronder class-grid met class-iconen + checkbox per class.
 
-**Checkbox aan:** wizard opent met startpositie pre-ingevuld vanuit template (zelfde race of zelfde class). Bij aanmaken: INSERT in `playercreateinfo`, actie-balk gekopieerd van zelfde class, entry toegevoegd aan `CharBaseInfo.dbc`.
+**Checkbox aan:** wizard opent met startpositie pre-ingevuld vanuit template. Bij aanmaken: INSERT in `playercreateinfo`, actie-balk gekopieerd van zelfde class, entry toegevoegd aan `CharBaseInfo.dbc`.
 
-**Checkbox uit:** bevestigingsdialoog → DELETE uit `playercreateinfo`, `playercreateinfo_action`, exact-match bitmask rijen uit `spell_custom`/`skills`, en entry verwijderd uit `CharBaseInfo.dbc`.
-
-**Klik op enabled class-card:** detail panel opent met twee tabs:
-- **Start Position** — `playercreateinfo` velden direct bewerkbaar + save
-- **Action Bar** — tabel met alle `playercreateinfo_action` rijen. Spell naam lookup: eerst `spell_dbc` (MySQL), dan `Spell.dbc` fallback voor client-only spells. Rijen toevoegen/verwijderen/opslaan.
+**Checkbox uit:** bevestigingsdialoog → DELETE uit `playercreateinfo`, `playercreateinfo_action`, bitmask rijen uit `spell_custom`/`skills`, entry verwijderd uit `CharBaseInfo.dbc`.
 
 **DBC write-back:** `CharBaseInfo.dbc` — structuur: WDBC header (20 bytes) + records van 2 bytes (uint8 race, uint8 class) + 1 byte string block. IPC: `dbc:readCharBaseInfo`, `dbc:writeCharBaseInfo`.
-
-**Race iconen:** `https://wow.zamimg.com/images/wow/icons/medium/race_*_male/female.jpg`
-**Class iconen:** `https://wow.zamimg.com/images/wow/icons/medium/classicon_*.jpg`
-**Races:** WotLK only (Human/Dwarf/Night Elf/Gnome/Draenei + Orc/Undead/Tauren/Troll/Blood Elf). Undead icon = `race_scourge_male`.
 
 ### ✅ TalentEditorPage
 DBC-based (Talent.dbc, Spell.dbc, SpellIcon.dbc). Visuele 15×4 grid per class/tab. Drag-and-drop, prereq-pijlen, icon picker modal, primary spell icon met live preview. Opslaan → DBC write-back.
@@ -58,7 +50,57 @@ DBC-based (Talent.dbc, Spell.dbc, SpellIcon.dbc). Visuele 15×4 grid per class/t
 **DBC-offsets Spell.dbc:** Name_Lang_enUS = offset 544, SpellIconID = offset 532.
 
 ### ✅ SpellEditorPage
-MySQL `spell_dbc`. 56 velden in 9 secties. Search op naam/ID.
+Spell.dbc via IPC (`dbc:readSpellFull` / `dbc:writeSpellFull`). Search op naam/ID. Velden in secties.
+
+**Clone → Trainer workflow:**
+1. Selecteer bronspell → klik **Clone → Trainer**
+2. Systeem kloont spell naar volgende vrije ID in custom range (Settings → ID Ranges)
+3. Panel toont pre-ingevulde velden vanuit bronspell:
+   - SpellLevel, BaseLevel, MaxLevel, ReqLevel, MoneyCost
+   - EffectBasePoints_1, EffectDieSides_1, EffectRealPointsPerLevel_1
+   - TrainerId dropdown (alleen trainers met actieve spawns, friendly labels)
+   - NPC Entry (npc_trainer directe entry)
+4. Opslaan doet: `writeSpellFull` + `addSkillLineAbility` (ClassMask van bronspell) + INSERT `trainer_spell` + INSERT `npc_trainer`
+5. Daarna: Spell.dbc + SkillLineAbility.dbc naar server + client, cache wissen, worldserver herstarten
+
+**Bekende SPELL_OFFSETS (electron/main.js):**
+
+| Veld | Offset | Type |
+|---|---|---|
+| ID | 0 | uint32 |
+| Attributes / Ex / Ex2 / Ex3 | 16–28 | uint32 |
+| CastingTimeIndex | 112 | uint32 |
+| RecoveryTime / CategoryRecoveryTime | 116 / 120 | uint32 |
+| MaxLevel / BaseLevel / SpellLevel | 148 / 152 / 156 | uint32 |
+| DurationIndex | 160 | uint32 |
+| ManaCost / ManaPerSecond / ManaCostPct | 168 / 176 / 816 | uint32 |
+| RangeIndex | 184 | uint32 |
+| Speed | 188 | float |
+| Effect_1/2/3 | 284 / 288 / 292 | uint32 |
+| EffectDieSides_1/2/3 | 296 / 300 / 304 | int32 |
+| EffectRealPointsPerLevel_1/2/3 | 308 / 312 / 316 | float |
+| EffectBasePoints_1/2/3 | 320 / 324 / 328 | int32 |
+| EffectAura_1/2/3 | 380 / 384 / 388 | uint32 |
+| EffectTriggerSpell_1/2/3 | 464 / 468 / 472 | uint32 |
+| SpellIconID | 532 | uint32 |
+| Name_Lang_enUS | 544 | string |
+| SpellClassSet | 832 | uint32 |
+| SchoolMask | 900 | uint32 |
+
+**Nog toe te voegen aan SPELL_OFFSETS (backlog):**
+
+| Veld | Offset | Type | Waarvoor |
+|---|---|---|---|
+| AttributesEx4/5/6/7 | 32 / 36 / 40 / 44 | uint32 | Extra flags |
+| EffectChainTarget_1/2/3 | 416 / 420 / 424 | uint32 | Chain/cleave targets |
+| EffectMiscValue_1/2/3 | 440 / 444 / 448 | int32 | Misc effect waarden |
+| EffectMiscValueB_1/2/3 | 452 / 456 / 460 | int32 | Misc effect B |
+| EffectPointsPerComboPoint_1/2/3 | 476 / 480 / 484 | float | Rogue combo scaling |
+| SpellClassMaskA_1/2/3 | 836 / 840 / 844 | uint32 | Talent interactie flags |
+| EffectAuraPeriod_1/2/3 | 392 / 396 / 400 | uint32 | DoT tick interval |
+| EffectRadiusIndex_1/2/3 | 368 / 372 / 376 | uint32 | AoE radius |
+| StartRecoveryTime | 824 | uint32 | GCD override (ms) |
+| EffectBonusMultiplier_1/2/3 | 864 / 868 / 872 | float | Spell power coëfficiënt ⭐ |
 
 ### ✅ ItemEditorPage
 MySQL `item_template`. 37 velden in 9 secties. Quality kleur-badges.
@@ -66,66 +108,64 @@ MySQL `item_template`. 37 velden in 9 secties. Quality kleur-badges.
 ### ✅ QuestEditorPage
 MySQL `quest_template`. 50+ velden in 10 secties.
 
-### ✅ CreatureEditorPage ← meest complex
-MySQL `creature_template` + gerelateerde tabellen. Keira3-workflow:
+### ✅ CreatureEditorPage
+MySQL `creature_template` + gerelateerde tabellen. Sub-tabs: General, Template Model, Addon, Trainer, Vendor, World Spawns.
 
-**Sub-tabs:** General, Template Model, Addon, Trainer, Vendor, World Spawns
+**Trainer tab:**
+- **Spell Templates** — npc_trainer template refs (negatief SpellID). Veelgebruikt: 200003 (lvl 1-6), 200004 (lvl 8-80 gedeeld), 200020 (Alliance: Warhorse + Seal of Vengeance), 200021 (Horde: BE Charger + Seal of Corruption). Template info live opgehaald (count + level range).
+- **Trainer Definition** — `creature_default_trainer` → `trainer` (Type, Requirement, Greeting). Create New of Link Existing.
+- **Trainer Spells (nieuw systeem)** — samenvatting van `trainer_spell` entries voor gelinkte TrainerId. Verwijst naar Trainer Spell Editor voor beheer.
+- **Direct Spells (legacy)** — npc_trainer positieve SpellIDs. Alleen zichtbaar als er data is.
 
-**Multi-table save:** `creature_template`, `creature_template_addon`, `npc_trainer`, `npc_vendor`, `creature`, `trainer`, `creature_default_trainer`
+> **Beide systemen draaien naast elkaar.** Server laadt `npc_trainer` (template refs + directe spells) én `trainer`/`trainer_spell`/`creature_default_trainer`. Beide zijn functioneel.
 
-**Trainer tab (volledig):**
-- `npc_trainer` — template-refs (negatieve SpellID = `-templateId`) + directe spells (positieve SpellID)
-  - Kolommen: `ID, SpellID, MoneyCost, ReqSkillLine, ReqSkillRank, ReqLevel, ReqSpell`
-  - Template info live opgehaald: spell count + level range per template ID
-- `trainer` + `creature_default_trainer` — trainer definitie (Type, Requirement, Greeting)
-  - Type: `0`=Class, `1`=Mount, `2`=Tradeskill, `3`=Pet
-  - Requirement: class ID (type 0/3), race ID (type 1), spell ID (type 2)
-  - UI: "Create New Trainer" (auto-ID, badge "NEW") of "Link Existing Trainer" (lookup op ID)
-  - Save via `INSERT ... ON DUPLICATE KEY UPDATE` voor beide tabellen
-- `trainer_spell` — spell inhoud per trainer template (bewaren voor Spell tab)
+**Template Model tab:** multi-row editor met ZamModelViewer live preview. MH/OH weapon thumbnails via `creature_equip_template`.
 
-**Split reference 50/50:** tweede creature parallel laden, per-sectie copy-knoppen.
+### ✅ TrainerSpellPage (`/trainer-spells`)
+Spell-first workflow voor trainer content. Zoek spell op naam → zie alle ranks → per rank: trainers beheren, BasePoints/SpellLevel bewerken.
 
-**Template Model tab:**
-- `creature_template_model` multi-row editor (Idx, CreatureDisplayID, DisplayScale, Probability, VerifiedBuild)
-- Integer kolommen: `type="text" inputMode="numeric"` + ▲▼ buttons via onMouseDown+preventDefault
-- Decimal kolommen: `type="number" step="0.01"` + onWheel → blur()
-- Live NPC preview via ZamModelViewer (type 2, NPC_TYPE=8)
-- **Mainhand / Offhand inputs:** item ID + naam (live lookup uit `item_template`) + screenshot thumbnail
-  - Thumbnail URL: `https://wow.zamimg.com/modelviewer/wrath/webthumbs/item/{displayId % 256}/{displayId}.webp`
-  - `displayId` komt uit `item_template.displayid`
-  - Auto-geladen bij creature select via `creature_equip_template` (ID=1, ItemID1=MH, ItemID2=OH)
-  - Visueel-only (niet opgeslagen)
-- Layout: NPC model links, MH+OH thumbnails rechts ernaast
+**Trainer labels:** friendly names op basis van ID (bijv. "Paladin Main (ID 3)", "Paladin Starter (ID 6)"). Ghost trainers (geen spawns) worden uitgefilterd. TrainerId 5 (TTR test NPC) expliciet uitgesloten.
+
+**Dual INSERT:** voegt spell toe aan zowel `trainer_spell` (TrainerId) als `npc_trainer` (NPC entry) tegelijk.
+
+**SkillLineAbility.dbc offsets:**
+- 0: ID, 4: SkillLine, 8: Spell, 12: RaceMask, 16: ClassMask
+- 28: AcquireMethod (1 = trainer), 32: SupercededBySpell
+- 36: TrivialSkillLineRankLow (0 = toonbaar bij trainer, >0 = niet-traineerbaar)
+- IPC: `dbc:readSkillLineAbility`, `dbc:addSkillLineAbility`
 
 ### ✅ SpawnMap (`/map`)
 2D kaart. BLP decoder, continent/zone tiles via MPQ. Creature + GO spawns, clustering, pan/zoom, inspector, waypoints, drag-and-drop DB-write, spawn zoeken/filteren.
 
 ### ✅ 3D Editor (`/editor3d`)
-Three.js + R3F. ADT terrain, MySQL spawns, move/rotate gizmo, M2 instancing + LOD, minimap overlay, SOAP teleport. Details: `docs/3d-editor-plan.md`.
+Three.js + R3F. ADT terrain, MySQL spawns, move/rotate gizmo, M2 instancing + LOD, minimap overlay, SOAP teleport.
+
+---
+
+## Trainer Systeem — Architectuur
+
+AzerothCore gebruikt **twee trainer systemen naast elkaar**:
+
+**Oud systeem (`npc_trainer`):**
+- `ID` = creature entry, `SpellID` negatief = template ref, positief = directe spell
+- Templates 200003/200004/200020/200021 bevatten gedeelde en faction-specifieke spells
+- Wordt **wel** geladen door deze server build (ondanks ontbreken in ObjectMgr.cpp — zit in ander bestand)
+
+**Nieuw systeem (`trainer` + `trainer_spell` + `creature_default_trainer`):**
+- `creature_default_trainer.CreatureId` → `TrainerId` → `trainer_spell.SpellId`
+- `LoadTrainers()` filtert talent-spells via `GetTalentSpellCost()` → deze worden genegeerd
+- Trainer labels (bekend): 1/2 Warrior, 3/6 Paladin, 7/8 Hunter, 9/10 Rogue, 11/12 Priest, 13 Death Knight, 14/15 Shaman, 16/17 Mage, 31/32 Warlock, 33/34 Druid
+
+**Crusader Strike — opgelost:**
+Spell 35395 zit in Talent.dbc → wordt genegeerd door `GetTalentSpellCost()`. Oplossing: kloon naar custom ID (4000000+), voeg SLA toe (ClassMask=2, AcquireMethod=1, TrivialSkillLineRankLow=0), voeg toe aan trainer_spell + npc_trainer. Dit is nu geautomatiseerd via de **Clone → Trainer** knop in de Spell Editor.
 
 ---
 
 ## ZamModelViewer — Technische notities
 
-**Script:** `https://wowgaming.altervista.org/modelviewer/scripts/viewer.min.js`
-**Content:** `https://wowgaming.altervista.org/modelviewer/data/get.php?path=`
-
-**Ondersteunde types:**
-- `type: 2` — NPC/creature (✅ werkt via altervista)
-- `type: 1` — character (❌ niet ondersteund door altervista script)
-- `type: 3` — item (❌ altervista heeft geen item data; wow.zamimg.com heeft CORS-blokkade)
-- `type: 4` — ongeldig ("Bad viewer type given")
-
-**Conclusie:** 3D item previews zijn niet mogelijk. Gebruik in plaats daarvan statische Wowhead webthumbs (zie Template Model tab hierboven).
-
-**CSP (electron/main.js) dekt:** wowgaming.altervista.org, wow.zamimg.com, code.jquery.com, fonts.googleapis.com
-
-**Vereiste globals:**
-```js
-window.WH = { debug: () => {}, defaultAnimation: 'Stand', WebP: { getImageExtension: () => '.webp' } }
-window.$ = window.jQuery
-```
+- `type: 2` — NPC/creature ✅ | `type: 1` — character ❌ | `type: 3` — item ❌ (CORS)
+- CSP dekt: wowgaming.altervista.org, wow.zamimg.com, code.jquery.com, fonts.googleapis.com
+- Vereiste globals: `window.WH`, `window.$ = window.jQuery`
 
 ---
 
@@ -133,59 +173,55 @@ window.$ = window.jQuery
 
 ### 🔴 Hoog
 
-**Trainer Spell Editor (Spell tab)**
-Bewerken van `trainer_spell` per trainer template.
-- Zoeken op TrainerId, class of spell naam
-- Per-spell view: welke trainers bieden deze spell aan
-- Toggle spells tussen `trainer_spell` en `trainer_spell_60plus` (custom archive tabel)
+**Spell Editor — readable field labels**
+Numerieke velden tonen met betekenisvolle labels:
+- `SpellClassSet`: 1=Warrior, 2=Paladin, 3=Hunter, 4=Rogue, 5=Priest, 6=DK, 7=Shaman, 8=Mage, 9=Warlock, 10=Druid (of Paladin in sommige builds), 11=Druid
+- `SchoolMask`: bitmask — 1=Fysiek, 2=Holy, 4=Fire, 8=Nature, 16=Frost, 32=Shadow, 64=Arcane
+- `PowerType`: -2=Gezondheid, 0=Mana, 1=Rage, 3=Energy, 6=Runic Power
+- `DefenseType`: 0=None, 1=Magic, 2=Melee, 3=Ranged
+- `Effect_1/2/3`: effect type ID → naam (64=SchoolDamage, 2=SchoolPeriodic, 6=ApplyAura, etc.)
+- `EffectAura_1/2/3`: aura type ID → naam (3=PeriodicDamage, 13=ModDamageDone, etc.)
+- `Attributes / AttributesEx`: bitmask met checkboxes of hover-labels
+
+**Spell Editor — ontbrekende DBC velden toevoegen**
+Priority: EffectBonusMultiplier (spell power coëff), SpellClassMaskA (talent flags), EffectChainTarget, StartRecoveryTime (GCD).
+
+**Spell Editor — spell_bonus_data koppeling**
+Tabel `spell_bonus_data` bevat server-side spell power bonus (direct_bonus, dot_bonus, ap_bonus). Bij Clone → Trainer automatisch een rij aanmaken op basis van bronspell.
+
+**Spell Editor — spell_ranks koppeling**
+Tabel `spell_ranks` koppelt rank-ketens. Bij het aanmaken van meerdere ranks automatisch de keten bijwerken.
 
 **Creature Equipment Editor (tab)**
-Tabel: `creature_equip_template` — `CreatureID`, `ID` (slot 1–3), `ItemID1/2/3`, `VerifiedBuild`
-- Multi-row editor (één rij per equipment set)
-- Item naam-lookup uit `item_template`
-- Koppelen aan mainhand/offhand preview in Model tab
+Tabel: `creature_equip_template` — multi-row editor, item naam-lookup, koppelen aan model preview.
 
 **Smart AI Editor (SAI)**
-Tabel: `smart_scripts` — meest bewerkte tabel op elke server
-- Visuele event → action builder
-- Inline documentatie per event/action ID
-- Link via `entryorguid`
-- Zie Keira3 als referentie
+Tabel: `smart_scripts` — visuele event → action builder, inline documentatie per event/action ID.
 
 **Creature Loot Editor**
-Tabel: `creature_loot_template`
-- Multi-row: ItemEntry, Chance, MinCount, MaxCount, QuestRequired, LootMode, GroupId
-- Item naam-lookup, drop-chance balk
-- `reference_loot_template` voor gedeelde loot pools
+Tabel: `creature_loot_template` — multi-row, item naam-lookup, drop-chance balk, `reference_loot_template`.
 
 ### 🟡 Medium
 
 **Creature Text tab** — `creature_text` (say/yell/gossip rijen)
 
 **NPC Gossip / Text Editor** — `npc_text`, `gossip_menu`, `gossip_menu_option`
-- Dialog tree preview
-- `broadcast_text` lookup
 
-**Waypoint Editor** — `waypoints` / `creature_addon.path_id`
-- Patrol paden tekenen op de SpawnMap minimap
+**Waypoint Editor** — patrol paden tekenen op SpawnMap minimap
 
-**Quest Editor uitbreiden** — `quest_template_addon`, `conditions`, reward previews, quest chain navigatie
+**Quest Editor uitbreiden** — `quest_template_addon`, reward previews, quest chain navigatie
 
-**Global Search** — één zoekbalk over creature/item/quest/gameobject/spell
+**Global Search** — één zoekbalk over creature/item/quest/spell
 
-**SQL Export / Diff View**
-- Gegenereerde INSERT/UPDATE SQL vóór opslaan tonen
-- Copy to clipboard of opslaan als .sql
+**SQL Export / Diff View** — gegenereerde SQL tonen vóór opslaan
 
 ### 🔵 Laag
 
 **Item Editor uitbreiden** — stat/socket/resistance velden, flag/bitmask selectors
 
-**Spell Editor** — `spell_dbc` / `spell_custom_attr`, description preview
-
 **Gameobject Editor** — zelfde patroon als Creature Editor
 
-**Raw SQL Editor** — vrije query invoer (Keira3 `sql-editor` patroon)
+**Raw SQL Editor** — vrije query invoer
 
 **Verbindingsprofielen** — max 5 opslaan (zonder wachtwoord)
 
@@ -197,7 +233,7 @@ Tabel: `creature_loot_template`
 - [ ] Toast-notificatie als herbruikbaar component (`src/components/Toast.jsx`)
 - [ ] Loading skeleton voor lijsten (shimmer animatie)
 - [ ] ConnectPage — "Test verbinding" knop (zonder navigatie)
-- [ ] Recente items voor alle editors (creature heeft al `localStorage`)
+- [ ] Recente items voor alle editors
 - [ ] Clone uitbreiden — gerelateerde rijen meeklonen (trainer, vendor, model, addon)
 - [ ] `game_tele` editor pagina
 - [ ] Export/import als JSON backup
@@ -243,124 +279,3 @@ useEffect(() => {
 **Context API:** `ConnectionContext.jsx` — globale DB/DBC/SOAP state
 **Response pattern:** `{ success: true, data: [...] }` of `{ error: '...' }`
 **CSS:** aparte `.css` per pagina (`DashboardPage.css`, `EditorPage.css`, etc.)
-
----
-
-## Ontwerp: volgende features
-
-### Trainer Spell Editor — ontwerp
-
-**Doel:** snel spells toevoegen/aanpassen aan een class trainer, inclusief rank-keten bewerken en damage tweaken — zonder door Creature Editor heen te hoeven.
-
-**Kernprobleem:** een "spell toevoegen aan trainer" raakt drie lagen tegelijk:
-1. De spell zelf in `spell_dbc` (naam, ranks, basisschade)
-2. Welke trainer hem aanbiedt (`trainer_spell`)
-3. Level requirement en prijs per rank
-
-**Aanpak: spell-first workflow**
-
-Zoek een spell op naam → zie de volledige rank-keten → beheer trainers en stats per rank.
-
----
-
-#### UI-layout
-
-```
-[ Spell zoekbalk ]  →  zoekt in spell_dbc op naam
-
-┌─────────────────────────────────────────────────────┐
-│  Crusader Strike                  Class: Paladin     │
-│                                                      │
-│  Rank  │ Spell ID │ Level │ Base dmg │ Trainers  │ + │
-│  ──────┼──────────┼───────┼──────────┼───────────┼───│
-│  Rank 1│  35395   │   1   │   75     │ 2 trainers│ ✎ │
-│  Rank 2│  35396   │  20   │  145     │ 1 trainer │ ✎ │
-│  Rank 3│  ...     │  ...  │  ...     │ —         │ ✎ │
-│                                          [ + Add rank]│
-└─────────────────────────────────────────────────────┘
-
-[ Klik op rank-rij → inline expand ]
-  ┌──────────────────────────────────────────────────┐
-  │ Damage: [ 75  ]   Trainers: [ Trainer A  ] [+]   │
-  │ Req. level: [ 1 ]           [ Trainer B  ] [×]   │
-  │ Cost: [ 10  ] copper        [ + Add trainer ]     │
-  │                             [ Save ]              │
-  └──────────────────────────────────────────────────┘
-```
-
----
-
-#### Tabellen
-
-| Tabel | Gebruik |
-|---|---|
-| `spell_dbc` | Naam, `EffectBasePoints_1` (schade), `SpellLevel` (min level) |
-| `trainer_spell` | Welke spell zit op welke trainer template: `TrainerId`, `SpellId`, `MoneyCost`, `ReqLevel` |
-| `npc_trainer` | Koppeling creature → trainer template (voor naam-lookup) |
-| `creature_template` | Naam van de trainer NPC (via `npc_trainer.ID`) |
-
-Rank-keten: spells met dezelfde naam maar oplopend `SpellLevel` en opeenvolgende IDs. Groepeer op `Name_Lang_enUS` + `SpellClassSet`/`SpellClassMask` of simpelweg op naam-match.
-
----
-
-#### Technische aanpak
-
-**Pagina:** `src/pages/TrainerSpellPage.jsx` — nieuwe route `/trainer-spells`, nav-item naast Talents.
-
-**Spell zoeken:**
-```sql
-SELECT ID, Name_Lang_enUS, SpellLevel, EffectBasePoints_1
-FROM spell_dbc
-WHERE Name_Lang_enUS LIKE ?
-ORDER BY Name_Lang_enUS, SpellLevel
-LIMIT 100
-```
-
-**Rank-keten groeperen:** client-side op `Name_Lang_enUS` — alle rijen met dezelfde naam vormen een rank-reeks, gesorteerd op `SpellLevel`.
-
-**Trainers per spell:**
-```sql
-SELECT ts.TrainerId, ts.MoneyCost, ts.ReqLevel, ct.name AS trainerName
-FROM trainer_spell ts
-LEFT JOIN npc_trainer nt ON nt.SpellID = -ts.TrainerId OR nt.SpellID = ts.SpellId
-LEFT JOIN creature_template ct ON ct.entry = nt.ID
-WHERE ts.SpellId = ?
-```
-*(of eenvoudiger: direct op `trainer_spell.SpellId = ?`)*
-
-**Damage bewerken:** `UPDATE spell_dbc SET EffectBasePoints_1 = ? WHERE ID = ?`
-
-**Trainer toevoegen:**
-```sql
-INSERT INTO trainer_spell (TrainerId, SpellId, MoneyCost, ReqLevel, ReqSkillLine, ReqSkillRank, ReqSpell)
-VALUES (?, ?, ?, ?, 0, 0, 0)
-ON DUPLICATE KEY UPDATE MoneyCost=VALUES(MoneyCost), ReqLevel=VALUES(ReqLevel)
-```
-
-**Trainer verwijderen:** `DELETE FROM trainer_spell WHERE TrainerId = ? AND SpellId = ?`
-
----
-
-#### Vragen om vooraf te stellen
-
-Voordat je begint: vraag de gebruiker om:
-```sql
-DESCRIBE trainer_spell;
-SELECT * FROM trainer_spell LIMIT 3;
-DESCRIBE npc_trainer;
-SELECT * FROM npc_trainer LIMIT 3;
-SELECT ts.TrainerId, ts.SpellId, ts.MoneyCost, ts.ReqLevel,
-       ct.name AS trainerName
-FROM trainer_spell ts
-LEFT JOIN npc_trainer nt ON nt.SpellID = -ts.TrainerId
-LEFT JOIN creature_template ct ON ct.entry = nt.ID
-WHERE ts.TrainerId = (SELECT TrainerId FROM trainer_spell LIMIT 1);
-```
-
----
-
-#### Scope afbakening
-
-- **In scope:** spell zoeken, rank-keten tonen, schade/level bewerken, trainers toevoegen/verwijderen
-- **Out of scope (later):** `trainer_spell_60plus` toggle, SpellClassMask bewerken, nieuwe ranks aanmaken vanuit niets
-- **Let op:** `spell_dbc` wijzigingen raken alleen de MySQL tabel — geen DBC write-back nodig voor trainer content (server-side only)

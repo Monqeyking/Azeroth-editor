@@ -62,6 +62,12 @@ const SPELL_OFFSETS = {
   Effect_1:                 { offset: 284, type: 'uint32' },
   Effect_2:                 { offset: 288, type: 'uint32' },
   Effect_3:                 { offset: 292, type: 'uint32' },
+  EffectDieSides_1:         { offset: 296, type: 'int32'  },
+  EffectDieSides_2:         { offset: 300, type: 'int32'  },
+  EffectDieSides_3:         { offset: 304, type: 'int32'  },
+  EffectRealPointsPerLevel_1: { offset: 308, type: 'float' },
+  EffectRealPointsPerLevel_2: { offset: 312, type: 'float' },
+  EffectRealPointsPerLevel_3: { offset: 316, type: 'float' },
   EffectBasePoints_1:       { offset: 320, type: 'int32'  },
   EffectBasePoints_2:       { offset: 324, type: 'int32'  },
   EffectBasePoints_3:       { offset: 328, type: 'int32'  },
@@ -519,7 +525,72 @@ async function loadSpellDbc(dbcPath) {
   return dbc;
 }
 
-ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term) => {
+// SkillLineAbility.dbc: fields per record (recordSize read from header)
+// Offsets: ID(0), SkillLine(4), Spell(8), RaceMask(12), ClassMask(16),
+//          ExcludeRace(20), ExcludeClass(24), MinSkillLineRank(28),
+//          SupercededBySpell(32), AcquireMethod(36), TrivialHigh(40),
+//          TrivialLow(44), ...
+ipcMain.handle('dbc:readSkillLineAbility', async (_, dbcPath, spellId) => {
+  try {
+    const filePath = path.join(dbcPath, 'SkillLineAbility.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon SkillLineAbility.dbc niet lezen' };
+    const results = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const off = i * dbc.recordSize;
+      if (dbc.dataBuffer.readUInt32LE(off + 8) === spellId) {
+        results.push({
+          ID: dbc.dataBuffer.readUInt32LE(off),
+          SkillLine: dbc.dataBuffer.readUInt32LE(off + 4),
+          Spell: dbc.dataBuffer.readUInt32LE(off + 8),
+          RaceMask: dbc.dataBuffer.readUInt32LE(off + 12),
+          ClassMask: dbc.dataBuffer.readUInt32LE(off + 16),
+          SupercededBySpell: dbc.dataBuffer.readUInt32LE(off + 32),
+          AcquireMethod: dbc.dataBuffer.readUInt32LE(off + 36),
+        });
+      }
+    }
+    return { success: true, data: results };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Voeg een nieuw record toe aan SkillLineAbility.dbc
+ipcMain.handle('dbc:addSkillLineAbility', async (_, dbcPath, entry) => {
+  try {
+    const filePath = path.join(dbcPath, 'SkillLineAbility.dbc');
+    const raw = fs.readFileSync(filePath);
+    const recordCount = raw.readUInt32LE(4);
+    const recordSize = raw.readUInt32LE(12);
+    const stringBlockSize = raw.readUInt32LE(16);
+    const headerSize = 20;
+    const recordsEnd = headerSize + recordCount * recordSize;
+
+    const newRecord = Buffer.alloc(recordSize, 0);
+    newRecord.writeUInt32LE(entry.ID >>> 0, 0);
+    newRecord.writeUInt32LE(entry.SkillLine >>> 0, 4);
+    newRecord.writeUInt32LE(entry.Spell >>> 0, 8);
+    newRecord.writeUInt32LE((entry.RaceMask || 0) >>> 0, 12);
+    newRecord.writeUInt32LE((entry.ClassMask || 0) >>> 0, 16);
+    newRecord.writeUInt32LE((entry.AcquireMethod || 0) >>> 0, 28);
+    newRecord.writeUInt32LE((entry.SupercededBySpell || 0) >>> 0, 32);
+    newRecord.writeUInt32LE((entry.TrivialSkillLineRankLow || 0) >>> 0, 36);
+
+    const newFile = Buffer.alloc(raw.length + recordSize);
+    raw.copy(newFile, 0, 0, recordsEnd);          // header + bestaande records
+    newRecord.copy(newFile, recordsEnd);           // nieuw record
+    raw.copy(newFile, recordsEnd + recordSize, recordsEnd); // string block
+    newFile.writeUInt32LE(recordCount + 1, 4);    // recordCount + 1
+
+    fs.writeFileSync(filePath, newFile);
+    return { success: true, id: entry.ID };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
   try {
     const dbc = await loadSpellDbc(dbcPath);
     if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
@@ -528,17 +599,28 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term) => {
     const isNum = /^\d+$/.test(term);
     const termNum = isNum ? parseInt(term) : 0;
     const termLower = term ? term.toLowerCase() : '';
+    const limit = options.limit || 50;
+    const trainerFilter = options.trainerSpells === true;
 
-    for (let i = 0; i < dbc.recordCount && results.length < 50; i++) {
+    for (let i = 0; i < dbc.recordCount && results.length < limit; i++) {
       const off = i * dbc.recordSize;
       const id = dbc.dataBuffer.readUInt32LE(off);
+      const attrs = dbc.dataBuffer.readUInt32LE(off + 16);
+      // Trainer spell filter: bit 16 (0x10000) set, bit 19 (0x80000) NOT set
+      if (trainerFilter && (!(attrs & 0x10000) || (attrs & 0x80000))) continue;
       if (!term || (isNum && id === termNum) || !isNum) {
         const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
         const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
+        if (!name) continue;
         if (isNum ? id === termNum : (!term || name.toLowerCase().includes(termLower))) {
+          const subtextRef = dbc.dataBuffer.readUInt32LE(off + 612);
+          const subtext = readStringFromBlock(null, subtextRef, dbc.stringBlock);
           results.push({
             ID: id,
             Name_Lang_enUS: name,
+            NameSubtext_Lang_enUS: subtext,
+            Attributes: attrs,
+            SpellLevel: dbc.dataBuffer.readUInt32LE(off + 156),
             SchoolMask: dbc.dataBuffer.readUInt32LE(off + 900),
             DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
           });

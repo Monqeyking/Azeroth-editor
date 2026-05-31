@@ -166,6 +166,7 @@ export default function CreatureEditorPage() {
   const [templateMeta, setTemplateMeta] = useState({});
   const [trainerDef, setTrainerDef] = useState(null);
   const [refTrainerDef, setRefTrainerDef] = useState(null);
+  const [trainerSpellSummary, setTrainerSpellSummary] = useState(null);
   const [trainerDefMode, setTrainerDefMode] = useState(null); // null | 'create' | 'link'
   const [vendorItems, setVendorItems] = useState([]);
   const [spawnData, setSpawnData] = useState(EMPTY_SPAWN());
@@ -241,6 +242,10 @@ export default function CreatureEditorPage() {
       query('SELECT ItemID1, ItemID2, ItemID3 FROM creature_equip_template WHERE CreatureID = ? AND ID = 1 LIMIT 1', [entry]),
       query('SELECT cdt.TrainerId, t.Type, t.Requirement, t.Greeting FROM creature_default_trainer cdt JOIN trainer t ON t.Id = cdt.TrainerId WHERE cdt.CreatureId = ? LIMIT 1', [entry]),
     ]);
+    const trainerDefRow = trainerDefRes.data?.[0] || null;
+    const trainerSpellSummaryRes = trainerDefRow
+      ? await query('SELECT COUNT(*) as cnt, MIN(ReqLevel) as minLvl, MAX(ReqLevel) as maxLvl FROM trainer_spell WHERE TrainerId = ?', [trainerDefRow.TrainerId])
+      : null;
     return {
       trainerSpells: trainerRes.data || [],
       vendorItems: vendorRes.data || [],
@@ -248,7 +253,8 @@ export default function CreatureEditorPage() {
       addon: addonRes.data?.[0] || null,
       models: modelRes.data || [],
       equip: equipRes.data?.[0] || null,
-      trainerDef: trainerDefRes.data?.[0] || null,
+      trainerDef: trainerDefRow,
+      trainerSpellSummary: trainerSpellSummaryRes?.data?.[0] || null,
     };
   }, [query]);
 
@@ -272,6 +278,7 @@ export default function CreatureEditorPage() {
     setTrainerMeta(deriveTrainerMeta(row.npcflag));
     setTrainerSpells(related.trainerSpells);
     setTrainerDef(related.trainerDef);
+    setTrainerSpellSummary(related.trainerSpellSummary);
     setTrainerDefMode(null);
     setVendorItems(related.vendorItems.length ? related.vendorItems : [EMPTY_VENDOR_ROW()]);
     setSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
@@ -685,7 +692,7 @@ export default function CreatureEditorPage() {
     </>
   );
 
-  const renderTrainerPanel = (spells, meta, setSpells, setMeta, readOnly, onCopySection, tmplMeta = {}, tDef = null, setTDef = null, defMode = null, setDefMode = null) => {
+  const renderTrainerPanel = (spells, meta, setSpells, setMeta, readOnly, onCopySection, tmplMeta = {}, tDef = null, setTDef = null, defMode = null, setDefMode = null, spellSummary = null) => {
     const templateRefs = spells.filter(r => Number(r.SpellID) < 0);
     const directSpells = spells.filter(r => Number(r.SpellID) > 0);
 
@@ -801,8 +808,14 @@ export default function CreatureEditorPage() {
           </div>
         )}
 
-        <h5 className="field-subsection-title">Trainer Templates</h5>
-        <p className="field-hint">Negative SpellID references — links this trainer to a shared spell group.</p>
+        <h5 className="field-subsection-title">Spell Templates</h5>
+        <p className="field-hint">
+          npc_trainer template refs (negatief SpellID). Veelgebruikte templates:
+          <strong> 200003</strong> — level 1–6 basis spells &nbsp;|&nbsp;
+          <strong> 200004</strong> — gedeelde class spells level 8–80 &nbsp;|&nbsp;
+          <strong> 200020</strong> — Alliance exclusief (mount + Seal of Vengeance) &nbsp;|&nbsp;
+          <strong> 200021</strong> — Horde exclusief (mount + Seal of Corruption)
+        </p>
         <table className="creature-data-table">
           <thead>
             <tr><th>Template ID</th><th>Info</th>{!readOnly && <th></th>}</tr>
@@ -846,48 +859,61 @@ export default function CreatureEditorPage() {
         </table>
         {!readOnly && (
           <button type="button" className="btn-ghost creature-add-row"
-            onClick={() => { setSpells([...spells, { SpellID: -200000, MoneyCost: 0, ReqSkillLine: 0, ReqSkillRank: 0, ReqLevel: 0, ReqSpell: 0 }]); markDirty(); }}>
+            onClick={() => { setSpells([...spells, { SpellID: -200003, MoneyCost: 0, ReqSkillLine: 0, ReqSkillRank: 0, ReqLevel: 0, ReqSpell: 0 }]); markDirty(); }}>
             <Plus size={12} /> Add Template
           </button>
         )}
 
-        <h5 className="field-subsection-title" style={{ marginTop: '1rem' }}>Direct Spells</h5>
-        <p className="field-hint">Individual spells added directly to this trainer (positive SpellID).</p>
-        <table className="creature-data-table">
-          <thead>
-            <tr><th>SpellID</th><th>Cost</th><th>Req Skill</th><th>Skill Rank</th><th>Req Lvl</th><th>Req Spell</th>{!readOnly && <th></th>}</tr>
-          </thead>
-          <tbody>
-            {directSpells.length === 0 && (
-              <tr><td colSpan={readOnly ? 6 : 7} style={{ color: 'var(--text-muted)', fontStyle: 'italic' }}>No direct spells</td></tr>
+        {tDef && (
+          <div style={{ marginTop: '1rem' }}>
+            <h5 className="field-subsection-title">Trainer Spells (nieuw systeem)</h5>
+            {spellSummary && Number(spellSummary.cnt) > 0 ? (
+              <div className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <span>
+                  <strong>{spellSummary.cnt}</strong> spells in trainer_spell voor TrainerId {tDef.TrainerId}
+                  {spellSummary.minLvl != null && ` · Lvl ${spellSummary.minLvl}–${spellSummary.maxLvl}`}
+                </span>
+                <span style={{ color: 'var(--text-muted)' }}>→ Beheer via Trainer Spell Editor</span>
+              </div>
+            ) : (
+              <p className="field-hint" style={{ color: 'var(--accent)' }}>
+                Geen trainer_spell entries gevonden voor TrainerId {tDef.TrainerId} — voeg spells toe via de Trainer Spell Editor.
+              </p>
             )}
-            {directSpells.map((row, i) => {
-              const gi = spellGlobalIdx(row);
-              return (
-                <tr key={i}>
-                  {['SpellID', 'MoneyCost', 'ReqSkillLine', 'ReqSkillRank', 'ReqLevel', 'ReqSpell'].map(col => (
-                    <td key={col}>
-                      <input type="text" inputMode="numeric" value={row[col] ?? 0} readOnly={readOnly}
-                        onChange={e => updateRow(gi, { [col]: e.target.value })} />
-                    </td>
-                  ))}
-                  {!readOnly && (
-                    <td>
-                      <button type="button" className="btn-ghost icon-btn" onClick={() => removeRow(gi)}>
-                        <Trash2 size={12} />
-                      </button>
-                    </td>
-                  )}
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-        {!readOnly && (
-          <button type="button" className="btn-ghost creature-add-row"
-            onClick={() => { setSpells([...spells, EMPTY_TRAINER_SPELL()]); markDirty(); }}>
-            <Plus size={12} /> Add Spell
-          </button>
+          </div>
+        )}
+        {directSpells.length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <h5 className="field-subsection-title">Direct Spells <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>(npc_trainer legacy)</span></h5>
+            <p className="field-hint">Positieve SpellID entries in npc_trainer — legacy, niet meer in gebruik in het nieuwe systeem.</p>
+            <table className="creature-data-table">
+              <thead>
+                <tr><th>SpellID</th><th>Cost</th><th>Req Skill</th><th>Skill Rank</th><th>Req Lvl</th><th>Req Spell</th>{!readOnly && <th></th>}</tr>
+              </thead>
+              <tbody>
+                {directSpells.map((row, i) => {
+                  const gi = spellGlobalIdx(row);
+                  return (
+                    <tr key={i}>
+                      {['SpellID', 'MoneyCost', 'ReqSkillLine', 'ReqSkillRank', 'ReqLevel', 'ReqSpell'].map(col => (
+                        <td key={col}>
+                          <input type="text" inputMode="numeric" value={row[col] ?? 0} readOnly={readOnly}
+                            onChange={e => updateRow(gi, { [col]: e.target.value })} />
+                        </td>
+                      ))}
+                      {!readOnly && (
+                        <td>
+                          <button type="button" className="btn-ghost icon-btn" onClick={() => removeRow(gi)}>
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     );
@@ -1193,7 +1219,8 @@ export default function CreatureEditorPage() {
             readOnly ? refTrainerDef : trainerDef,
             readOnly ? null : (v) => { setTrainerDef(v); markDirty(); },
             trainerDefMode,
-            readOnly ? null : setTrainerDefMode
+            readOnly ? null : setTrainerDefMode,
+            trainerSpellSummary
           )}
         </div>
         <div className="creature-subtab-panel" hidden={!show('vendor', 'vendor')}>
