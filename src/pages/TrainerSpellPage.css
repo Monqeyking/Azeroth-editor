@@ -1,0 +1,225 @@
+.ts-content {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.ts-table-wrap {
+  padding: 20px 28px 32px;
+  overflow-y: auto;
+}
+
+.ts-rank-table {
+  width: 100%;
+}
+
+.ts-rank-row {
+  cursor: pointer;
+}
+
+.ts-rank-row:hover {
+  background: var(--bg-hover);
+}
+
+.ts-rank-row--open {
+  background: rgba(200, 169, 110, 0.08);
+}
+
+.ts-confirmed {
+  color: var(--accent-green, #4aaa6a);
+  font-size: 9px;
+  margin-left: 4px;
+}
+
+.ts-dirty-dot {
+  color: var(--gold);
+  margin-left: 5px;
+  font-size: 10px;
+}
+
+.ts-muted {
+  color: var(--text-muted);
+}
+
+/* Expand panel */
+.ts-expand-row td {
+  background: var(--bg-panel);
+  border-top: none;
+}
+
+.ts-expand-panel {
+  display: flex;
+  gap: 0;
+  border-top: 1px solid var(--border);
+}
+
+.ts-expand-col {
+  flex: 0 0 220px;
+  padding: 14px 18px;
+  border-right: 1px solid var(--border);
+}
+
+.ts-expand-col--trainers {
+  flex: 1;
+  border-right: none;
+}
+
+.ts-field-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.ts-field-row label {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+  color: var(--text-secondary);
+  width: 90px;
+  flex-shrink: 0;
+}
+
+.ts-field-row input {
+  width: 90px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 13px;
+}
+
+.ts-field-row input:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+
+.ts-save-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 4px;
+}
+
+/* Trainers list */
+.ts-no-trainers {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0 0 6px;
+}
+
+.ts-trainer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(42, 48, 64, 0.4);
+}
+
+.ts-trainer-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ts-trainer-id {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ts-trainer-name {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 200px;
+}
+
+.ts-trainer-meta {
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.ts-remove-btn {
+  padding: 3px 6px;
+  color: var(--accent-red, #cc4a4a);
+  flex-shrink: 0;
+}
+
+/* Add trainer form */
+.ts-add-trainer-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.ts-draft-input {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.ts-draft-input:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+
+.ts-draft-input--id   { width: 90px; }
+.ts-draft-input--cost { width: 80px; }
+.ts-draft-input--lvl  { width: 70px; }
+
+.ts-trainer-search-wrap {
+  position: relative;
+}
+
+.ts-trainer-search {
+  width: 100%;
+}
+
+.ts-trainer-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  z-index: 10;
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.ts-trainer-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+  border-bottom: 1px solid rgba(42,48,64,0.4);
+}
+
+.ts-trainer-option:hover {
+  background: var(--bg-hover);
+}
+
+.ts-selected-trainer {
+  font-size: 12px;
+  font-family: var(--font-mono, monospace);
+  color: var(--gold);
+  padding: 0 4px;
+  flex-shrink: 0;
+}

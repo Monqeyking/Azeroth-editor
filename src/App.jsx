@@ -12,6 +12,7 @@ import SpawnMapPage from './pages/SpawnMapPage';
 import SettingsPage from './pages/SettingsPage';
 import Editor3DPage from './pages/Editor3DPage';
 import RaceClassPage from './pages/RaceClassPage';
+import TrainerSpellPage from './pages/TrainerSpellPage';
 
 export default function App() {
   return (
@@ -30,6 +31,7 @@ export default function App() {
             <Route path="map" element={<SpawnMapPage />} />
             <Route path="editor3d" element={<Editor3DPage />} />
             <Route path="races" element={<RaceClassPage />} />
+            <Route path="trainer-spells" element={<TrainerSpellPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>
