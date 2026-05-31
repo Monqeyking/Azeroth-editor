@@ -425,7 +425,7 @@ const SPELL_FIELDS = [
 ];
 
 export default function SpellEditorPage() {
-  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query } = useConnection();
+  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges } = useConnection();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -439,6 +439,9 @@ export default function SpellEditorPage() {
   const [cloneSaving, setCloneSaving] = useState(false);
   const [trainerList, setTrainerList] = useState([]);
   const [expandedFlags, setExpandedFlags] = useState({});
+  const [castTimes, setCastTimes] = useState({});
+  const [durations, setDurations] = useState({});
+  const [ranges, setRanges] = useState({});
   const searchRef = useRef(null);
 
   const searchSpells = useCallback(async (term) => {
@@ -449,6 +452,12 @@ export default function SpellEditorPage() {
   }, [searchSpellsDbc]);
 
   useEffect(() => { searchSpells(''); }, []);
+
+  useEffect(() => {
+    readCastTimes().then(r => { if (r.success) setCastTimes(r.data); });
+    readDurations().then(r => { if (r.success) setDurations(r.data); });
+    readRanges().then(r => { if (r.success) setRanges(r.data); });
+  }, []);
 
   useEffect(() => { searchRef.current?.focus(); }, []);
 
@@ -629,6 +638,41 @@ export default function SpellEditorPage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [dirty, selected, handleSave]);
+
+  const formatCastTime = (idx) => {
+    const ms = castTimes[idx];
+    if (ms === undefined) return '';
+    if (ms === 0) return 'Instant';
+    if (ms < 1000) return `${ms}ms`;
+    return `${(ms / 1000).toFixed(2).replace(/\.?0+$/, '')}s cast`;
+  };
+
+  const formatDuration = (idx) => {
+    const d = durations[idx];
+    if (!d) return '';
+    const ms = d.duration;
+    if (ms === -1) return 'Permanent';
+    if (ms === 0) return 'Instant';
+    if (ms < 1000) return `${ms}ms`;
+    if (ms < 60000) return `${ms / 1000}s`;
+    if (ms < 3600000) return `${ms / 60000}min`;
+    return `${ms / 3600000}h`;
+  };
+
+  const formatRange = (idx) => {
+    const r = ranges[idx];
+    if (!r) return '';
+    if (r.rangeMax === 0) return 'Self';
+    if (r.name) return `${r.rangeMax}yd (${r.name})`;
+    return `${r.rangeMax}yd`;
+  };
+
+  const getIndexHint = (key, value) => {
+    if (key === 'CastingTimeIndex') return formatCastTime(value);
+    if (key === 'DurationIndex') return formatDuration(value);
+    if (key === 'RangeIndex') return formatRange(value);
+    return '';
+  };
 
   const getFieldSections = () => [
     { title: 'Basis Info', keys: ['ID', 'Name_Lang_enUS', 'NameSubtext_Lang_enUS', 'Description_Lang_enUS', 'AuraDescription_Lang_enUS'] },
@@ -848,9 +892,17 @@ export default function SpellEditorPage() {
                                 </div>
                               )}
                             </div>
-                          ) : (
-                            <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
-                          )}
+                          ) : (() => {
+                            const hint = getIndexHint(f.key, form[f.key]);
+                            return hint ? (
+                              <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                                <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
+                                <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>{hint}</span>
+                              </div>
+                            ) : (
+                              <input type={f.type} value={form[f.key] ?? ''} onChange={e => handleChange(f.key, e.target.value)} readOnly={f.readonly} />
+                            );
+                          })()}
                         </div>
                       );
                     })}
