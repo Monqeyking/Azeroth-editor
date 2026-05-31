@@ -55,9 +55,6 @@ Spell.dbc via IPC (`dbc:readSpellFull` / `dbc:writeSpellFull`).
 - Ctrl+S opslaan
 
 **Backlog:**
-- [ ] CastingTimeIndex → leesbare cast time (SpellCastTimes.dbc)
-- [ ] DurationIndex → leesbare duur (SpellDuration.dbc)
-- [ ] RangeIndex → leesbare range (SpellRange.dbc)
 - [ ] DK verbergen via toggle (voor Vanilla-focus)
 
 ---
@@ -123,6 +120,20 @@ Directe SQL-query editor.
 ### 4. WoW-stijl item tooltip preview
 Readonly tooltip-panel rechtsonder: toont naam in quality-kleur, item level, type, stats, spells, flavortekst — zoals de in-game tooltip. Puur frontend, geen extra IPC.
 
+### 5. ✅ Filters + Bulk Edit (gebouwd 2026-05-31)
+Class/subclass/quality filterdrops in listpanel. Bulk edit paneel (zichtbaar bij actieve filter): veld + waarde + twee-staps confirm met exact itemcount → één UPDATE query.
+
+### 6. ✅ Create tab (gebouwd 2026-05-31)
+Nieuw item aanmaken met auto-ID. "Use selected as template" kopieert alle velden van het geselecteerde item. Na aanmaken: terug naar Edit met nieuw item geselecteerd.
+
+### 7. ✅ Scaling tab — Heirloom (gebouwd 2026-05-31)
+Alleen actief bij Quality=7. Beheert `scalingstatdistribution_dbc`. Check-before-alter: bepaalt kolomnaam op basis van slot + materiaal (`PlateHelmArmor` etc.), checkt via `INFORMATION_SCHEMA`, draait `ALTER TABLE` + `UPDATE ROUND(ChestArmor × factor)` bij ontbrekende kolom. Bulk "Alle Maxlevel → 60". Preview tabel armor + stats per level.
+
+### 8. QoL — nog te doen
+- [ ] **Display ID icon preview** — item icon naast Display ID veld via `wow.zamimg.com/images/wow/icons/`
+- [ ] **Sell/Buy price calculator** — goud/zilver/koper inputs die samenvoegen tot 1 integer (i.p.v. raw getal)
+- [ ] **ScalingStatValue smart dropdown** — automatisch juiste waarde voorstellen op basis van slot + materiaal
+
 ---
 
 ## 🔧 QuestEditorPage (`/quests`) — Verbetering gepland
@@ -169,6 +180,9 @@ Mini-diagram dat `PrevQuestId` / `NextQuestId` / `ExclusiveGroup` toont als een 
 ## 📋 Globale backlog
 
 - [ ] **Vanilla-filter toggle** — DK verbergen/tonen, WotLK-only content filteren uit dropdowns
-- [ ] **CastingTimeIndex / DurationIndex / RangeIndex** → DBC lookup naar leesbare waarden (SpellEditor)
 - [ ] **Talent tree revamp** — aangepaste boom voor Vanilla-stijl
 - [ ] **Crusader Strike ranks** — custom spell workflow: baseline melee + holy damage per rank
+- [ ] **Loot table editor** (`/loot`) — `creature_loot_template` + `item_loot_template`. Hoog dagelijks gebruik bij custom content, nog volledig afwezig
+- [ ] **Quest Editor refactor** — zelfde behandeling als Item Editor: enum dropdowns, bitmasks, naam lookups, ontbrekende velden, quest chain visualisatie
+- [ ] **Gossip/NPC text editor** — `npc_text`, `gossip_menu`, `gossip_menu_option`. Nu alleen via SQL
+- [ ] **Achievement editor** — `achievement_dbc` / `achievement_criteria_dbc` voor custom progressie

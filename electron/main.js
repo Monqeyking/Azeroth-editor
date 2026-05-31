@@ -871,6 +871,63 @@ ipcMain.handle('dbc:readTalents', async (_, dbcPath, tabId) => {
   }
 });
 
+// SpellCastTimes.dbc: ID(0), CastTime(4), CastTimePerLevel(8), MinCastTime(12) — 4 fields × 4 bytes
+ipcMain.handle('dbc:readCastTimes', async (_, dbcPath) => {
+  try {
+    const dbc = await readDbcFile(path.join(dbcPath, 'SpellCastTimes.dbc'));
+    if (!dbc) return { success: true, data: {} };
+    const result = {};
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const base = i * dbc.recordSize;
+      const id = readUInt32LE(dbc.dataBuffer, base);
+      const castTime = readUInt32LE(dbc.dataBuffer, base + 4);
+      result[id] = castTime;
+    }
+    return { success: true, data: result };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// SpellDuration.dbc: ID(0), Duration(4), DurationPerLevel(8), MaxDuration(12) — 4 fields × 4 bytes
+ipcMain.handle('dbc:readDurations', async (_, dbcPath) => {
+  try {
+    const dbc = await readDbcFile(path.join(dbcPath, 'SpellDuration.dbc'));
+    if (!dbc) return { success: true, data: {} };
+    const result = {};
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const base = i * dbc.recordSize;
+      const id = readUInt32LE(dbc.dataBuffer, base);
+      const duration = readUInt32LE(dbc.dataBuffer, base + 4);
+      const maxDuration = readUInt32LE(dbc.dataBuffer, base + 12);
+      result[id] = { duration, maxDuration };
+    }
+    return { success: true, data: result };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+// SpellRange.dbc: ID(0), RangeMin(4), RangeMinHostile(8), RangeMax(12), RangeMaxHostile(16), then 2 localized name strings (offset 20+)
+ipcMain.handle('dbc:readRanges', async (_, dbcPath) => {
+  try {
+    const dbc = await readDbcFile(path.join(dbcPath, 'SpellRange.dbc'));
+    if (!dbc) return { success: true, data: {} };
+    const result = {};
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const base = i * dbc.recordSize;
+      const id = readUInt32LE(dbc.dataBuffer, base);
+      const rangeMin = dbc.dataBuffer.readFloatLE(base + 4);
+      const rangeMax = dbc.dataBuffer.readFloatLE(base + 12);
+      // Name string: offset 20 = first localized string block (enUS pointer)
+      const nameOffset = readUInt32LE(dbc.dataBuffer, base + 20);
+      let name = '';
+      if (nameOffset < dbc.stringBlock.length) {
+        const end = dbc.stringBlock.indexOf(0, nameOffset);
+        name = dbc.stringBlock.toString('utf8', nameOffset, end >= 0 ? end : undefined);
+      }
+      result[id] = { rangeMin: Math.round(rangeMin * 10) / 10, rangeMax: Math.round(rangeMax * 10) / 10, name };
+    }
+    return { success: true, data: result };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('dbc:readSpellIcons', async (_, dbcPath, iconIds) => {
   try {
     const filePath = path.join(dbcPath, 'SpellIcon.dbc');
