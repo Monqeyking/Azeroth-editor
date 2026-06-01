@@ -13,6 +13,7 @@ import SettingsPage from './pages/SettingsPage';
 import Editor3DPage from './pages/Editor3DPage';
 import RaceClassPage from './pages/RaceClassPage';
 import TrainerSpellPage from './pages/TrainerSpellPage';
+import CharCustomizationPage from './pages/CharCustomizationPage';
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="editor3d" element={<Editor3DPage />} />
             <Route path="races" element={<RaceClassPage />} />
             <Route path="trainer-spells" element={<TrainerSpellPage />} />
+            <Route path="char-customization" element={<CharCustomizationPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

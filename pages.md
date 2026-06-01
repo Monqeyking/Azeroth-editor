@@ -1,6 +1,19 @@
 # Azeroth Editor — Pages Overview
 
-> Status-overzicht van alle editor-pagina's. Bijgewerkt: 2026-05-31
+> Status-overzicht van alle editor-pagina's. Bijgewerkt: 2026-06-01
+
+---
+
+## 🎯 Project Doel
+
+**Classic+ op WotLK engine.** Het doel is een aangepaste WoW-server die een "Classic+" ervaring biedt — Vanilla-sfeer en progressie, maar gebouwd op de stabiele WotLK (AzerothCore) engine. Dit betekent:
+
+- **Custom content** als eerste prioriteit: nieuwe quests, creatures, items, spells — allemaal via eigen ID ranges (4000000+)
+- **Vanilla-stijl progressie**: geen dungeon finder, geen flying in old world, klassieke quest chains en reputatie
+- **Balans op WotLK engine**: class mechanics, talent trees en spells worden aangepast richting Vanilla/TBC feel
+- **DBC-aanpassingen**: SpellLevel, SkillLineAbility, talent trees — server én client moeten synchroon blijven
+
+Elke editor-pagina moet dit doel ondersteunen: snel custom content kunnen aanmaken, aanpassen en testen zonder SQL handwerk.
 
 ---
 
