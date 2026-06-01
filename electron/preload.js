@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     addSkillLineAbility: (dbcPath, entry) => ipcRenderer.invoke('dbc:addSkillLineAbility', dbcPath, entry),
     readCharBaseInfo: (dbcPath) => ipcRenderer.invoke('dbc:readCharBaseInfo', dbcPath),
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
+    readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
+    writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
     readDurations: (dbcPath) => ipcRenderer.invoke('dbc:readDurations', dbcPath),
     readRanges: (dbcPath) => ipcRenderer.invoke('dbc:readRanges', dbcPath),

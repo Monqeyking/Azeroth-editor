@@ -3,7 +3,7 @@ import { useConnection } from '../../lib/ConnectionContext';
 import { useEffect } from 'react';
 import {
   LayoutDashboard, Swords, Package, ScrollText,
-  Sparkles, GitBranch, Map, Settings, Unplug, Globe, Monitor, Users, BookOpen
+  Sparkles, GitBranch, Map, Settings, Unplug, Globe, Monitor, Users, BookOpen, Palette
 } from 'lucide-react';
 import './Layout.css';
 
@@ -17,7 +17,8 @@ const NAV = [
   { to: '/trainer-spells', icon: BookOpen,   label: 'Trainers' },
   { to: '/map',        icon: Map,             label: 'Spawn Map' },
   { to: '/editor3d',   icon: Monitor,         label: '3D Editor' },
-  { to: '/races',      icon: Users,           label: 'Races & Classes' },
+  { to: '/races',           icon: Users,    label: 'Races & Classes' },
+  { to: '/char-customization', icon: Palette, label: 'Char Looks' },
 ];
 
 export default function Layout() {

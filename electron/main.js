@@ -2229,3 +2229,99 @@ ipcMain.handle('dbc:writeCharBaseInfo', async (_, dbcPath, combos) => {
     return { success: false, error: e.message };
   }
 });
+
+// CharSections.dbc: 10 fields × 4 bytes = 40 bytes/record
+// ID(0) Race(4) Sex(8) BaseSection(12) Tex1(16) Tex2(20) Tex3(24) Flags(28) VariationIndex(32) ColorIndex(36)
+ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {
+  try {
+    const filePath = path.join(dbcPath, 'CharSections.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon CharSections.dbc niet lezen' };
+    const { recordCount, recordSize, dataBuffer, stringBlock } = dbc;
+    const readStr = (offset) => {
+      if (!offset) return '';
+      let end = offset;
+      while (end < stringBlock.length && stringBlock[end] !== 0) end++;
+      return stringBlock.toString('utf8', offset, end);
+    };
+    const records = [];
+    for (let i = 0; i < recordCount; i++) {
+      const b = i * recordSize;
+      records.push({
+        id:             dataBuffer.readUInt32LE(b + 0),
+        race:           dataBuffer.readUInt32LE(b + 4),
+        sex:            dataBuffer.readUInt32LE(b + 8),
+        baseSection:    dataBuffer.readUInt32LE(b + 12),
+        tex1:           readStr(dataBuffer.readUInt32LE(b + 16)),
+        tex2:           readStr(dataBuffer.readUInt32LE(b + 20)),
+        tex3:           readStr(dataBuffer.readUInt32LE(b + 24)),
+        flags:          dataBuffer.readUInt32LE(b + 28),
+        variationIndex: dataBuffer.readUInt32LE(b + 32),
+        colorIndex:     dataBuffer.readUInt32LE(b + 36),
+      });
+    }
+    return { success: true, records };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records) => {
+  try {
+    const filePath = path.join(dbcPath, 'CharSections.dbc');
+    const RECORD_SIZE = 40;
+    const FIELD_COUNT = 10;
+
+    // Build string block: collect unique strings in insertion order
+    const strMap = new Map([['', 0]]);
+    let strOffset = 1; // offset 0 = empty string (null byte)
+    const strParts = [Buffer.from('\0')];
+    const internStr = (s) => {
+      if (!s) return 0;
+      if (strMap.has(s)) return strMap.get(s);
+      const off = strOffset;
+      strMap.set(s, off);
+      const buf = Buffer.from(s + '\0', 'utf8');
+      strParts.push(buf);
+      strOffset += buf.length;
+      return off;
+    };
+
+    // Pre-intern all strings
+    for (const r of records) {
+      internStr(r.tex1 || '');
+      internStr(r.tex2 || '');
+      internStr(r.tex3 || '');
+    }
+
+    const stringBlock = Buffer.concat(strParts);
+    const dataBuffer = Buffer.alloc(records.length * RECORD_SIZE);
+
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      const b = i * RECORD_SIZE;
+      dataBuffer.writeUInt32LE(r.id            >>> 0, b + 0);
+      dataBuffer.writeUInt32LE(r.race          >>> 0, b + 4);
+      dataBuffer.writeUInt32LE(r.sex           >>> 0, b + 8);
+      dataBuffer.writeUInt32LE(r.baseSection   >>> 0, b + 12);
+      dataBuffer.writeUInt32LE(internStr(r.tex1 || ''), b + 16);
+      dataBuffer.writeUInt32LE(internStr(r.tex2 || ''), b + 20);
+      dataBuffer.writeUInt32LE(internStr(r.tex3 || ''), b + 24);
+      dataBuffer.writeUInt32LE(r.flags         >>> 0, b + 28);
+      dataBuffer.writeUInt32LE(r.variationIndex >>> 0, b + 32);
+      dataBuffer.writeUInt32LE(r.colorIndex    >>> 0, b + 36);
+    }
+
+    const header = Buffer.alloc(20);
+    header.write('WDBC', 0, 'ascii');
+    header.writeUInt32LE(records.length,       4);
+    header.writeUInt32LE(FIELD_COUNT,          8);
+    header.writeUInt32LE(RECORD_SIZE,         12);
+    header.writeUInt32LE(stringBlock.length,  16);
+
+    fs.writeFileSync(filePath, Buffer.concat([header, dataBuffer, stringBlock]));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});

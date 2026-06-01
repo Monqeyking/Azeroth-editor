@@ -164,6 +164,14 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.readRanges(dbcPath);
   }, [dbcPath]);
 
+  const readCharSections = useCallback(async () => {
+    return window.azeroth.dbc.readCharSections(dbcPath);
+  }, [dbcPath]);
+
+  const writeCharSections = useCallback(async (records) => {
+    return window.azeroth.dbc.writeCharSections(dbcPath, records);
+  }, [dbcPath]);
+
   return (
     <ConnectionContext.Provider value={{
       dbConfig, setDbConfig,
@@ -181,6 +189,7 @@ export function ConnectionProvider({ children }) {
       searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
       readSkillLineAbility, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
+      readCharSections, writeCharSections,
       idRanges, setIdRanges
     }}>
       {children}

@@ -37,9 +37,14 @@
 
 .editor-list-header {
 	display: flex;
-	gap: 8px;
-	padding: 12px 12px 10px;
+	flex-direction: column;
+	gap: 0;
+	padding: 0;
 	border-bottom: 1px solid var(--border);
+}
+
+.editor-list-header .search-box {
+	margin: 10px 10px 8px;
 }
 
 .search-box {
