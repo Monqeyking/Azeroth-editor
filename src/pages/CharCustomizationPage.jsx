@@ -2,6 +2,8 @@ import { useState, useEffect, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Plus, Trash2, Save, RefreshCw } from 'lucide-react';
 import './CharCustomizationPage.css';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 const RACES = [
   { id: 1,  label: 'Human' },
@@ -33,6 +35,7 @@ export default function CharCustomizationPage() {
   const [saving, setSaving]         = useState(false);
   const [saveMsg, setSaveMsg]       = useState(null);
   const [dirty, setDirty]           = useState(false);
+  const unsavedGuard = useUnsavedGuard(dirty);
 
   const [race,    setRace]    = useState(1);
   const [gender,  setGender]  = useState(0);
@@ -100,7 +103,9 @@ export default function CharCustomizationPage() {
   };
 
   return (
-    <div className="cc-page">
+    <>
+      {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
+      <div className="cc-page">
       <div className="cc-header">
         <div>
           <h1 className="cc-title">Character Customization</h1>
@@ -258,5 +263,6 @@ export default function CharCustomizationPage() {
         )}
       </div>
     </div>
+    </>
   );
 }

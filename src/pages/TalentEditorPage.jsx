@@ -4,6 +4,8 @@ import { Save, RotateCcw, GitBranch, X, Search, Copy, Trash2, Plus } from 'lucid
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 const CLASSES = [
 	{ id: 1, name: 'Warrior', color: '#C79C6E' },
@@ -60,6 +62,7 @@ export default function TalentEditorPage() {
 	const [isNew, setIsNew] = useState(false);
 	const [form, setForm] = useState({});
 	const [dirty, setDirty] = useState(false);
+	const unsavedGuard = useUnsavedGuard(dirty);
 	const [saving, setSaving] = useState(false);
 	const [copying, setCopying] = useState(false);
 	const [deleting, setDeleting] = useState(false);
@@ -441,7 +444,9 @@ export default function TalentEditorPage() {
 
 	// ─── render ──────────────────────────────────────────────────────────────
 	return (
-		<div className="talent-layout fade-in">
+		<>
+			{unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
+			<div className="talent-layout fade-in">
 			{/* ── Class sidebar ── */}
 			<div className="talent-class-list">
 				<div className="talent-section-label">Classes</div>
@@ -773,5 +778,6 @@ export default function TalentEditorPage() {
 				</div>
 			)}
 		</div>
+		</>
 	);
 }

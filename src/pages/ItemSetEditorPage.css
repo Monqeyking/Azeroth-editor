@@ -1,0 +1,83 @@
+.ise-page { padding: 24px; max-width: 1100px; }
+.ise-title { font-size: 1.3rem; font-weight: 700; color: var(--gold); margin: 0 0 2px; }
+.ise-sub { color: var(--text-muted); font-size: 0.82rem; margin: 0 0 12px; }
+.ise-header { margin-bottom: 4px; }
+
+/* Tabs */
+.ise-tabs { display: flex; gap: 2px; margin-bottom: 18px; border-bottom: 1px solid var(--border); }
+.ise-tab { background: none; border: none; border-bottom: 2px solid transparent; color: var(--text-muted); padding: 7px 16px; font-size: 0.83rem; cursor: pointer; margin-bottom: -1px; transition: color 0.15s, border-color 0.15s; }
+.ise-tab:hover { color: #fff; }
+.ise-tab.active { color: var(--gold); border-bottom-color: var(--gold); font-weight: 600; }
+
+/* Browser */
+.ise-browser { display: flex; flex-direction: column; gap: 12px; }
+.ise-browser-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ise-browser-search { display: flex; align-items: center; gap: 8px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; padding: 5px 10px; max-width: 340px; }
+.ise-browser-search:focus-within { border-color: var(--gold); }
+.ise-browser-table { max-width: 700px; }
+.ise-empty { padding: 16px; color: var(--text-muted); font-size: 0.82rem; text-align: center; }
+.ise-help { color: var(--text-muted); font-size: 0.8rem; }
+.ise-warning { color: #e6b450; font-size: 0.8rem; }
+.ise-source-cell { display: flex; align-items: center; gap: 5px; }
+
+.ise-editor { display: flex; flex-direction: column; gap: 0; }
+
+.ise-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+.ise-status { color: var(--text-muted); font-size: 0.8rem; }
+
+.ise-btn { display: flex; align-items: center; gap: 5px; background: var(--bg-panel); border: 1px solid var(--border); color: #fff; padding: 5px 12px; border-radius: 4px; font-size: 0.82rem; cursor: pointer; }
+.ise-btn:hover { border-color: var(--gold); color: var(--gold); }
+.ise-btn.primary { background: var(--gold); color: #000; border-color: var(--gold); font-weight: 600; }
+.ise-btn.primary:hover { opacity: 0.85; }
+
+/* Search */
+.ise-search-wrap { position: relative; }
+.ise-search-field { display: flex; align-items: center; gap: 6px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; min-width: 280px; }
+.ise-search-field:focus-within { border-color: var(--gold); }
+.ise-search-icon { color: var(--text-muted); flex-shrink: 0; }
+.ise-search-input { background: none; border: none; color: #fff; font-size: 0.83rem; outline: none; width: 100%; }
+.ise-search-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 260px; overflow-y: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+.ise-search-option { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.ise-search-option:last-child { border-bottom: none; }
+.ise-search-option:hover { background: rgba(255,255,255,0.05); }
+
+/* Form */
+.ise-form { display: flex; flex-wrap: wrap; gap: 14px; margin-bottom: 24px; align-items: flex-end; }
+.ise-form label { display: flex; flex-direction: column; gap: 4px; font-size: 0.78rem; color: var(--text-muted); }
+.ise-input { background: var(--bg-dark); border: 1px solid var(--border); color: #fff; border-radius: 4px; padding: 5px 8px; font-size: 0.83rem; outline: none; width: 220px; }
+.ise-input.short { width: 90px; }
+.ise-input.readonly { opacity: 0.5; cursor: default; width: 80px; }
+.ise-input:focus { border-color: var(--gold); }
+
+/* Sections */
+.ise-sections { display: flex; gap: 24px; flex-wrap: wrap; align-items: flex-start; }
+.ise-section { flex: 1; min-width: 300px; }
+.ise-section-title { font-size: 0.9rem; font-weight: 600; color: var(--gold); margin: 0 0 10px; }
+.ise-muted { color: var(--text-muted); font-weight: 400; }
+
+/* Table */
+.ise-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.ise-table th { background: var(--bg-dark); color: var(--text-muted); padding: 5px 8px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--border); font-size: 0.75rem; }
+.ise-table td { padding: 3px 6px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+.ise-table tr:hover td { background: rgba(255,255,255,0.03); }
+.ise-clickable-row { cursor: pointer; }
+
+.ise-cell-input { background: var(--bg-dark); border: 1px solid transparent; color: #fff; border-radius: 3px; padding: 3px 6px; font-size: 0.8rem; outline: none; width: 90px; }
+.ise-cell-input.short { width: 60px; }
+.ise-cell-input:focus { border-color: var(--gold); }
+.ise-name-cell { color: var(--text-muted); font-size: 0.78rem; max-width: 180px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.ise-icon-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 2px 4px; border-radius: 3px; }
+.ise-icon-btn:hover { color: var(--gold); background: rgba(255,255,255,0.05); }
+.ise-icon-btn.danger:hover { color: #e06c75; }
+.ise-id { color: var(--text-muted); font-size: 0.75rem; min-width: 44px; }
+
+/* Modal */
+.ise-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 500; display: flex; align-items: center; justify-content: center; }
+.ise-modal { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; width: 480px; max-height: 480px; display: flex; flex-direction: column; }
+.ise-modal-search { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.ise-modal-search input { background: none; border: none; color: #fff; font-size: 0.85rem; outline: none; flex: 1; }
+.ise-modal-results { overflow-y: auto; flex: 1; }
+.ise-modal-row { display: flex; align-items: center; gap: 10px; padding: 7px 14px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.ise-modal-row:hover { background: rgba(255,255,255,0.05); }
+.ise-modal-empty { padding: 16px; color: var(--text-muted); font-size: 0.82rem; text-align: center; }

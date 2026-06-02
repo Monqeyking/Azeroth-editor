@@ -2230,6 +2230,170 @@ ipcMain.handle('dbc:writeCharBaseInfo', async (_, dbcPath, combos) => {
   }
 });
 
+// ─── ItemSet.dbc ──────────────────────────────────────────────────────────────
+const ITEMSET_LAYOUTS = {
+  180: {
+    nameFields: 9,
+    itemsOffset: 40,
+    spellsOffset: 108,
+    thresholdsOffset: 140,
+    requiredSkillOffset: 172,
+    requiredSkillRankOffset: 176,
+  },
+  212: {
+    nameFields: 17,
+    itemsOffset: 72,
+    spellsOffset: 140,
+    thresholdsOffset: 172,
+    requiredSkillOffset: 204,
+    requiredSkillRankOffset: 208,
+  },
+};
+
+function getItemSetLayout(recordSize) {
+  return ITEMSET_LAYOUTS[recordSize] || null;
+}
+
+ipcMain.handle('dbc:searchItemSets', async (_, dbcPath, term = '') => {
+  try {
+    const filePath = path.join(dbcPath, 'ItemSet.dbc');
+    const buf = fs.readFileSync(filePath);
+    if (buf.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Invalid DBC' };
+    const recordCount = buf.readUInt32LE(4);
+    const recordSize = buf.readUInt32LE(12);
+    const layout = getItemSetLayout(recordSize);
+    if (!layout) return { success: false, error: `Unsupported ItemSet.dbc record size ${recordSize}` };
+    const strBlockStart = 20 + recordCount * recordSize;
+    const strBlock = buf.slice(strBlockStart);
+    const needle = String(term || '').trim().toLowerCase();
+    const isId = /^\d+$/.test(needle);
+    const matches = [];
+
+    for (let i = 0; i < recordCount; i++) {
+      const off = 20 + i * recordSize;
+      const id = buf.readUInt32LE(off);
+      const nameRef = buf.readUInt32LE(off + 4);
+      const name = readStringFromBlock(null, nameRef, strBlock);
+
+      if (!needle || (isId && String(id).includes(needle)) || (!isId && name.toLowerCase().includes(needle))) {
+        matches.push({ entry: id, name, patch: 0, source: 'DBC' });
+      }
+
+      if (matches.length >= 200) break;
+    }
+
+    return { success: true, data: matches };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:readItemSet', async (_, dbcPath, id) => {
+  try {
+    const filePath = path.join(dbcPath, 'ItemSet.dbc');
+    const buf = fs.readFileSync(filePath);
+    if (buf.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Invalid DBC' };
+    const recordCount = buf.readUInt32LE(4);
+    const recordSize = buf.readUInt32LE(12);
+    const layout = getItemSetLayout(recordSize);
+    if (!layout) return { success: false, error: `Unsupported ItemSet.dbc record size ${recordSize}` };
+    const strBlockStart = 20 + recordCount * recordSize;
+    const strBlock = buf.slice(strBlockStart);
+    for (let i = 0; i < recordCount; i++) {
+      const off = 20 + i * recordSize;
+      if (buf.readUInt32LE(off) !== id) continue;
+      const nameRef = buf.readUInt32LE(off + 4);
+      const name = readStringFromBlock(null, nameRef, strBlock);
+      const items = [], spells = [], thresholds = [];
+      for (let j = 0; j < 17; j++) items.push(buf.readUInt32LE(off + layout.itemsOffset + j * 4));
+      for (let j = 0; j < 8; j++) {
+        spells.push(buf.readUInt32LE(off + layout.spellsOffset + j * 4));
+        thresholds.push(buf.readUInt32LE(off + layout.thresholdsOffset + j * 4));
+      }
+      return { success: true, data: {
+        id, name, items, spells, thresholds,
+        requiredSkill: buf.readUInt32LE(off + layout.requiredSkillOffset),
+        requiredSkillRank: buf.readUInt32LE(off + layout.requiredSkillRankOffset),
+      }};
+    }
+    return { success: false, error: `ItemSet ${id} niet gevonden` };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeItemSet', async (_, dbcPath, set) => {
+  try {
+    const filePath = path.join(dbcPath, 'ItemSet.dbc');
+    let buf = fs.readFileSync(filePath);
+    if (buf.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Invalid DBC' };
+    let recordCount = buf.readUInt32LE(4);
+    const recordSize = buf.readUInt32LE(12);
+    const layout = getItemSetLayout(recordSize);
+    if (!layout) return { success: false, error: `Unsupported ItemSet.dbc record size ${recordSize}` };
+    const strBlockStart = 20 + recordCount * recordSize;
+
+    let recordIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      if (buf.readUInt32LE(20 + i * recordSize) === set.id) { recordIndex = i; break; }
+    }
+
+    let newBuf;
+    if (recordIndex === -1) {
+      // Insert new record before string block
+      const newRecord = Buffer.alloc(recordSize, 0);
+      newBuf = Buffer.concat([buf.slice(0, strBlockStart), newRecord, buf.slice(strBlockStart)]);
+      recordIndex = recordCount;
+      recordCount++;
+      newBuf.writeUInt32LE(recordCount, 4);
+    } else {
+      newBuf = Buffer.from(buf);
+    }
+
+    // Append new name string
+    const nameStr = Buffer.from((set.name || '') + '\0', 'utf8');
+    const nameRef = newBuf.readUInt32LE(16); // current string block size = offset of new string
+    newBuf = Buffer.concat([newBuf, nameStr]);
+    newBuf.writeUInt32LE(nameRef + nameStr.length, 16);
+
+    const off = 20 + recordIndex * recordSize;
+    newBuf.writeUInt32LE(set.id, off);
+    newBuf.writeUInt32LE(nameRef, off + 4);
+    for (let field = 2; field <= layout.nameFields; field++) newBuf.writeUInt32LE(0, off + field * 4);
+    for (let j = 0; j < 17; j++) newBuf.writeUInt32LE(set.items[j] || 0, off + layout.itemsOffset + j * 4);
+    for (let j = 0; j < 8; j++) {
+      newBuf.writeUInt32LE(set.spells[j] || 0, off + layout.spellsOffset + j * 4);
+      newBuf.writeUInt32LE(set.thresholds[j] || 0, off + layout.thresholdsOffset + j * 4);
+    }
+    newBuf.writeUInt32LE(set.requiredSkill || 0, off + layout.requiredSkillOffset);
+    newBuf.writeUInt32LE(set.requiredSkillRank || 0, off + layout.requiredSkillRankOffset);
+
+    fs.writeFileSync(filePath, newBuf);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:findNextItemSetId', async (_, dbcPath) => {
+  try {
+    const filePath = path.join(dbcPath, 'ItemSet.dbc');
+    const buf = fs.readFileSync(filePath);
+    const recordCount = buf.readUInt32LE(4);
+    const recordSize = buf.readUInt32LE(12);
+    const layout = getItemSetLayout(recordSize);
+    if (!layout) return { success: false, error: `Unsupported ItemSet.dbc record size ${recordSize}` };
+    let max = 0;
+    for (let i = 0; i < recordCount; i++) {
+      const id = buf.readUInt32LE(20 + i * recordSize);
+      if (id > max) max = id;
+    }
+    return { success: true, id: max + 1 };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // CharSections.dbc: 10 fields × 4 bytes = 40 bytes/record
 // ID(0) Race(4) Sex(8) BaseSection(12) Tex1(16) Tex2(20) Tex3(24) Flags(28) VariationIndex(32) ColorIndex(36)
 ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {

@@ -4,6 +4,8 @@ import { Search, ChevronRight, ChevronDown, Trash2, Plus, Save, MousePointerClic
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TrainerSpellPage.css';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 export default function TrainerSpellPage() {
   const { searchSpellsDbc, readSpellFull, writeSpellFull, readSkillLineAbility, addSkillLineAbility, query } = useConnection();
@@ -16,7 +18,8 @@ export default function TrainerSpellPage() {
   const [expandedId, setExpandedId] = useState(null);
   const [rankFull, setRankFull] = useState({});   // full DBC record per rank ID
   const [rankEdits, setRankEdits] = useState({});
-  const [trainerDraft, setTrainerDraft] = useState({ trainerId: '', moneyCost: '0', reqLevel: '0', search: '' });
+  const unsavedGuard = useUnsavedGuard(Object.keys(rankEdits).length > 0);
+  const [trainerDraft, setTrainerDraft] = useState({ trainerId: '', moneyCost: '0', reqLevel: '0', search: '', skillLine: '' });
   const [trainerList, setTrainerList] = useState([]);   // alle trainer templates
   const [msg, setMsg] = useState(null);
   const [saving, setSaving] = useState(false);
@@ -41,6 +44,19 @@ export default function TrainerSpellPage() {
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   const CLASS_NAMES = { 1:'Warrior',2:'Paladin',3:'Hunter',4:'Rogue',5:'Priest',6:'Death Knight',7:'Shaman',8:'Mage',9:'Warlock',11:'Druid' };
+
+  const SKILL_LINE_OPTIONS = {
+    1:  [{ id: 26,  label: 'General' }, { id: 100, label: 'Arms' }, { id: 256, label: 'Fury' }, { id: 257, label: 'Protection' }],
+    2:  [{ id: 594, label: 'General' }, { id: 317, label: 'Holy' }, { id: 267, label: 'Protection' }, { id: 184, label: 'Retribution' }],
+    3:  [{ id: 50,  label: 'General' }, { id: 163, label: 'Beast Mastery' }, { id: 164, label: 'Marksmanship' }, { id: 165, label: 'Survival' }],
+    4:  [{ id: 253, label: 'General' }, { id: 182, label: 'Assassination' }, { id: 181, label: 'Combat' }, { id: 183, label: 'Subtlety' }],
+    5:  [{ id: 56,  label: 'General' }, { id: 78,  label: 'Discipline' }, { id: 613, label: 'Holy' }, { id: 236, label: 'Shadow' }],
+    6:  [{ id: 770, label: 'General' }, { id: 398, label: 'Blood' }, { id: 399, label: 'Frost' }, { id: 400, label: 'Unholy' }],
+    7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Elemental' }, { id: 374, label: 'Enhancement' }, { id: 375, label: 'Restoration' }],
+    8:  [{ id: 6,   label: 'General' }, { id: 237, label: 'Arcane' }, { id: 8,   label: 'Fire' }, { id: 454, label: 'Frost' }],
+    9:  [{ id: 593, label: 'General' }, { id: 355, label: 'Affliction' }, { id: 354, label: 'Demonology' }, { id: 593, label: 'Destruction' }],
+    11: [{ id: 574, label: 'General' }, { id: 134, label: 'Balance' }, { id: 134, label: 'Feral Combat' }, { id: 573, label: 'Restoration' }],
+  };
 
   const TRAINER_LABELS = {
     1: 'Warrior Main', 2: 'Warrior Starter',
@@ -183,7 +199,7 @@ export default function TrainerSpellPage() {
       setExpandedId(null);
     } else {
       setExpandedId(id);
-      setTrainerDraft({ trainerId: '', moneyCost: '0', reqLevel: String(spellLevel || 0), search: '' });
+      setTrainerDraft({ trainerId: '', moneyCost: '0', reqLevel: String(spellLevel || 0), search: '', skillLine: '' });
     }
   };
 
@@ -223,7 +239,7 @@ export default function TrainerSpellPage() {
 
   const addTrainer = async (e, rankId) => {
     e.stopPropagation();
-    const { trainerId, moneyCost, reqLevel } = trainerDraft;
+    const { trainerId, moneyCost, reqLevel, skillLine } = trainerDraft;
     if (!trainerId) return;
     setSaving(true);
     setMsg(null);
@@ -241,13 +257,17 @@ export default function TrainerSpellPage() {
       if (slaRead.success && slaRead.data.length === 0) {
         const trainer = trainerList.find(x => x.TrainerId === Number(trainerId));
         const classMask = trainer ? (1 << (trainer.Requirement - 1)) : 0;
-        // Bereken nieuw ID: lees max ID via een proxy-spell (35395) en tel op
         const refSla = await readSkillLineAbility(35395);
         const refMaxId = refSla.success && refSla.data.length > 0 ? refSla.data[0].ID : 21980;
-        const newId = refMaxId + rankId; // uniek genoeg voor custom spells
+        const newId = refMaxId + rankId;
+        const classOptions = SKILL_LINE_OPTIONS[trainer?.Requirement] || [];
+        const resolvedSkillLine = skillLine
+          ? Number(skillLine)
+          : classOptions.length > 0 ? classOptions[0].id
+          : (refSla.success && refSla.data.length > 0 ? refSla.data[0].SkillLine : 184);
         const slaResult = await addSkillLineAbility({
           ID: newId,
-          SkillLine: refSla.success && refSla.data.length > 0 ? refSla.data[0].SkillLine : 184,
+          SkillLine: resolvedSkillLine,
           Spell: rankId,
           RaceMask: 0,
           ClassMask: classMask,
@@ -288,6 +308,7 @@ export default function TrainerSpellPage() {
 
   return (
     <>
+      {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
       <div className="editor-page-header">
         <h2 className="editor-page-title">Trainer Spell Editor</h2>
         <p className="editor-page-subtitle">Manage spell ranks and trainer assignments</p>
@@ -479,32 +500,53 @@ export default function TrainerSpellPage() {
                                       ) : null;
                                     })()}
                                   </div>
-                                  {trainerDraft.trainerId && (
-                                    <div className="ts-add-trainer-row" style={{ marginTop: '6px' }}>
-                                      <span className="ts-selected-trainer">{trainerDraft.search} (ID {trainerDraft.trainerId})</span>
-                                      <input
-                                        type="number"
-                                        placeholder="Cost (c)"
-                                        value={trainerDraft.moneyCost}
-                                        onChange={e => setTrainerDraft(d => ({ ...d, moneyCost: e.target.value }))}
-                                        className="ts-draft-input ts-draft-input--cost"
-                                      />
-                                      <input
-                                        type="number"
-                                        placeholder="Req Lvl"
-                                        value={trainerDraft.reqLevel}
-                                        onChange={e => setTrainerDraft(d => ({ ...d, reqLevel: e.target.value }))}
-                                        className="ts-draft-input ts-draft-input--lvl"
-                                      />
+                                  {trainerDraft.trainerId && (() => {
+                                    const selTrainer = trainerList.find(x => x.TrainerId === Number(trainerDraft.trainerId));
+                                    const skillOptions = SKILL_LINE_OPTIONS[selTrainer?.Requirement] || [];
+                                    return (
+                                    <div style={{ marginTop: '6px' }}>
+                                      <div className="ts-add-trainer-row">
+                                        <span className="ts-selected-trainer">{trainerDraft.search} (ID {trainerDraft.trainerId})</span>
+                                        <input
+                                          type="number"
+                                          placeholder="Cost (c)"
+                                          value={trainerDraft.moneyCost}
+                                          onChange={e => setTrainerDraft(d => ({ ...d, moneyCost: e.target.value }))}
+                                          className="ts-draft-input ts-draft-input--cost"
+                                        />
+                                        <input
+                                          type="number"
+                                          placeholder="Req Lvl"
+                                          value={trainerDraft.reqLevel}
+                                          onChange={e => setTrainerDraft(d => ({ ...d, reqLevel: e.target.value }))}
+                                          className="ts-draft-input ts-draft-input--lvl"
+                                        />
+                                      </div>
+                                      {skillOptions.length > 0 && (
+                                        <div className="ts-field-row" style={{ marginTop: '6px' }}>
+                                          <label>SkillLine</label>
+                                          <select
+                                            className="ts-draft-select"
+                                            value={trainerDraft.skillLine || String(skillOptions[0].id)}
+                                            onChange={e => setTrainerDraft(d => ({ ...d, skillLine: e.target.value }))}
+                                          >
+                                            {skillOptions.map(o => (
+                                              <option key={`${o.id}-${o.label}`} value={String(o.id)}>{o.label} ({o.id})</option>
+                                            ))}
+                                          </select>
+                                        </div>
+                                      )}
                                       <button
                                         className="btn-primary"
+                                        style={{ marginTop: '8px' }}
                                         onClick={e => addTrainer(e, rank.ID)}
                                         disabled={saving}
                                       >
                                         <Plus size={12} /> Add
                                       </button>
                                     </div>
-                                  )}
+                                    );
+                                  })()}
                                 </div>
 
                               </div>

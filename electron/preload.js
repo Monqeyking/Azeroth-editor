@@ -37,6 +37,10 @@ contextBridge.exposeInMainWorld('azeroth', {
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
     readDurations: (dbcPath) => ipcRenderer.invoke('dbc:readDurations', dbcPath),
     readRanges: (dbcPath) => ipcRenderer.invoke('dbc:readRanges', dbcPath),
+    readItemSet: (dbcPath, id) => ipcRenderer.invoke('dbc:readItemSet', dbcPath, id),
+    searchItemSets: (dbcPath, term) => ipcRenderer.invoke('dbc:searchItemSets', dbcPath, term),
+    writeItemSet: (dbcPath, set) => ipcRenderer.invoke('dbc:writeItemSet', dbcPath, set),
+    findNextItemSetId: (dbcPath) => ipcRenderer.invoke('dbc:findNextItemSetId', dbcPath),
   },
   // Icons
   icons: {

@@ -89,3 +89,12 @@ Voorkeuren:
 - Sla kleine wijzigingen direct op in de map, geen tussentijdse bevestiging nodig
 - Als je vragen hebt over de database structuur. vraag mij dit dan. Ik kan het voor je ophalen.
 - Als cache files vergrendeld zijn door npm dev. vraag mij dan eerst om het te stoppen in plaats van het hele file opnieuw te schrijven
+
+## Docs-onderhoud bij voltooide taken
+
+Wanneer de gebruiker bevestigt dat een taak/feature voltooid is ("klaar", "werkt", "voltooid", "ship het"):
+
+1. **PROJECT.md** — single source of truth voor status, roadmap en backlog. Verplaats item van Roadmap/Verbeteringen naar de "Voltooide editors" tabel met korte omschrijving, of vink af in QoL Backlog / Classic+ backlog met `[x]` + datum (`YYYY-MM-DD`). Afgevinkte QoL/backlog items blijven staan als history.
+2. **CLAUDE.md** — alleen aanpassen als de feature nieuwe architectuur, IPC-handlers of niet-vanzelfsprekend gedrag introduceert dat een volgende sessie moet weten. Geen logregels per kleine wijziging.
+
+Geen tussentijdse bevestiging vragen voor deze doc-updates — direct meeschrijven met de code-commit zodat de docs in sync blijven.
