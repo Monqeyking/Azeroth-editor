@@ -3,6 +3,8 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Save, RotateCcw, Copy, ChevronRight, MousePointerClick, Columns2, ClipboardCopy, Trash2 } from 'lucide-react';
 import FlagsSelector from '../components/FlagsSelector';
 import CreatureModelPreview from '../components/creature/CreatureModelPreview';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { prefetchM2Models } from '../components/editor3d/m2Loader';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
@@ -196,6 +198,7 @@ export default function CreatureEditorPage() {
   const [refSelectedModelIdx, setRefSelectedModelIdx] = useState(0);
   const [refRoles, setRefRoles] = useState({ trainer: false, vendor: false, spawn: false });
   const [dirty, setDirty] = useState(false);
+  const unsavedGuard = useUnsavedGuard(dirty);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -1284,6 +1287,7 @@ export default function CreatureEditorPage() {
 
   return (
     <>
+      {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
       <div className="editor-page-header">
         <h2 className="editor-page-title">Creature Editor</h2>
         <p className="editor-page-subtitle">Manage creature templates, trainers, vendors & spawns</p>

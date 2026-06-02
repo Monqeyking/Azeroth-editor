@@ -172,6 +172,22 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.writeCharSections(dbcPath, records);
   }, [dbcPath]);
 
+  const readItemSet = useCallback(async (id) => {
+    return window.azeroth.dbc.readItemSet(dbcPath, id);
+  }, [dbcPath]);
+
+  const searchItemSets = useCallback(async (term) => {
+    return window.azeroth.dbc.searchItemSets(dbcPath, term);
+  }, [dbcPath]);
+
+  const writeItemSet = useCallback(async (set) => {
+    return window.azeroth.dbc.writeItemSet(dbcPath, set);
+  }, [dbcPath]);
+
+  const findNextItemSetId = useCallback(async () => {
+    return window.azeroth.dbc.findNextItemSetId(dbcPath);
+  }, [dbcPath]);
+
   return (
     <ConnectionContext.Provider value={{
       dbConfig, setDbConfig,
@@ -190,6 +206,7 @@ export function ConnectionProvider({ children }) {
       readSkillLineAbility, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
       readCharSections, writeCharSections,
+      readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       idRanges, setIdRanges
     }}>
       {children}

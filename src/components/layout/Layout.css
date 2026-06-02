@@ -128,6 +128,20 @@
   box-shadow: inset 3px 0 0 var(--gold);
 }
 
+.nav-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 2px;
+}
+
+.nav-item-wip {
+  opacity: 0.55;
+}
+.nav-item-wip:hover,
+.nav-item-wip.active {
+  opacity: 1;
+}
+
 .nav-item.disconnect {
   color: var(--text-muted);
 }

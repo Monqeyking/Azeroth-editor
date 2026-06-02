@@ -178,6 +178,20 @@
 .ts-draft-input--cost { width: 80px; }
 .ts-draft-input--lvl  { width: 70px; }
 
+.ts-draft-select {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-dark);
+  color: var(--text-primary);
+  padding: 5px 8px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.ts-draft-select:focus {
+  outline: none;
+  border-color: var(--gold-dim);
+}
+
 .ts-trainer-search-wrap {
   position: relative;
 }

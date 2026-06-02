@@ -1,0 +1,60 @@
+.vendor-editor { padding: 24px; max-width: 1100px; }
+.vendor-editor-title { font-size: 1.3rem; font-weight: 700; color: var(--gold); margin: 0 0 4px; }
+.vendor-editor-subtitle { color: var(--text-muted); font-size: 0.82rem; margin: 0 0 20px; }
+
+.vendor-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+
+/* reuse loot entry search styles */
+.vendor-entry-wrap { position: relative; }
+.vendor-entry-field { display: flex; align-items: center; gap: 6px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; min-width: 300px; }
+.vendor-entry-field:focus-within { border-color: var(--gold); }
+.vendor-entry-icon { color: var(--text-muted); flex-shrink: 0; }
+.vendor-entry-input { background: none; border: none; color: #fff; font-size: 0.83rem; outline: none; width: 140px; }
+.vendor-entry-label { color: var(--gold); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.vendor-entry-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 280px; overflow-y: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+.vendor-entry-option { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.vendor-entry-option:last-child { border-bottom: none; }
+.vendor-entry-option:hover { background: rgba(255,255,255,0.05); }
+.vendor-entry-id { color: var(--text-muted); font-size: 0.76rem; min-width: 48px; }
+.vendor-entry-name { flex: 1; }
+.vendor-entry-sub { color: var(--text-muted); font-size: 0.75rem; font-style: italic; }
+.vendor-entry-count { color: var(--text-muted); font-size: 0.74rem; margin-left: auto; white-space: nowrap; }
+
+.vendor-search-wrap { display: flex; flex-direction: column; gap: 6px; }
+.vendor-filters { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.vendor-filter-field { min-width: unset; }
+.vendor-filter-narrow { min-width: unset; }
+.vendor-filter-check { display: flex; align-items: center; gap: 5px; color: var(--text-secondary); font-size: 0.82rem; cursor: pointer; white-space: nowrap; }
+.vendor-filter-check input[type="checkbox"] { accent-color: var(--gold); cursor: pointer; }
+
+.vendor-table-wrap { overflow-x: auto; margin-bottom: 6px; }
+.vendor-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.vendor-table th { background: var(--bg-dark); color: var(--text-muted); padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.vendor-table td { padding: 3px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.vendor-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+.vendor-table input[type="text"],
+.vendor-table input[type="number"] { background: var(--bg-dark); border: 1px solid transparent; border-radius: 3px; color: #fff; padding: 3px 6px; font-size: 0.8rem; width: 100%; min-width: 50px; box-sizing: border-box; }
+.vendor-table input:focus { outline: none; border-color: var(--gold); }
+
+.vendor-td-item { width: 80px; }
+.vendor-td-name { min-width: 180px; }
+.vendor-td-name-cell { display: flex; align-items: center; gap: 4px; }
+.vendor-item-name { color: var(--gold); font-size: 0.78rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 170px; }
+.vendor-search-btn { opacity: 0.4; padding: 2px 4px; }
+.vendor-search-btn:hover { opacity: 1; }
+
+.vendor-footer { display: flex; align-items: center; gap: 12px; margin-top: 10px; }
+.vendor-row-count { color: var(--text-muted); font-size: 0.8rem; }
+.vendor-status { font-size: 0.8rem; color: var(--accent-green); }
+
+/* Item modal — reuse loot modal styles */
+.vendor-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: flex-start; justify-content: center; padding-top: 80px; }
+.vendor-modal { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; width: 420px; max-height: 500px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.vendor-modal-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+.vendor-modal-search input { flex: 1; background: none; border: none; color: #fff; font-size: 0.88rem; outline: none; }
+.vendor-modal-results { overflow-y: auto; flex: 1; }
+.vendor-modal-empty { color: var(--text-muted); font-size: 0.82rem; padding: 16px; text-align: center; }
+.vendor-modal-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.vendor-modal-row:hover { background: rgba(255,255,255,0.05); }
+.vendor-modal-id { color: var(--text-muted); font-size: 0.76rem; min-width: 48px; }

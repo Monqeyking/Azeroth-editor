@@ -1,0 +1,58 @@
+.loot-editor { padding: 24px; max-width: 1200px; }
+.loot-editor-title { font-size: 1.3rem; font-weight: 700; color: var(--gold); margin: 0 0 4px; }
+.loot-editor-subtitle { color: var(--text-muted); font-size: 0.82rem; margin: 0 0 20px; }
+
+.loot-toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 18px; flex-wrap: wrap; }
+
+.loot-segmented { display: flex; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.loot-segmented button { background: none; border: none; color: var(--text-muted); padding: 6px 14px; font-size: 0.82rem; cursor: pointer; transition: background 0.15s, color 0.15s; }
+.loot-segmented button.active { background: var(--gold); color: #000; font-weight: 600; }
+.loot-segmented button:hover:not(.active) { background: var(--bg-panel); color: #fff; }
+
+.loot-entry-wrap { position: relative; }
+.loot-entry-field { display: flex; align-items: center; gap: 6px; background: var(--bg-dark); border: 1px solid var(--border); border-radius: 4px; padding: 4px 10px; min-width: 280px; }
+.loot-entry-field:focus-within { border-color: var(--gold); }
+.loot-entry-icon { color: var(--text-muted); flex-shrink: 0; }
+.loot-entry-input { background: none; border: none; color: #fff; font-size: 0.83rem; outline: none; width: 120px; }
+.loot-entry-label { color: var(--gold); font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.loot-entry-dropdown { position: absolute; top: calc(100% + 4px); left: 0; right: 0; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 6px; z-index: 200; max-height: 280px; overflow-y: auto; box-shadow: 0 6px 20px rgba(0,0,0,0.5); }
+.loot-entry-option { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.loot-entry-option:last-child { border-bottom: none; }
+.loot-entry-option:hover { background: rgba(255,255,255,0.05); }
+
+.loot-table-wrap { overflow-x: auto; margin-bottom: 6px; }
+
+.loot-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.loot-table th { background: var(--bg-dark); color: var(--text-muted); padding: 6px 8px; text-align: left; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.loot-th-name { min-width: 180px; }
+.loot-table td { padding: 3px 4px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+.loot-table tr:hover td { background: rgba(255,255,255,0.03); }
+.loot-row-warn td { background: rgba(245,158,11,0.06) !important; }
+
+.loot-table input[type="text"],
+.loot-table input[type="number"] { background: var(--bg-dark); border: 1px solid transparent; border-radius: 3px; color: #fff; padding: 3px 6px; width: 100%; font-size: 0.8rem; min-width: 50px; box-sizing: border-box; }
+.loot-table input:focus { outline: none; border-color: var(--gold); }
+
+.loot-td-item { width: 80px; }
+.loot-td-name { min-width: 180px; }
+.loot-td-name { display: flex; align-items: center; gap: 4px; }
+.loot-item-name { color: var(--gold); font-size: 0.78rem; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 160px; }
+.loot-search-btn { opacity: 0.4; padding: 2px 4px; }
+.loot-search-btn:hover { opacity: 1; }
+
+.loot-group-totals { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px; }
+
+.loot-footer { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+.loot-row-count { color: var(--text-muted); font-size: 0.8rem; }
+.loot-warning { color: #f59e0b; font-size: 0.8rem; background: rgba(245,158,11,0.1); border: 1px solid rgba(245,158,11,0.3); border-radius: 4px; padding: 4px 10px; }
+
+/* Item search modal */
+.loot-modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 1000; display: flex; align-items: flex-start; justify-content: center; padding-top: 80px; }
+.loot-modal { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 8px; width: 420px; max-height: 500px; display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+.loot-modal-search { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--border); color: var(--text-muted); }
+.loot-modal-search input { flex: 1; background: none; border: none; color: #fff; font-size: 0.88rem; outline: none; }
+.loot-modal-results { overflow-y: auto; flex: 1; }
+.loot-modal-empty { color: var(--text-muted); font-size: 0.82rem; padding: 16px; text-align: center; }
+.loot-modal-row { display: flex; align-items: center; gap: 10px; padding: 7px 12px; cursor: pointer; font-size: 0.82rem; border-bottom: 1px solid var(--border); }
+.loot-modal-row:hover { background: rgba(255,255,255,0.05); }
+.loot-modal-id { color: var(--text-muted); font-size: 0.76rem; min-width: 48px; }

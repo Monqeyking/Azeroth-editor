@@ -14,6 +14,9 @@ import Editor3DPage from './pages/Editor3DPage';
 import RaceClassPage from './pages/RaceClassPage';
 import TrainerSpellPage from './pages/TrainerSpellPage';
 import CharCustomizationPage from './pages/CharCustomizationPage';
+import LootEditorPage from './pages/LootEditorPage';
+import ItemSetEditorPage from './pages/ItemSetEditorPage';
+import VendorEditorPage from './pages/VendorEditorPage';
 
 export default function App() {
   return (
@@ -34,6 +37,9 @@ export default function App() {
             <Route path="races" element={<RaceClassPage />} />
             <Route path="trainer-spells" element={<TrainerSpellPage />} />
             <Route path="char-customization" element={<CharCustomizationPage />} />
+            <Route path="loot" element={<LootEditorPage />} />
+            <Route path="item-sets" element={<ItemSetEditorPage />} />
+            <Route path="vendors" element={<VendorEditorPage />} />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
         </Routes>

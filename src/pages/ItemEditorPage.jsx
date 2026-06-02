@@ -3,6 +3,8 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Zap, Plus, ClipboardCopy, Layers } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import ItemScalingTab from './ItemScalingTab';
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -419,6 +421,7 @@ export default function ItemEditorPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm]         = useState({});
   const [dirty, setDirty]       = useState(false);
+  const unsavedGuard = useUnsavedGuard(dirty);
   const [saving, setSaving]     = useState(false);
   const [msg, setMsg]           = useState(null);
   const [loading, setLoading]   = useState(false);
@@ -640,6 +643,7 @@ export default function ItemEditorPage() {
 
   return (
     <>
+      {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
       <div className="editor-page-header">
         <h2 className="editor-page-title">Item Editor</h2>
         <p className="editor-page-subtitle">Manage item templates and properties</p>

@@ -3,6 +3,8 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Wand2, X } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import { useUnsavedGuard } from '../lib/useUnsavedGuard';
+import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 const SPELL_CLASS_SET = { 0:'Generic',3:'Mage',4:'Warrior',5:'Warlock',6:'Priest',7:'Druid',8:'Rogue',9:'Hunter',10:'Paladin',11:'Shaman',13:'Potion',14:'Death Knight',16:'Pet' };
 const SCHOOL_MASK_BITS = { 1:'Physical',2:'Holy',4:'Fire',8:'Nature',16:'Frost',32:'Shadow',64:'Arcane' };
@@ -358,6 +360,19 @@ const ATTRIBUTES_EX_FLAGS = {
   28:'Hide in Aura Bar',29:'Show Spell Name During Channel',30:'Enable at Dodge',31:'UNK31',
 };
 
+const SKILL_LINE_OPTIONS = {
+  1:  [{ id: 26,  label: 'General' }, { id: 100, label: 'Arms' }, { id: 256, label: 'Fury' }, { id: 257, label: 'Protection' }],
+  2:  [{ id: 594, label: 'General' }, { id: 317, label: 'Holy' }, { id: 267, label: 'Protection' }, { id: 184, label: 'Retribution' }],
+  3:  [{ id: 50,  label: 'General' }, { id: 163, label: 'Beast Mastery' }, { id: 164, label: 'Marksmanship' }, { id: 165, label: 'Survival' }],
+  4:  [{ id: 253, label: 'General' }, { id: 182, label: 'Assassination' }, { id: 181, label: 'Combat' }, { id: 183, label: 'Subtlety' }],
+  5:  [{ id: 56,  label: 'General' }, { id: 78,  label: 'Discipline' }, { id: 613, label: 'Holy' }, { id: 236, label: 'Shadow' }],
+  6:  [{ id: 770, label: 'General' }, { id: 398, label: 'Blood' }, { id: 399, label: 'Frost' }, { id: 400, label: 'Unholy' }],
+  7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Elemental' }, { id: 374, label: 'Enhancement' }, { id: 375, label: 'Restoration' }],
+  8:  [{ id: 6,   label: 'General' }, { id: 237, label: 'Arcane' }, { id: 8,   label: 'Fire' }, { id: 454, label: 'Frost' }],
+  9:  [{ id: 593, label: 'General' }, { id: 355, label: 'Affliction' }, { id: 354, label: 'Demonology' }, { id: 356, label: 'Destruction' }],
+  11: [{ id: 574, label: 'General' }, { id: 134, label: 'Balance' }, { id: 573, label: 'Feral Combat' }, { id: 572, label: 'Restoration' }],
+};
+
 const TRAINER_LABELS = {
   1: 'Warrior Main', 2: 'Warrior Starter',
   3: 'Paladin Main', 6: 'Paladin Starter',
@@ -431,6 +446,7 @@ export default function SpellEditorPage() {
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({});
   const [dirty, setDirty] = useState(false);
+  const unsavedGuard = useUnsavedGuard(dirty);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -438,6 +454,7 @@ export default function SpellEditorPage() {
   const [clonePanel, setClonePanel] = useState(null);
   const [cloneSaving, setCloneSaving] = useState(false);
   const [trainerList, setTrainerList] = useState([]);
+  const [slaData, setSlaData] = useState(null);   // SkillLineAbility record voor geselecteerde spell
   const [expandedFlags, setExpandedFlags] = useState({});
   const [castTimes, setCastTimes] = useState({});
   const [durations, setDurations] = useState({});
@@ -469,6 +486,8 @@ export default function SpellEditorPage() {
       setDirty(false);
       setMsg(null);
     }
+    const slaRes = await readSkillLineAbility(ID);
+    setSlaData(slaRes.success && slaRes.data.length > 0 ? slaRes.data[0] : null);
   };
 
   const handleChange = (key, value) => {
@@ -510,6 +529,8 @@ export default function SpellEditorPage() {
       if (!cloneResult.success) throw new Error(cloneResult.error);
       await searchSpells(search);
       await selectSpell(newId);
+      const srcSlaRes = await readSkillLineAbility(selected.ID);
+      const srcSla = srcSlaRes.success && srcSlaRes.data.length > 0 ? srcSlaRes.data[0] : null;
       setClonePanel({
         newId,
         sourceId: selected.ID,
@@ -523,6 +544,8 @@ export default function SpellEditorPage() {
         realPPL: selected.EffectRealPointsPerLevel_1 ?? 0,
         baseLevel: selected.BaseLevel ?? 0,
         maxLevel: selected.MaxLevel ?? 0,
+        skillLine: srcSla ? String(srcSla.SkillLine) : '184',
+        srcSla,
       });
       if (trainerList.length === 0) {
         const res = await query(
@@ -547,7 +570,7 @@ export default function SpellEditorPage() {
 
   const handleSaveCloneTrainer = async () => {
     if (!clonePanel) return;
-    const { newId, sourceId, spellLevel, trainerId, npcEntry, reqLevel, moneyCost, basePoints, dieSides, realPPL, baseLevel, maxLevel } = clonePanel;
+    const { newId, sourceId, spellLevel, trainerId, npcEntry, reqLevel, moneyCost, basePoints, dieSides, realPPL, baseLevel, maxLevel, skillLine, srcSla } = clonePanel;
     if (!trainerId && !npcEntry) { setMsg({ type: 'error', text: 'Vul minimaal TrainerId of NPC Entry in' }); return; }
     setCloneSaving(true);
     setMsg(null);
@@ -563,15 +586,13 @@ export default function SpellEditorPage() {
         EffectRealPointsPerLevel_1: Number(realPPL),
       });
 
-      // 2. SLA entry toevoegen — lees van BRONspell, niet de clone
-      const slaRead = await readSkillLineAbility(sourceId);
-      const srcSla = slaRead.success && slaRead.data.length > 0 ? slaRead.data[0] : null;
+      // 2. SLA entry toevoegen
       const slaNewRead = await readSkillLineAbility(newId);
       if (slaNewRead.success && slaNewRead.data.length === 0) {
         const newSlaId = srcSla ? srcSla.ID + newId : newId;
         await addSkillLineAbility({
           ID: newSlaId,
-          SkillLine: srcSla ? srcSla.SkillLine : 184,
+          SkillLine: Number(skillLine) || (srcSla ? srcSla.SkillLine : 184),
           Spell: newId,
           RaceMask: 0,
           ClassMask: srcSla ? srcSla.ClassMask : 2,
@@ -690,6 +711,7 @@ export default function SpellEditorPage() {
 
   return (
     <>
+      {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
       <div className="editor-page-header">
         <h2 className="editor-page-title">Spell Editor</h2>
         <p className="editor-page-subtitle">Manage spell data and properties</p>
@@ -826,10 +848,98 @@ export default function SpellEditorPage() {
                       <input type="number" value={clonePanel.npcEntry} style={{ width: '100px' }} placeholder="bv. 4000001"
                         onChange={e => setClonePanel(p => ({ ...p, npcEntry: e.target.value }))} />
                     </label>
+                    {(() => {
+                      const selTrainer = trainerList.find(t => String(t.Id) === String(clonePanel.trainerId));
+                      const opts = SKILL_LINE_OPTIONS[selTrainer?.Requirement] || [];
+                      if (!opts.length) return null;
+                      return (
+                        <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                          SkillLine <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(SkillLineAbility.dbc)</span>
+                          <select value={clonePanel.skillLine}
+                            onChange={e => setClonePanel(p => ({ ...p, skillLine: e.target.value }))}>
+                            {opts.map(o => (
+                              <option key={`${o.id}-${o.label}`} value={String(o.id)}>{o.label} ({o.id})</option>
+                            ))}
+                          </select>
+                        </label>
+                      );
+                    })()}
                     <button className="btn-primary" onClick={handleSaveCloneTrainer} disabled={cloneSaving}>
                       <Save size={13}/> {cloneSaving ? 'Opslaan...' : 'Opslaan'}
                     </button>
                   </div>
+                </div>
+              )}
+              {slaData !== undefined && (
+                <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-darker)' }}>
+                  <h4 className="field-section-title" style={{ marginBottom: '8px' }}>SkillLineAbility.dbc</h4>
+                  {slaData === null ? (
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Geen entry gevonden voor dit spell</span>
+                  ) : (
+                    <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                        SkillLine
+                        {(() => {
+                          const allOpts = Object.values(SKILL_LINE_OPTIONS).flat();
+                          const known = allOpts.find(o => o.id === slaData.SkillLine);
+                          return (
+                            <select
+                              value={String(slaData.SkillLine)}
+                              onChange={async e => {
+                                const newSla = { ...slaData, SkillLine: Number(e.target.value) };
+                                const r = await addSkillLineAbility(newSla);
+                                if (r.success) setSlaData(newSla);
+                                else setMsg({ type: 'error', text: `✗ SkillLine: ${r.error}` });
+                              }}
+                              style={{ minWidth: '180px' }}
+                            >
+                              {known
+                                ? Object.values(SKILL_LINE_OPTIONS).flat()
+                                    .filter((o, i, arr) => arr.findIndex(x => x.id === o.id) === i)
+                                    .map(o => <option key={o.id} value={String(o.id)}>{o.label} ({o.id})</option>)
+                                : <option value={String(slaData.SkillLine)}>{slaData.SkillLine}</option>
+                              }
+                            </select>
+                          );
+                        })()}
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                        ClassMask
+                        <input type="number" value={slaData.ClassMask} style={{ width: '90px' }}
+                          onChange={async e => {
+                            const newSla = { ...slaData, ClassMask: Number(e.target.value) };
+                            const r = await addSkillLineAbility(newSla);
+                            if (r.success) setSlaData(newSla);
+                          }} />
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                        AcquireMethod
+                        <select value={String(slaData.AcquireMethod)}
+                          onChange={async e => {
+                            const newSla = { ...slaData, AcquireMethod: Number(e.target.value) };
+                            const r = await addSkillLineAbility(newSla);
+                            if (r.success) setSlaData(newSla);
+                          }}
+                          style={{ width: '130px' }}>
+                          <option value="1">1 — Trainer</option>
+                          <option value="0">0 — Overig</option>
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                        Trivial (0=zichtbaar)
+                        <select value={String(slaData.TrivialSkillLineRankLow ?? 0)}
+                          onChange={async e => {
+                            const newSla = { ...slaData, TrivialSkillLineRankLow: Number(e.target.value) };
+                            const r = await addSkillLineAbility(newSla);
+                            if (r.success) setSlaData(newSla);
+                          }}
+                          style={{ width: '150px' }}>
+                          <option value="0">0 — Toonbaar bij trainer</option>
+                          <option value="2">2 — Talent/niet-traineerbaar</option>
+                        </select>
+                      </label>
+                    </div>
+                  )}
                 </div>
               )}
               <div className="form-fields">
