@@ -38,10 +38,7 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 | CharCustomizationPage | `/char-customization` | `CharSections.dbc` editor (skin/face/facial hair/hair/underclothing per race+gender). |
 | SpawnMapPage | `/map` | Spawn-locaties op kaart (WIP). |
 | Editor3DPage | `/editor3d` | 3D map/model viewer (WIP). |
-
-### Niet aangesloten (bestaat, ontbreekt route)
-
-- **SqlEditorPage** — `src/pages/SqlEditorPage.jsx` is compleet (Ctrl+Enter execute, table render, error display) maar niet in `App.jsx` routes of `Layout.jsx` nav. Zie QoL Backlog → quick win.
+| SqlEditorPage | `/sql` | Raw SQL editor. Ctrl+Enter execute, table render, error display. Nav onder WIP-divider (Terminal icon). |
 
 ---
 
@@ -179,7 +176,7 @@ Doel: WotLK client als engine, TBC/WotLK content visueel en functioneel blokkere
 
 ### Quick wins
 
-- [ ] **SqlEditor aansluiten** — pagina bestaat, alleen route `/sql` + nav-item toevoegen.
+- [x] **SqlEditor aansluiten** — pagina bestaat, alleen route `/sql` + nav-item toevoegen. (2026-06-03)
 - [ ] **Toast/notification systeem** — `<ToastProvider>` in `ConnectionContext`, `useToast()` hook (`.success/.error/.info`). Vervang stille saves overal.
 - [x] **Unsaved-changes guard** — `useBlocker` (React Router 6) op editors met `dirty` state. Modal bij navigatie. (2026-06-02)
 - [ ] **Recent edited universeel** — alleen `CreatureEditorPage` gebruikt `localStorage.recent_creatures`. Patroon uitrollen naar Items, Quests, Spells, Trainers.
@@ -221,7 +218,7 @@ Doel: WotLK client als engine, TBC/WotLK content visueel en functioneel blokkere
 
 Volledige details staan in `CLAUDE.md`. Korte samenvatting:
 
-- **Stack:** Electron 29, React 18, Vite 5, React Router 6 (HashRouter), Lucide React, MySQL2, node-soap.
+- **Stack:** Electron 29, React 18, Vite 5, React Router 6 (data router — `createHashRouter` + `RouterProvider`, vereist voor `useBlocker`), Lucide React, MySQL2, node-soap.
 - **IPC:** `electron/main.js` ↔ `electron/preload.js` (contextBridge) ↔ `window.azeroth.*` in React.
 - **Globale state:** `ConnectionContext` voor dbConfig, soapConfig, dbcPath, ID ranges. Alle DB/DBC calls lopen hierdoorheen.
 - **DBC writes:** moeten naar server- én client-copy. Bestaande pattern in `writeSpellFull`/`writeTalent`/`writeItemSet`.

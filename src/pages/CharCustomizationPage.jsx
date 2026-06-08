@@ -1,9 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Plus, Trash2, Save, RefreshCw } from 'lucide-react';
+import { Plus, Trash2, Save, RefreshCw, ImageOff, Loader2 } from 'lucide-react';
 import './CharCustomizationPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
+import { useBlpTexture } from '../lib/useBlpTexture';
+import CharM2Viewer from '../components/char/CharM2Viewer';
+import CharCreationPreview from '../components/char/CharCreationPreview';
+
 
 const RACES = [
   { id: 1,  label: 'Human' },
@@ -26,8 +30,160 @@ const SECTION_TABS = [
   { id: 4, label: 'Underclothing' },
 ];
 
+function TextureThumb({ blpPath, size = 56 }) {
+  const { dataUrl, loading, error } = useBlpTexture(blpPath);
+  if (!blpPath) return <div className="cc-thumb cc-thumb-empty" style={{ width: size, height: size }} title="Geen texture pad">—</div>;
+  if (loading) return <div className="cc-thumb cc-thumb-loading" style={{ width: size, height: size }}><Loader2 size={14} className="cc-spin" /></div>;
+  if (error)   return <div className="cc-thumb cc-thumb-error" style={{ width: size, height: size }} title={error}><ImageOff size={14} /></div>;
+  return (
+    <div className="cc-thumb" style={{ width: size, height: size }}>
+      <img src={dataUrl} alt={blpPath} />
+    </div>
+  );
+}
+
+function PreviewSlot({ label, path, size = 96 }) {
+  const { dataUrl, loading, error } = useBlpTexture(path);
+  const missing = !loading && (error || !path);
+  return (
+    <div className="cc-preview-slot">
+      <div className="cc-preview-slot-label">{label}</div>
+      <div className={`cc-preview-thumb ${missing ? 'cc-preview-thumb-missing' : ''}`} style={{ width: size, height: size }}>
+        {loading ? <Loader2 size={16} className="cc-spin" /> :
+         missing ? <><ImageOff size={16} /><span>{path ? 'Niet gevonden' : 'Leeg'}</span></> :
+         <img src={dataUrl} alt={path} />}
+      </div>
+      <div className={`cc-preview-slot-path ${missing && path ? 'cc-path-error' : ''}`} title={path || ''}>
+        {path ? path : <em>leeg</em>}
+      </div>
+    </div>
+  );
+}
+
+function SwatchItem({ row, isSelected, onClick }) {
+  const { dataUrl, loading, error } = useBlpTexture(row.tex1);
+  const missing = !loading && (error || !row.tex1);
+  return (
+    <button
+      className={`cc-swatch${isSelected ? ' cc-swatch-selected' : ''}${missing ? ' cc-swatch-error' : ''}`}
+      onClick={onClick}
+      title={`Var ${row.variationIndex} / Color ${row.colorIndex}${row.tex1 ? '\n' + row.tex1 : '\n(geen texture)'}`}
+    >
+      {loading ? <Loader2 size={11} className="cc-spin" /> :
+       missing ? <ImageOff size={11} /> :
+       <img src={dataUrl} alt="" />}
+      <span className="cc-swatch-badge">{row.colorIndex}</span>
+    </button>
+  );
+}
+
+function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDataPath }) {
+  const pickerRef = useRef(null);
+
+  const selectedRow = useMemo(
+    () => rows.find(r => r.id === selectedId) || rows[0] || null,
+    [rows, selectedId]
+  );
+
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const row of rows) {
+      if (!map.has(row.variationIndex)) map.set(row.variationIndex, []);
+      map.get(row.variationIndex).push(row);
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([v, items]) => ({ variation: v, items: items.sort((a, b) => a.colorIndex - b.colorIndex) }));
+  }, [rows]);
+
+  const handleKeyDown = useCallback((e) => {
+    if (!selectedRow || groups.length === 0) return;
+    const curGroupIdx = groups.findIndex(g => g.items.some(r => r.id === selectedRow.id));
+    if (curGroupIdx === -1) return;
+    const curGroup = groups[curGroupIdx];
+    const posInGroup = curGroup.items.findIndex(r => r.id === selectedRow.id);
+
+    if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      e.preventDefault();
+      const next = e.key === 'ArrowRight' ? curGroup.items[posInGroup + 1] : curGroup.items[posInGroup - 1];
+      if (next) setSelectedId(next.id);
+    } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const nextGroup = e.key === 'ArrowDown' ? groups[curGroupIdx + 1] : groups[curGroupIdx - 1];
+      if (nextGroup) {
+        const targetPos = Math.min(posInGroup, nextGroup.items.length - 1);
+        setSelectedId(nextGroup.items[targetPos].id);
+      }
+    }
+  }, [selectedRow, groups, setSelectedId]);
+
+  useEffect(() => {
+    const el = pickerRef.current;
+    if (!el) return;
+    el.addEventListener('keydown', handleKeyDown);
+    return () => el.removeEventListener('keydown', handleKeyDown);
+  }, [handleKeyDown]);
+
+  return (
+    <aside className="cc-visual-picker" ref={pickerRef} tabIndex={0}>
+      <div className="cc-vp-model">
+        <CharM2Viewer
+          race={race}
+          gender={gender}
+          skinBlp={selectedRow?.tex1 || null}
+          active={hasDataPath}
+        />
+      </div>
+
+      <div className="cc-vp-swatches">
+        {!hasDataPath && (
+          <div className="cc-preview-warn">Geen WoW Data-pad — textures laden niet.</div>
+        )}
+        {rows.length === 0 ? (
+          <div className="cc-preview-empty">Geen records voor deze selectie.</div>
+        ) : (
+          groups.map(({ variation, items }) => (
+            <div key={variation} className="cc-swatch-group">
+              <div className="cc-swatch-group-label">Var {variation}</div>
+              <div className="cc-swatch-row">
+                {items.map(row => (
+                  <SwatchItem
+                    key={row.id}
+                    row={row}
+                    isSelected={selectedRow?.id === row.id}
+                    onClick={() => setSelectedId(row.id)}
+                  />
+                ))}
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {selectedRow && (
+        <div className="cc-vp-detail">
+          <div className="cc-vp-detail-header">
+            <span className="cc-vp-detail-id">ID {selectedRow.id}</span>
+            <span className="cc-vp-detail-coords">
+              Var <strong>{selectedRow.variationIndex}</strong>
+              {' / '}
+              Color <strong>{selectedRow.colorIndex}</strong>
+            </span>
+            <span className="cc-vp-detail-flags">{selectedRow.flags === 1 ? 'Player' : 'NPC'}</span>
+          </div>
+          <div className="cc-vp-slots">
+            <PreviewSlot label="Tex 1" path={selectedRow.tex1} />
+            <PreviewSlot label="Tex 2" path={selectedRow.tex2} />
+            <PreviewSlot label="Tex 3" path={selectedRow.tex3} />
+          </div>
+        </div>
+      )}
+    </aside>
+  );
+}
+
 export default function CharCustomizationPage() {
-  const { readCharSections, writeCharSections, dbcPath } = useConnection();
+  const { readCharSections, writeCharSections, dbcPath, worldmapMpqPath } = useConnection();
 
   const [allRecords, setAllRecords] = useState(null);
   const [loading, setLoading]       = useState(false);
@@ -37,9 +193,11 @@ export default function CharCustomizationPage() {
   const [dirty, setDirty]           = useState(false);
   const unsavedGuard = useUnsavedGuard(dirty);
 
-  const [race,    setRace]    = useState(1);
-  const [gender,  setGender]  = useState(0);
-  const [section, setSection] = useState(0);
+  const [race,      setRace]     = useState(1);
+  const [gender,    setGender]   = useState(0);
+  const [section,   setSection]  = useState(0);
+  const [selectedId, setSelectedId] = useState(null);
+  const [viewMode,  setViewMode] = useState('table'); // 'table' | 'preview'
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,6 +217,12 @@ export default function CharCustomizationPage() {
   const visibleRows = allRecords
     ? allRecords.filter(r => r.race === race && r.sex === gender && r.baseSection === section)
     : [];
+
+  const selectedRow = useMemo(() => {
+    if (!allRecords) return null;
+    if (selectedId == null) return visibleRows[0] || null;
+    return allRecords.find(r => r.id === selectedId) || visibleRows[0] || null;
+  }, [allRecords, selectedId, visibleRows]);
 
   const updateField = (id, field, value) => {
     setAllRecords(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
@@ -148,9 +312,19 @@ export default function CharCustomizationPage() {
           </div>
         </div>
         {dirty && <span className="cc-dirty-badge">● Unsaved</span>}
+        <div className="cc-view-toggle">
+          <button
+            className={`cc-gender-btn ${viewMode === 'table' ? 'active' : ''}`}
+            onClick={() => setViewMode('table')}
+          >Tabel</button>
+          <button
+            className={`cc-gender-btn ${viewMode === 'preview' ? 'active' : ''}`}
+            onClick={() => setViewMode('preview')}
+          >Preview</button>
+        </div>
       </div>
 
-      <div className="cc-tabs">
+      {viewMode === 'table' && <div className="cc-tabs">
         {SECTION_TABS.map(t => (
           <button
             key={t.id}
@@ -158,108 +332,138 @@ export default function CharCustomizationPage() {
             onClick={() => setSection(t.id)}
           >{t.label}</button>
         ))}
-      </div>
+      </div>}
 
       <div className="cc-body">
         {loading && <div className="cc-status">Laden…</div>}
         {error   && <div className="cc-status cc-status-err">Fout: {error}</div>}
-        {!loading && !error && allRecords && (
-          <>
-            <div className="cc-table-wrap">
-              <table className="cc-table">
-                <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Variation</th>
-                    <th>Color</th>
-                    <th>Texture 1</th>
-                    <th>Texture 2</th>
-                    <th>Texture 3</th>
-                    <th>Flags</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRows.length === 0 && (
+        {!loading && !error && allRecords && viewMode === 'preview' && (
+          <CharCreationPreview
+            allRecords={allRecords}
+            race={race}
+            gender={gender}
+            hasDataPath={!!worldmapMpqPath}
+          />
+        )}
+        {!loading && !error && allRecords && viewMode === 'table' && (
+          <div className="cc-layout">
+            <div className="cc-table-col">
+              <div className="cc-table-wrap">
+                <table className="cc-table">
+                  <thead>
                     <tr>
-                      <td colSpan={8} className="cc-empty">
-                        Geen records voor deze combinatie. Gebruik "Rij toevoegen" om te beginnen.
-                      </td>
+                      <th style={{ width: 130 }}>Textures</th>
+                      <th>ID</th>
+                      <th>Variation</th>
+                      <th>Color</th>
+                      <th>Texture 1</th>
+                      <th>Texture 2</th>
+                      <th>Texture 3</th>
+                      <th>Flags</th>
+                      <th></th>
                     </tr>
-                  )}
-                  {visibleRows.map(row => (
-                    <tr key={row.id} className="cc-row">
-                      <td className="cc-cell-id">{row.id}</td>
-                      <td>
-                        <input
-                          className="cc-input cc-input-sm"
-                          type="text"
-                          inputMode="numeric"
-                          value={row.variationIndex}
-                          onChange={e => updateField(row.id, 'variationIndex', Number(e.target.value) || 0)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="cc-input cc-input-sm"
-                          type="text"
-                          inputMode="numeric"
-                          value={row.colorIndex}
-                          onChange={e => updateField(row.id, 'colorIndex', Number(e.target.value) || 0)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="cc-input cc-input-tex"
-                          value={row.tex1}
-                          onChange={e => updateField(row.id, 'tex1', e.target.value)}
-                          placeholder="pad/naar/texture.blp"
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="cc-input cc-input-tex"
-                          value={row.tex2}
-                          onChange={e => updateField(row.id, 'tex2', e.target.value)}
-                          placeholder=""
-                        />
-                      </td>
-                      <td>
-                        <input
-                          className="cc-input cc-input-tex"
-                          value={row.tex3}
-                          onChange={e => updateField(row.id, 'tex3', e.target.value)}
-                          placeholder=""
-                        />
-                      </td>
-                      <td>
-                        <select
-                          className="cc-select cc-select-sm"
-                          value={row.flags}
-                          onChange={e => updateField(row.id, 'flags', Number(e.target.value))}
-                        >
-                          <option value={1}>1 — Player</option>
-                          <option value={0}>0 — NPC only</option>
-                        </select>
-                      </td>
-                      <td>
-                        <button className="cc-delete-btn" onClick={() => deleteRow(row.id)}>
-                          <Trash2 size={13} />
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {visibleRows.length === 0 && (
+                      <tr>
+                        <td colSpan={9} className="cc-empty">
+                          Geen records voor deze combinatie. Gebruik "Rij toevoegen" om te beginnen.
+                        </td>
+                      </tr>
+                    )}
+                    {visibleRows.map(row => (
+                      <tr
+                        key={row.id}
+                        className={`cc-row ${selectedRow?.id === row.id ? 'cc-row-selected' : ''}`}
+                        onClick={() => setSelectedId(row.id)}
+                      >
+                        <td>
+                          <div className="cc-thumbs-row">
+                            <TextureThumb blpPath={row.tex1} size={32} />
+                            <TextureThumb blpPath={row.tex2} size={32} />
+                            <TextureThumb blpPath={row.tex3} size={32} />
+                          </div>
+                        </td>
+                        <td className="cc-cell-id">{row.id}</td>
+                        <td>
+                          <input
+                            className="cc-input cc-input-sm"
+                            type="text"
+                            inputMode="numeric"
+                            value={row.variationIndex}
+                            onChange={e => updateField(row.id, 'variationIndex', Number(e.target.value) || 0)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="cc-input cc-input-sm"
+                            type="text"
+                            inputMode="numeric"
+                            value={row.colorIndex}
+                            onChange={e => updateField(row.id, 'colorIndex', Number(e.target.value) || 0)}
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="cc-input cc-input-tex"
+                            value={row.tex1}
+                            onChange={e => updateField(row.id, 'tex1', e.target.value)}
+                            placeholder="pad/naar/texture.blp"
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="cc-input cc-input-tex"
+                            value={row.tex2}
+                            onChange={e => updateField(row.id, 'tex2', e.target.value)}
+                            placeholder=""
+                          />
+                        </td>
+                        <td>
+                          <input
+                            className="cc-input cc-input-tex"
+                            value={row.tex3}
+                            onChange={e => updateField(row.id, 'tex3', e.target.value)}
+                            placeholder=""
+                          />
+                        </td>
+                        <td>
+                          <select
+                            className="cc-select cc-select-sm"
+                            value={row.flags}
+                            onChange={e => updateField(row.id, 'flags', Number(e.target.value))}
+                          >
+                            <option value={1}>1 — Player</option>
+                            <option value={0}>0 — NPC only</option>
+                          </select>
+                        </td>
+                        <td>
+                          <button className="cc-delete-btn" onClick={e => { e.stopPropagation(); deleteRow(row.id); }}>
+                            <Trash2 size={13} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="cc-footer">
+                <button className="cc-btn cc-btn-ghost" onClick={addRow}>
+                  <Plus size={14} />
+                  Rij toevoegen
+                </button>
+                <span className="cc-count">{visibleRows.length} record{visibleRows.length !== 1 ? 's' : ''}</span>
+              </div>
             </div>
-            <div className="cc-footer">
-              <button className="cc-btn cc-btn-ghost" onClick={addRow}>
-                <Plus size={14} />
-                Rij toevoegen
-              </button>
-              <span className="cc-count">{visibleRows.length} record{visibleRows.length !== 1 ? 's' : ''}</span>
-            </div>
-          </>
+            <CharVisualPicker
+              rows={visibleRows}
+              selectedId={selectedRow?.id ?? null}
+              setSelectedId={setSelectedId}
+              race={race}
+              gender={gender}
+              hasDataPath={!!worldmapMpqPath}
+            />
+          </div>
         )}
       </div>
     </div>

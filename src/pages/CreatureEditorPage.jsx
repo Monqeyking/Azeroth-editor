@@ -441,7 +441,7 @@ export default function CreatureEditorPage() {
       await query('DELETE FROM creature_template_addon WHERE entry = ?', [entry]);
       return;
     }
-    const vals = cols.map(k => addonData[k] ?? (typeof ADDON_FIELDS.find(f => f.key === k)?.type === 'text' ? '' : 0));
+    const vals = cols.map(k => addonData[k] ?? (ADDON_FIELDS.find(f => f.key === k)?.type === 'text' ? '' : 0));
     if (existing.data?.length) {
       const sets = cols.map(k => `\`${k}\` = ?`).join(', ');
       await query(`UPDATE creature_template_addon SET ${sets} WHERE entry = ?`, [...vals, entry]);

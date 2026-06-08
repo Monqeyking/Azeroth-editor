@@ -743,6 +743,132 @@ ipcMain.handle('dbc:findNextSpellId', async (_, dbcPath, startId) => {
   }
 });
 
+// ScalingStatDistribution.dbc: ID(0), StatID_1..10 (4..40, int32), Bonus_1..10 (44..80, int32), Maxlevel(84)
+ipcMain.handle('dbc:readScalingStatDistribution', async (_, dbcPath, id) => {
+  try {
+    const filePath = path.join(dbcPath, 'ScalingStatDistribution.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon ScalingStatDistribution.dbc niet lezen' };
+    const results = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const off = i * dbc.recordSize;
+      const recId = dbc.dataBuffer.readUInt32LE(off);
+      if (id !== undefined && id !== null && recId !== id) continue;
+      const rec = { ID: recId };
+      for (let s = 1; s <= 10; s++) rec[`StatID_${s}`] = dbc.dataBuffer.readInt32LE(off + 4 + (s - 1) * 4);
+      for (let s = 1; s <= 10; s++) rec[`Bonus_${s}`] = dbc.dataBuffer.readInt32LE(off + 44 + (s - 1) * 4);
+      rec.Maxlevel = dbc.dataBuffer.readUInt32LE(off + 84);
+      results.push(rec);
+      if (id !== undefined && id !== null) break;
+    }
+    return { success: true, data: results };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeScalingStatDistribution', async (_, dbcPath, dist) => {
+  try {
+    const filePath = path.join(dbcPath, 'ScalingStatDistribution.dbc');
+    const raw = fs.readFileSync(filePath);
+    const recordCount = raw.readUInt32LE(4);
+    const recordSize = raw.readUInt32LE(12);
+    const headerSize = 20;
+
+    let recordIndex = -1;
+    for (let i = 0; i < recordCount; i++) {
+      if (raw.readUInt32LE(headerSize + i * recordSize) === dist.ID) { recordIndex = i; break; }
+    }
+    if (recordIndex === -1) return { success: false, error: 'Distributie niet gevonden' };
+
+    const recordBase = headerSize + recordIndex * recordSize;
+    const newBuffer = Buffer.from(raw);
+
+    for (let s = 1; s <= 10; s++) {
+      const key = `StatID_${s}`;
+      if (dist[key] !== undefined) newBuffer.writeInt32LE(Number(dist[key]) | 0, recordBase + 4 + (s - 1) * 4);
+    }
+    for (let s = 1; s <= 10; s++) {
+      const key = `Bonus_${s}`;
+      if (dist[key] !== undefined) newBuffer.writeInt32LE(Number(dist[key]) | 0, recordBase + 44 + (s - 1) * 4);
+    }
+    if (dist.Maxlevel !== undefined) newBuffer.writeUInt32LE(Number(dist.Maxlevel) >>> 0, recordBase + 84);
+
+    fs.writeFileSync(filePath, newBuffer);
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:addScalingStatDistribution', async (_, dbcPath, dist) => {
+  try {
+    const filePath = path.join(dbcPath, 'ScalingStatDistribution.dbc');
+    const raw = fs.readFileSync(filePath);
+    const recordCount = raw.readUInt32LE(4);
+    const recordSize = raw.readUInt32LE(12);
+    const headerSize = 20;
+    const recordsEnd = headerSize + recordCount * recordSize;
+
+    const newRecord = Buffer.alloc(recordSize, 0);
+    newRecord.writeUInt32LE(dist.ID >>> 0, 0);
+    for (let s = 1; s <= 10; s++) newRecord.writeInt32LE(Number(dist[`StatID_${s}`] ?? -1) | 0, 4 + (s - 1) * 4);
+    for (let s = 1; s <= 10; s++) newRecord.writeInt32LE(Number(dist[`Bonus_${s}`] ?? 0) | 0, 44 + (s - 1) * 4);
+    newRecord.writeUInt32LE(Number(dist.Maxlevel ?? 80) >>> 0, 84);
+
+    const newFile = Buffer.alloc(raw.length + recordSize);
+    raw.copy(newFile, 0, 0, recordsEnd);
+    newRecord.copy(newFile, recordsEnd);
+    raw.copy(newFile, recordsEnd + recordSize, recordsEnd);
+    newFile.writeUInt32LE(recordCount + 1, 4);
+
+    fs.writeFileSync(filePath, newFile);
+    return { success: true, id: dist.ID };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:findNextScalingStatDistributionId', async (_, dbcPath, startId) => {
+  try {
+    const filePath = path.join(dbcPath, 'ScalingStatDistribution.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon ScalingStatDistribution.dbc niet lezen' };
+    const usedIds = new Set();
+    for (let i = 0; i < dbc.recordCount; i++) usedIds.add(dbc.dataBuffer.readUInt32LE(i * dbc.recordSize));
+    let nextId = Number(startId) || 1;
+    while (usedIds.has(nextId)) nextId++;
+    return { success: true, nextId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// ScalingStatValues.dbc: ID(0), Charlevel(4), 22 budget/armor fields (8..92), all uint32, recordSize 96
+ipcMain.handle('dbc:readScalingStatValues', async (_, dbcPath) => {
+  try {
+    const filePath = path.join(dbcPath, 'ScalingStatValues.dbc');
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon ScalingStatValues.dbc niet lezen' };
+    const fields = ['ID', 'Charlevel', 'ShoulderBudget', 'TrinketBudget', 'WeaponBudget1H', 'RangedBudget',
+      'ClothShoulderArmor', 'LeatherShoulderArmor', 'MailShoulderArmor', 'PlateShoulderArmor',
+      'WeaponDPS1H', 'WeaponDPS2H', 'SpellcasterDPS1H', 'SpellcasterDPS2H', 'RangedDPS', 'WandDPS',
+      'SpellPower', 'PrimaryBudget', 'TertiaryBudget', 'ClothCloakArmor', 'ClothChestArmor',
+      'LeatherChestArmor', 'MailChestArmor', 'PlateChestArmor'];
+    const results = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const off = i * dbc.recordSize;
+      const rec = {};
+      fields.forEach((key, idx) => { rec[key] = dbc.dataBuffer.readUInt32LE(off + idx * 4); });
+      results.push(rec);
+    }
+    results.sort((a, b) => a.Charlevel - b.Charlevel);
+    return { success: true, data: results };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('dbc:copySpell', async (_, dbcPath, sourceId, newId) => {
   try {
     const filePath = path.join(dbcPath, 'Spell.dbc');
@@ -2153,6 +2279,86 @@ ipcMain.handle('m2:prefetch', async (_, { displayIds }) => {
   }
 });
 
+// Character model paths per race/gender in WotLK MPQ
+const CHAR_M2_PATHS = {
+  1:  ['Character\\Human\\Male\\HumanMale.m2',        'Character\\Human\\Female\\HumanFemale.m2'],
+  2:  ['Character\\Orc\\Male\\OrcMale.m2',            'Character\\Orc\\Female\\OrcFemale.m2'],
+  3:  ['Character\\Dwarf\\Male\\DwarfMale.m2',        'Character\\Dwarf\\Female\\DwarfFemale.m2'],
+  4:  ['Character\\NightElf\\Male\\NightElfMale.m2',  'Character\\NightElf\\Female\\NightElfFemale.m2'],
+  5:  ['Character\\Scourge\\Male\\ScourgeMale.m2',    'Character\\Scourge\\Female\\ScourgeFemale.m2'],
+  6:  ['Character\\Tauren\\Male\\TaurenMale.m2',      'Character\\Tauren\\Female\\TaurenFemale.m2'],
+  7:  ['Character\\Gnome\\Male\\GnomeMale.m2',        'Character\\Gnome\\Female\\GnomeFemale.m2'],
+  8:  ['Character\\Troll\\Male\\TrollMale.m2',        'Character\\Troll\\Female\\TrollFemale.m2'],
+  10: ['Character\\BloodElf\\Male\\BloodElfMale.m2',  'Character\\BloodElf\\Female\\BloodElfFemale.m2'],
+  11: ['Character\\Draenei\\Male\\DraeneiMale.m2',    'Character\\Draenei\\Female\\DraeneiFemale.m2'],
+};
+
+ipcMain.handle('m2:loadCharModel', async (_, { race, gender, skinBlp }) => {
+  const log = (...a) => console.log(`[m2:char:${race}/${gender}]`, ...a);
+  try {
+    const dataPath = getM2DataPath();
+    if (!dataPath) return { success: false, error: 'Geen MPQ pad ingesteld' };
+
+    const m2Path = CHAR_M2_PATHS[race]?.[gender];
+    if (!m2Path) return { success: false, error: `Onbekende race/gender: ${race}/${gender}` };
+
+    const reader = getMpqReader();
+    const geo = await getOrLoadM2Geometry(reader, dataPath, m2Path, log);
+    if (!geo?.skin) return { success: false, error: `Model niet gevonden: ${m2Path}` };
+
+    // Character geoset filtering — toon standaard naakt body
+    const dbcData = await getM2DbcData(dataPath);
+    const extra = { race, sex: gender, skin: 0, face: 0, hairStyle: 0, hairColor: 0, facialHair: 0 };
+    const visible = resolveVisibleGeosets(geo.skin.submeshes, null, extra, dbcData.charHair, dbcData.facialHair);
+    const indexList = buildIndicesFromSkin(geo.skin, visible);
+    if (!indexList.length) return { success: false, error: 'Geen zichtbare submeshes' };
+
+    // Skin texture laden
+    let textureRgba = null, textureW = 0, textureH = 0, texturePath = null;
+    if (skinBlp) {
+      const key = blpCacheKey(skinBlp);
+      let entry = blpTextureCache.get(key);
+      if (!entry) {
+        const buf = await reader.readFileFromMpqs(dataPath, skinBlp);
+        if (buf?.length >= 4 && buf.toString('ascii', 0, 4) === 'BLP2') {
+          try {
+            const decoded = decodeBLP(buf);
+            entry = { textureRgba: new Uint8Array(decoded.rgba), textureW: decoded.w, textureH: decoded.h, blpPath: skinBlp };
+            blpTextureCache.set(key, entry);
+          } catch (e) { log('BLP decode fout:', e.message); }
+        } else if (buf) {
+          log('BLP niet gevonden of geen BLP2 magic:', skinBlp);
+        }
+      }
+      if (entry) { textureRgba = entry.textureRgba; textureW = entry.textureW; textureH = entry.textureH; texturePath = entry.blpPath; }
+    }
+
+    return {
+      success: true,
+      data: {
+        positions:    geo.positions,
+        normals:      geo.normals,
+        uvs:          geo.uvs,
+        indices:      new Uint32Array(indexList),
+        textureRgba,
+        textureW,
+        textureH,
+        modelPath:    m2Path,
+        texturePath,
+        debug: {
+          race, gender, skinBlp,
+          triangleCount: Math.floor(indexList.length / 3),
+          textureLoaded: !!textureRgba,
+          visibleGeosets: [...visible].sort((a, b) => a - b),
+        },
+      },
+    };
+  } catch (e) {
+    console.error('[m2:loadCharModel]', e);
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
   try {
     const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapArea.dbc'));
@@ -2487,5 +2693,162 @@ ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records) => {
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+});
+
+// Decode een BLP-texture uit de WoW Data folder (MPQ) of losse file en geef terug als PNG buffer.
+// dataPath mag een WoW Data root zijn (met MPQs) of een gewone map met uitgepakte BLPs.
+// Cached zowel RGBA als PNG base64 — herhaalde lookups hoeven niet opnieuw te encoden.
+ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
+  try {
+    if (!dataPath || !blpPath) return { success: false, error: 'dataPath of blpPath ontbreekt' };
+    const key = blpCacheKey(blpPath);
+    const hit = blpTextureCache.get(key);
+    if (hit) {
+      if (hit.pngBase64) return { success: true, w: hit.textureW, h: hit.textureH, png: hit.pngBase64, path: blpPath };
+      hit.pngBase64 = rgbaToPNG(Buffer.from(hit.textureRgba), hit.textureW, hit.textureH).toString('base64');
+      return { success: true, w: hit.textureW, h: hit.textureH, png: hit.pngBase64, path: blpPath };
+    }
+
+    let buf = null;
+    const mpqReader = getMpqReader();
+    if (mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
+      buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
+    }
+    if (!buf) {
+      const direct = path.join(dataPath, blpPath.replace(/\\/g, path.sep));
+      if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
+    }
+    if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {
+      return { success: false, error: 'BLP niet gevonden of geen BLP2', path: blpPath };
+    }
+
+    const decoded = decodeBLP(buf);
+    const pngBase64 = rgbaToPNG(Buffer.from(decoded.rgba), decoded.w, decoded.h).toString('base64');
+    blpTextureCache.set(key, {
+      textureRgba: new Uint8Array(decoded.rgba),
+      textureW: decoded.w,
+      textureH: decoded.h,
+      blpPath,
+      pngBase64,
+    });
+    return { success: true, w: decoded.w, h: decoded.h, png: pngBase64, path: blpPath };
+  } catch (e) {
+    return { success: false, error: e.message, path: blpPath };
+  }
+});
+
+// Batch-variant: laad meerdere BLP-textures in één IPC. Opent elke MPQ maximaal 1×
+// ongeacht hoeveel BLPs erin zitten — groot verschil met de single-call handler.
+// Geeft een array terug in dezelfde volgorde als de input; ontbrekende BLPs krijgen
+// { success: false } zodat de caller per item kan beslissen.
+ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
+  try {
+    if (!dataPath || !Array.isArray(blpPaths)) return [];
+    const mpqReader = getMpqReader();
+    const useMpq = mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs;
+
+    // Groepeer BLPs per MPQ archive (om elke MPQ maar 1× te openen).
+    const directFiles = [];
+    const byMpq = new Map();   // mpqAbsPath → [blpPath, ...]
+    const results = new Array(blpPaths.length);
+
+    if (useMpq) {
+      const index = await mpqReader.buildBlpIndex(dataPath);
+      for (let i = 0; i < blpPaths.length; i++) {
+        const blpPath = blpPaths[i];
+        if (!blpPath) { results[i] = { success: false, error: 'leeg', path: blpPath }; continue; }
+        const cacheKey = blpCacheKey(blpPath);
+        if (blpTextureCache.has(cacheKey)) {
+          const hit = blpTextureCache.get(cacheKey);
+          if (!hit.pngBase64) hit.pngBase64 = rgbaToPNG(Buffer.from(hit.textureRgba), hit.textureW, hit.textureH).toString('base64');
+          results[i] = { success: true, w: hit.textureW, h: hit.textureH, png: hit.pngBase64, path: blpPath };
+          continue;
+        }
+        const k = blpPath.replace(/\//g, '\\').toLowerCase();
+        const mpqAbsPath = index.get(k);
+        if (!mpqAbsPath) { directFiles.push({ i, blpPath }); continue; }
+        if (!byMpq.has(mpqAbsPath)) byMpq.set(mpqAbsPath, []);
+        byMpq.get(mpqAbsPath).push({ i, blpPath, cacheKey });
+      }
+    } else {
+      for (let i = 0; i < blpPaths.length; i++) {
+        directFiles.push({ i, blpPath: blpPaths[i] });
+      }
+    }
+
+    // Open elke MPQ 1× en lees alle BLPs eruit.
+    if (byMpq.size) {
+      await Promise.all([...byMpq.entries()].map(async ([mpqAbsPath, items]) => {
+        let archive = null;
+        try { archive = await mpqReader.openArchive(dataPath, mpqAbsPath); }
+        catch (e) {
+          for (const it of items) results[it.i] = { success: false, error: 'MPQ open fout: ' + e.message, path: it.blpPath };
+          return;
+        }
+        try {
+          for (const it of items) {
+            try {
+              const buf = archive.readFile(it.blpPath);
+              if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {
+                results[it.i] = { success: false, error: 'BLP niet gevonden of geen BLP2', path: it.blpPath };
+                continue;
+              }
+              const decoded = decodeBLP(buf);
+              const pngBase64 = rgbaToPNG(Buffer.from(decoded.rgba), decoded.w, decoded.h).toString('base64');
+              blpTextureCache.set(it.cacheKey, {
+                textureRgba: new Uint8Array(decoded.rgba),
+                textureW: decoded.w, textureH: decoded.h,
+                blpPath: it.blpPath, pngBase64,
+              });
+              results[it.i] = { success: true, w: decoded.w, h: decoded.h, png: pngBase64, path: it.blpPath };
+            } catch (e) {
+              results[it.i] = { success: false, error: e.message, path: it.blpPath };
+            }
+          }
+        } finally {
+          try { archive.close(); } catch (_) {}
+        }
+      }));
+    }
+
+    // Direct-file fallback (niet-MPQ dataPath of paths niet in listfile).
+    // Bij MPQ-dataPath: eerst losse file proberen, dan full MPQ scan (zelfde pad als dbc:readBlpTexture).
+    for (const { i, blpPath } of directFiles) {
+      if (!blpPath) { results[i] = { success: false, error: 'leeg', path: blpPath }; continue; }
+      const cacheKey = blpCacheKey(blpPath);
+      if (blpTextureCache.has(cacheKey)) {
+        const hit = blpTextureCache.get(cacheKey);
+        if (!hit.pngBase64) hit.pngBase64 = rgbaToPNG(Buffer.from(hit.textureRgba), hit.textureW, hit.textureH).toString('base64');
+        results[i] = { success: true, w: hit.textureW, h: hit.textureH, png: hit.pngBase64, path: blpPath };
+        continue;
+      }
+      try {
+        let buf = null;
+        const direct = path.join(dataPath, blpPath.replace(/\\/g, path.sep));
+        if (fs.existsSync(direct)) {
+          buf = fs.readFileSync(direct);
+        } else if (useMpq) {
+          // Niet in listfile-index en niet als losse file — full MPQ scan als fallback
+          buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
+        }
+        if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {
+          results[i] = { success: false, error: 'Niet gevonden', path: blpPath }; continue;
+        }
+        const decoded = decodeBLP(buf);
+        const pngBase64 = rgbaToPNG(Buffer.from(decoded.rgba), decoded.w, decoded.h).toString('base64');
+        blpTextureCache.set(cacheKey, {
+          textureRgba: new Uint8Array(decoded.rgba),
+          textureW: decoded.w, textureH: decoded.h,
+          blpPath, pngBase64,
+        });
+        results[i] = { success: true, w: decoded.w, h: decoded.h, png: pngBase64, path: blpPath };
+      } catch (e) {
+        results[i] = { success: false, error: e.message, path: blpPath };
+      }
+    }
+    return results;
+  } catch (e) {
+    return blpPaths.map(p => ({ success: false, error: e.message, path: p }));
   }
 });

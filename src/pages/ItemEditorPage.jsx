@@ -37,6 +37,11 @@ const STAT_TYPE_OPTIONS = [
 const DMG_TYPE_OPTIONS      = ['0:Physical','1:Holy','2:Fire','3:Nature','4:Frost','5:Shadow','6:Arcane'];
 const MATERIAL_OPTIONS      = ['-1:Consumable','0:Undefined','1:Metal','2:Wood','3:Liquid','4:Jewelry','5:Chain','6:Plate','7:Cloth','8:Leather'];
 const SPELL_TRIGGER_OPTIONS = ['0:On Use','1:On Equip','2:Chance on Hit','4:Soulstone','5:Use (no delay)','6:Learn on Pickup'];
+const XP_BONUS_OPTIONS = [
+  { id: 0,     label: 'Geen XP-bonus' },
+  { id: 71354, label: '+5% XP (Dead Pirate\'s Ring)' },
+  { id: 57353, label: '+10% XP (Valor Heirloom Chest)' },
+];
 
 const SUBCLASS_OPTIONS = {
   0:  ['0:Consumable','1:Potion','2:Elixir','3:Flask','4:Scroll','5:Food & Drink','6:Item Enhancement','7:Bandage','8:Healthstone'],
@@ -211,6 +216,10 @@ function ItemTooltip({ form }) {
 }
 
 // ── Shared form fields ─────────────────────────────────────────────────────
+const FG = ({label,children,style={}}) => (
+  <div className="field-group" style={style}><label>{label}</label>{children}</div>
+);
+
 function ItemFormFields({ form, onChange }) {
   const [expandedFlags, setExpandedFlags] = useState({});
 
@@ -279,10 +288,6 @@ function ItemFormFields({ form, onChange }) {
     const opts = SUBCLASS_OPTIONS[Number(form.class)];
     return opts?.length ? sel('subclass',opts) : num('subclass');
   };
-
-  const FG = ({label,children,style={}}) => (
-    <div className="field-group" style={style}><label>{label}</label>{children}</div>
-  );
 
   return (
     <div className="form-fields">
@@ -368,8 +373,14 @@ function ItemFormFields({ form, onChange }) {
       <div style={{gridColumn:'1/-1',borderTop:'1px solid var(--border)',paddingTop:'16px'}}>
         <h4 className="field-section-title">Scaling <span style={{fontWeight:400,color:'var(--text-muted)',textTransform:'none',letterSpacing:0}}>(heirloom)</span></h4>
         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px'}}>
-          <FG label="ScalingStatDistribution">{num('ScalingStatDistribution')}</FG>
-          <FG label="ScalingStatValue">{num('ScalingStatValue')}</FG>
+          <div>
+            <FG label="ScalingStatDistribution">{num('ScalingStatDistribution')}</FG>
+            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatdistribution_dbc — bepaalt welke stats meeschalen en tot welk level (Maxlevel = bovengrens van de tooltip-range, bijv. "Levels 1-80"). Bewerk via het tabblad "Scaling".</div>
+          </div>
+          <div>
+            <FG label="ScalingStatValue">{num('ScalingStatValue')}</FG>
+            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatvalues_dbc — koppelt aan de tabel met budgetten per characterlevel waaruit de daadwerkelijke stat-waarden worden berekend.</div>
+          </div>
         </div>
       </div>
 
@@ -392,6 +403,20 @@ function ItemFormFields({ form, onChange }) {
       {/* Spells (full width) */}
       <div style={{gridColumn:'1/-1',borderTop:'1px solid var(--border)',paddingTop:'16px'}}>
         <h4 className="field-section-title">Spell Effects</h4>
+        <div style={{marginBottom:'12px'}}>
+          <FG label="XP Bonus (heirloom)">
+            <select
+              value={String(XP_BONUS_OPTIONS.find(o=>o.id>0 && Number(form.spellid_1)===o.id)?.id ?? 0)}
+              onChange={e=>{
+                const id = Number(e.target.value);
+                onChange('spellid_1', id);
+                onChange('spelltrigger_1', id ? 1 : 0);
+              }}>
+              {XP_BONUS_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
+          </FG>
+          <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-4px'}}>Vult Spell 1 + trigger "On Equip" automatisch in.</div>
+        </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'10px'}}>
           {[1,2,3,4,5].map(i=>(
             <div key={i}>
@@ -755,7 +780,7 @@ export default function ItemEditorPage() {
             </button>
           </div>
 
-          {activeTab === 'edit' ? (
+          {activeTab === 'edit' && (
             /* ── Edit tab ── */
             !selected ? (
               <div className="editor-empty">
@@ -794,7 +819,8 @@ export default function ItemEditorPage() {
                 <ItemFormFields form={form} onChange={handleEditChange} />
               </>
             )
-          ) : (
+          )}
+          {activeTab === 'create' && (
             /* ── Create tab ── */
             <div>
               <div className="page-header">

@@ -1,12 +1,17 @@
 Project: Azeroth Editor — een Electron + React (Vite) desktoptool voor het beheren van AzerothCore WoW-serverdata via MySQL en SOAP.
 
-Tech stack: Electron 29, React 18, Vite 5, React Router 6, Lucide React, MySQL2, node-soap.
+Tech stack: Electron 29, React 18, Vite 5, React Router 6 (data router), Lucide React, MySQL2, node-soap.
 
 Structuur:
 - electron/main.js — Electron main process (IPC, DB, SOAP)
 - electron/preload.js — contextBridge
 - src/ — React frontend (JSX, geen TypeScript)
 - src/assets/icon.ico — app-icoon
+
+## React Router setup
+- `src/App.jsx` gebruikt `createHashRouter` + `RouterProvider` (data router), **niet** `<HashRouter>` + `<Routes>`.
+- Reden: `useBlocker` (in `useUnsavedGuard.js`, gebruikt door alle editors met unsaved-guard) werkt in React Router 6 alleen binnen een data router. Declaratieve `<HashRouter>` gooit `useBlocker must be used within a data router`.
+- Bij uitbreiding van routes: voeg toe aan de `createHashRouter([...])` array, niet aan een `<Routes>` block.
 
 ## Model Preview (CreatureModelPreview.jsx)
 Uses ZamModelViewer (Wowhead cloud renderer) — requires internet.
@@ -17,6 +22,14 @@ Uses ZamModelViewer (Wowhead cloud renderer) — requires internet.
 - CSP in main.js covers: wowgaming.altervista.org, wow.zamimg.com, code.jquery.com, fonts.googleapis.com
 - Old Three.js/M2 renderer is commented out at the bottom of the file for reference
 - CharSections.dbc is parsed in getM2DbcData() for fallback skin texture lookups (still used by the 3D editor map view)
+
+## BLP texture loading
+- IPC: `dbc:readBlpTexture(dataPath, blpPath)` in `main.js` — single BLP uit MPQ of losse file, decodeert, encodeert naar PNG, geeft base64 terug.
+- Batch IPC: `dbc:readBlpTextures(dataPath, blpPaths)` — array in, array uit. Opent elke MPQ maximaal 1× ongeacht hoeveel BLPs erin zitten (gebruikt `mpqReader.openArchive`).
+- Performance: gebruikt `readBlpFromMpqs` (`electron/mpq-reader.js`) die een **listfile pre-index** bouwt op eerste aanvraag — `Map<lowerBlpPath, mpqAbsPath>` zodat BLP-lookups O(1) zijn i.p.v. full MPQ-scan per lookup.
+- Cache: `blpTextureCache` in `main.js` bewaart RGBA én PNG base64 — herhaalde IPC calls slaan de `rgbaToPNG` (zlib) encoding over.
+- Renderer batching: `src/lib/blpBatchLoader.js` — module-level debounced batcher (16ms window). Meerdere `useBlpTexture` calls in dezelfde tick worden gebundeld tot één IPC.
+- Renderer hook: `src/lib/useBlpTexture.js` — gebruikt de batch loader, module-level dataURL cache, hergebruikt resultaten over component remounts.
 
 ## Creature Editor — model table inputs
 - Integer columns (Idx, CreatureDisplayID, VerifiedBuild): type="text" inputMode="numeric" + custom ▲▼ buttons using onMouseDown+preventDefault — exactly one step per click, no auto-repeat

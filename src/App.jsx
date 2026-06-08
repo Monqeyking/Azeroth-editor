@@ -1,4 +1,4 @@
-import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { ConnectionProvider } from './lib/ConnectionContext';
 import Layout from './components/layout/Layout';
 import ConnectPage from './pages/ConnectPage';
@@ -17,33 +17,39 @@ import CharCustomizationPage from './pages/CharCustomizationPage';
 import LootEditorPage from './pages/LootEditorPage';
 import ItemSetEditorPage from './pages/ItemSetEditorPage';
 import VendorEditorPage from './pages/VendorEditorPage';
+import SqlEditorPage from './pages/SqlEditorPage';
+
+const router = createHashRouter([
+  { path: '/connect', element: <ConnectPage /> },
+  {
+    path: '/',
+    element: <Layout />,
+    children: [
+      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { path: 'dashboard',          element: <DashboardPage /> },
+      { path: 'creatures',          element: <CreatureEditorPage /> },
+      { path: 'items',              element: <ItemEditorPage /> },
+      { path: 'quests',             element: <QuestEditorPage /> },
+      { path: 'spells',             element: <SpellEditorPage /> },
+      { path: 'talents',            element: <TalentEditorPage /> },
+      { path: 'map',                element: <SpawnMapPage /> },
+      { path: 'editor3d',           element: <Editor3DPage /> },
+      { path: 'races',              element: <RaceClassPage /> },
+      { path: 'trainer-spells',     element: <TrainerSpellPage /> },
+      { path: 'char-customization', element: <CharCustomizationPage /> },
+      { path: 'loot',               element: <LootEditorPage /> },
+      { path: 'item-sets',          element: <ItemSetEditorPage /> },
+      { path: 'vendors',            element: <VendorEditorPage /> },
+      { path: 'sql',                element: <SqlEditorPage /> },
+      { path: 'settings',           element: <SettingsPage /> },
+    ],
+  },
+]);
 
 export default function App() {
   return (
     <ConnectionProvider>
-      <HashRouter>
-        <Routes>
-          <Route path="/connect" element={<ConnectPage />} />
-          <Route path="/" element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="dashboard" element={<DashboardPage />} />
-            <Route path="creatures" element={<CreatureEditorPage />} />
-            <Route path="items" element={<ItemEditorPage />} />
-            <Route path="quests" element={<QuestEditorPage />} />
-            <Route path="spells" element={<SpellEditorPage />} />
-            <Route path="talents" element={<TalentEditorPage />} />
-            <Route path="map" element={<SpawnMapPage />} />
-            <Route path="editor3d" element={<Editor3DPage />} />
-            <Route path="races" element={<RaceClassPage />} />
-            <Route path="trainer-spells" element={<TrainerSpellPage />} />
-            <Route path="char-customization" element={<CharCustomizationPage />} />
-            <Route path="loot" element={<LootEditorPage />} />
-            <Route path="item-sets" element={<ItemSetEditorPage />} />
-            <Route path="vendors" element={<VendorEditorPage />} />
-            <Route path="settings" element={<SettingsPage />} />
-          </Route>
-        </Routes>
-      </HashRouter>
+      <RouterProvider router={router} />
     </ConnectionProvider>
   );
 }

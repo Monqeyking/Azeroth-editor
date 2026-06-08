@@ -30,10 +30,17 @@ contextBridge.exposeInMainWorld('azeroth', {
     copyTalent: (dbcPath, sourceId, newId) => ipcRenderer.invoke('dbc:copyTalent', dbcPath, sourceId, newId),
     readSkillLineAbility: (dbcPath, spellId) => ipcRenderer.invoke('dbc:readSkillLineAbility', dbcPath, spellId),
     addSkillLineAbility: (dbcPath, entry) => ipcRenderer.invoke('dbc:addSkillLineAbility', dbcPath, entry),
+    readScalingStatDistribution: (dbcPath, id) => ipcRenderer.invoke('dbc:readScalingStatDistribution', dbcPath, id),
+    writeScalingStatDistribution: (dbcPath, dist) => ipcRenderer.invoke('dbc:writeScalingStatDistribution', dbcPath, dist),
+    addScalingStatDistribution: (dbcPath, dist) => ipcRenderer.invoke('dbc:addScalingStatDistribution', dbcPath, dist),
+    findNextScalingStatDistributionId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextScalingStatDistributionId', dbcPath, startId),
+    readScalingStatValues: (dbcPath) => ipcRenderer.invoke('dbc:readScalingStatValues', dbcPath),
     readCharBaseInfo: (dbcPath) => ipcRenderer.invoke('dbc:readCharBaseInfo', dbcPath),
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
     writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
+    readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
+    readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
     readDurations: (dbcPath) => ipcRenderer.invoke('dbc:readDurations', dbcPath),
     readRanges: (dbcPath) => ipcRenderer.invoke('dbc:readRanges', dbcPath),
@@ -78,7 +85,8 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // M2 model loader (3D editor)
   m2: {
-    loadModel: (opts) => ipcRenderer.invoke('m2:loadModel', opts),
-    prefetch:  (opts) => ipcRenderer.invoke('m2:prefetch', opts),
+    loadModel:     (opts) => ipcRenderer.invoke('m2:loadModel', opts),
+    prefetch:      (opts) => ipcRenderer.invoke('m2:prefetch', opts),
+    loadCharModel: (opts) => ipcRenderer.invoke('m2:loadCharModel', opts),
   },
 });
