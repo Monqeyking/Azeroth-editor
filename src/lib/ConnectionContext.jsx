@@ -172,6 +172,14 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.writeCharSections(dbcPath, records);
   }, [dbcPath]);
 
+  const readBlpTexture = useCallback(async (dataPath, blpPath) => {
+    return window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
+  }, []);
+
+  const readBlpTextures = useCallback(async (dataPath, blpPaths) => {
+    return window.azeroth.dbc.readBlpTextures(dataPath, blpPaths);
+  }, []);
+
   const readItemSet = useCallback(async (id) => {
     return window.azeroth.dbc.readItemSet(dbcPath, id);
   }, [dbcPath]);
@@ -186,6 +194,26 @@ export function ConnectionProvider({ children }) {
 
   const findNextItemSetId = useCallback(async () => {
     return window.azeroth.dbc.findNextItemSetId(dbcPath);
+  }, [dbcPath]);
+
+  const readScalingStatDistribution = useCallback(async (id) => {
+    return window.azeroth.dbc.readScalingStatDistribution(dbcPath, id);
+  }, [dbcPath]);
+
+  const writeScalingStatDistribution = useCallback(async (dist) => {
+    return window.azeroth.dbc.writeScalingStatDistribution(dbcPath, dist);
+  }, [dbcPath]);
+
+  const addScalingStatDistribution = useCallback(async (dist) => {
+    return window.azeroth.dbc.addScalingStatDistribution(dbcPath, dist);
+  }, [dbcPath]);
+
+  const findNextScalingStatDistributionId = useCallback(async (startId) => {
+    return window.azeroth.dbc.findNextScalingStatDistributionId(dbcPath, startId);
+  }, [dbcPath]);
+
+  const readScalingStatValues = useCallback(async () => {
+    return window.azeroth.dbc.readScalingStatValues(dbcPath);
   }, [dbcPath]);
 
   return (
@@ -206,7 +234,10 @@ export function ConnectionProvider({ children }) {
       readSkillLineAbility, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
       readCharSections, writeCharSections,
+      readBlpTexture, readBlpTextures,
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
+      readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,
+      findNextScalingStatDistributionId, readScalingStatValues,
       idRanges, setIdRanges
     }}>
       {children}

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, X } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
@@ -8,7 +8,7 @@ import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 // ── Constants ──────────────────────────────────────────────────────────────
 const QUEST_TYPE_OPTIONS = [
-  '0:Normal','1:Daily','21:Weekly','41:PvP','45:Heroic Dungeon','62:Raid','88:Elite','102:Dungeon',
+  '0:Auto-complete (skips objectives)','1:Disabled','2:Enabled (normal)',
 ];
 
 const XP_DIFFICULTY_OPTIONS = [
@@ -38,20 +38,34 @@ const ADDON_FIELDS = new Set([
 
 const QUEST_FLAGS_BITS = {
   1:'Stay Alive',
-  4:'Deliver More',
-  64:'Exploration',
-  256:'Sharable',
-  512:'Epic Quest',
-  1024:'Raid Quest',
-  2048:'Daily',
-  4096:'PvP (flagged)',
-  8192:'No Share',
-  16384:'No QuestID',
-  32768:'Seasonal Superquest',
-  65536:'Tracking',
-  131072:'Deprecate Rep Req',
-  262144:'Failed',
-  1048576:'Weekly',
+  2:'Party Accept',
+  4:'Exploration',
+  8:'Sharable',
+  16:'Has Condition',
+  32:'Hide Reward POI',
+  64:'Raid',
+  128:'TBC',
+  256:'No Money From XP',
+  512:'Hidden Rewards',
+  1024:'Tracking',
+  2048:'Deprecate Reputation',
+  4096:'Daily',
+  8192:'PvP (flagged)',
+  16384:'Unavailable',
+  32768:'Weekly',
+  65536:'Auto Complete',
+  131072:'Display Item In Tracker',
+  262144:'Obj Text As Complete Text',
+  524288:'Auto Accept',
+  1048576:'Player Cast On Accept',
+  2097152:'Player Cast On Complete',
+  4194304:'Update Phase Shift',
+  16777216:'Launch Gossip Complete',
+  67108864:'Hide Until Discovered',
+  134217728:'Portrait In Quest Log',
+  268435456:'Show Item When Completed',
+  536870912:'Launch Gossip Accept',
+  1073741824:'Items Glow When Done',
 };
 
 // ── NameHint component — async lookup for creature/GO/item names ───────────
@@ -95,6 +109,78 @@ function NameHint({ id, type, query }) {
     <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px', fontStyle: 'italic' }}>
       {name}
     </span>
+  );
+}
+
+// ── QuestGiverList ─────────────────────────────────────────────────────────
+function QuestGiverList({ questId, table, label, query }) {
+  const [rows, setRows] = useState([]);
+  const [search, setSearch] = useState('');
+  const [results, setResults] = useState([]);
+
+  const load = useCallback(async () => {
+    if (!questId) { setRows([]); return; }
+    const r = await query(
+      `SELECT t.id, c.name FROM ${table} t LEFT JOIN creature_template c ON c.entry = t.id WHERE t.quest = ? ORDER BY t.id`,
+      [questId]
+    );
+    setRows(r.data || []);
+  }, [questId, table, query]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const term = search.trim();
+    if (term.length < 2) { setResults([]); return; }
+    const isNum = /^\d+$/.test(term);
+    const t = setTimeout(async () => {
+      const r = await query(
+        `SELECT entry, name FROM creature_template WHERE ${isNum ? 'entry = ?' : 'name LIKE ?'} ORDER BY entry LIMIT 20`,
+        [isNum ? term : `%${term}%`]
+      );
+      setResults(r.data || []);
+    }, 250);
+    return () => clearTimeout(t);
+  }, [search, query]);
+
+  const add = async (entry) => {
+    await query(`INSERT IGNORE INTO ${table} (id, quest) VALUES (?, ?)`, [entry, questId]);
+    setSearch('');
+    setResults([]);
+    load();
+  };
+
+  const remove = async (entry) => {
+    await query(`DELETE FROM ${table} WHERE id = ? AND quest = ?`, [entry, questId]);
+    load();
+  };
+
+  return (
+    <div>
+      <H5>{label}</H5>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+        {rows.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Geen NPCs gekoppeld</span>}
+        {rows.map(r => (
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
+            <span style={{ color: 'var(--text-muted)' }}>{r.id}</span>
+            <span>{r.name || '?'}</span>
+            <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', padding: '1px 6px' }} onClick={() => remove(r.id)}><X size={12} /></button>
+          </div>
+        ))}
+      </div>
+      <div style={{ position: 'relative', maxWidth: '280px' }}>
+        <input type="text" placeholder="Zoek NPC op naam of entry…" value={search} onChange={e => setSearch(e.target.value)} />
+        {results.length > 0 && (
+          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', marginTop: '2px' }}>
+            {results.map(c => (
+              <div key={c.entry} style={{ padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }} onClick={() => add(c.entry)}>
+                {c.entry} — {c.name}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -229,6 +315,14 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
   );
 }
 
+const FG = ({ label, children, style = {} }) => (
+  <div className="field-group" style={style}><label>{label}</label>{children}</div>
+);
+
+const H5 = ({ children }) => (
+  <h5 style={{ margin: '12px 0 8px', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</h5>
+);
+
 // ── QuestFormFields ────────────────────────────────────────────────────────
 function QuestFormFields({ form, onChange, query, onNavigate }) {
   const [expandedFlags, setExpandedFlags] = useState(false);
@@ -329,14 +423,6 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
     </div>
   );
 
-  const FG = ({ label, children, style = {} }) => (
-    <div className="field-group" style={style}><label>{label}</label>{children}</div>
-  );
-
-  const H5 = ({ children }) => (
-    <h5 style={{ margin: '12px 0 8px', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</h5>
-  );
-
   const BitmaskRow = ({ fieldKey, bits, label, note }) => (
     <div style={{ marginTop: '12px' }}>
       <label style={{ display: 'block', marginBottom: '4px', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
@@ -386,6 +472,10 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
             <BitmaskRow fieldKey="AllowableRaces" bits={ALLOWABLE_RACE_BITS} label="Allowable Races" note="(0 = all)" />
             <BitmaskRow fieldKey="AllowableClasses" bits={ALLOWABLE_CLASS_BITS} label="Allowable Classes" note="(0 = all)" />
             <BitmaskRow fieldKey="SpecialFlags" bits={SPECIAL_FLAGS_BITS} label="Special Flags" />
+          </div>
+          <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '16px' }}>
+            <QuestGiverList questId={form.ID} table="creature_queststarter" label="Quest Starter NPCs" query={query} />
+            <QuestGiverList questId={form.ID} table="creature_questender" label="Quest Ender NPCs" query={query} />
           </div>
         </div>
       )}
@@ -865,7 +955,7 @@ export default function QuestEditorPage() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [dirty, selected, handleSave]);
 
-  const QUEST_TYPE_LABEL = { 0:'Normal',1:'Daily',21:'Weekly',41:'PvP',45:'H.Dungeon',62:'Raid',88:'Elite',102:'Dungeon' };
+  const QUEST_TYPE_LABEL = { 0:'Auto-complete',1:'Disabled',2:'' };
 
   return (
     <>

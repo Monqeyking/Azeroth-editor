@@ -39,6 +39,7 @@ function ensureMounted(dataPath) {
   listfileCache.clear();
   blpDirCache.clear();
   fileFoundIn.clear();
+  archiveDiscoveryCache.clear();
 }
 
 // ── MPQ-bestanden zoeken ───────────────────────────────────────────────────────
@@ -93,6 +94,7 @@ function toStormPath(dataPath, mpqAbsPath) {
 const zoneCache     = new Map();   // dataPath → string[]
 const tileCache     = new Map();   // `dataPath|zone|idx` → Buffer
 const fileFoundIn   = new Map();   // `${dataPath}|${lcPath}` → mpqAbsPath  (memoïseert welke archive een bestand bevat)
+const archiveDiscoveryCache = new Map(); // `${dataPath}|${lcPath}` → mpqAbsPath | null  (listfile-miss discovery)
 
 // ── Zones ophalen via listfile ─────────────────────────────────────────────────
 async function listWorldmapZones(dataPath) {
@@ -314,6 +316,114 @@ async function collectListfilePaths(dataPath) {
   return result;
 }
 
+// ── BLP pre-index: bouw een Map<blpPathLower, mpqAbsPath> in één pas over alle MPQs ─
+const blpIndexCache = new Map();   // dataPath → Map<lowerPath, mpqAbsPath>
+const blpIndexBuildInFlight = new Map();
+
+function _indexFromListfile(dataPath) {
+  return new Promise((resolve) => {
+    const idx = new Map();
+    const mpqs = findMpqFiles(dataPath);
+    let i = 0;
+    const next = () => {
+      if (i >= mpqs.length) { resolve(idx); return; }
+      const mpqPath = mpqs[i++];
+      let stat;
+      try { stat = fs.statSync(mpqPath); } catch (_) { return next(); }
+      if (stat.isDirectory()) {
+        const set = new Set();
+        walkDirBlps(mpqPath, '', set);
+        for (const p of set) {
+          const k = p.toLowerCase();
+          if (!idx.has(k)) idx.set(k, mpqPath);
+        }
+        return setImmediate(next);
+      }
+      (async () => {
+        let archive;
+        try { archive = await MPQ.open(toStormPath(dataPath, mpqPath), 'r'); }
+        catch (_) { return next(); }
+        try {
+          if (archive.hasFile('(listfile)')) {
+            const f = archive.openFile('(listfile)');
+            const raw = f.read();
+            f.close();
+            const text = Buffer.from(raw).toString('utf8');
+            for (const line of text.split(/\r?\n/)) {
+              const t = line.trim();
+              if (!t) continue;
+              if (!t.toLowerCase().endsWith('.blp')) continue;
+              const k = t.replace(/\//g, '\\').toLowerCase();
+              if (!idx.has(k)) idx.set(k, mpqPath);
+            }
+          }
+        } catch (_) {}
+        archive.close();
+        next();
+      })();
+    };
+    next();
+  });
+}
+
+async function buildBlpIndex(dataPath) {
+  if (blpIndexCache.has(dataPath)) return blpIndexCache.get(dataPath);
+  if (blpIndexBuildInFlight.has(dataPath)) return blpIndexBuildInFlight.get(dataPath);
+  const p = _indexFromListfile(dataPath).then(idx => { blpIndexCache.set(dataPath, idx); return idx; });
+  blpIndexBuildInFlight.set(dataPath, p);
+  return p;
+}
+
+// Snelle BLP-lookup via listfile-index. Valt terug op readFileFromMpqs (full scan)
+// als de index het bestand niet kent (geen listfile in die MPQ).
+async function readBlpFromMpqs(dataPath, blpPath) {
+  const index = await buildBlpIndex(dataPath);
+  const key = blpPath.replace(/\//g, '\\').toLowerCase();
+  const mpqAbsPath = index.get(key);
+  if (mpqAbsPath) return await readFileFromMpqEntry(dataPath, mpqAbsPath, blpPath);
+  return await readFileFromMpqs(dataPath, blpPath);
+}
+
+// Open een MPQ-archief één keer en geef een sync read-interface terug.
+// Bedoeld voor batch-gebruik waar je meerdere bestanden uit dezelfde MPQ nodig hebt
+// zonder steeds opnieuw te openen/sluiten.
+async function openArchive(dataPath, mpqAbsPath) {
+  let stat;
+  try { stat = fs.statSync(mpqAbsPath); } catch (e) { return null; }
+  if (stat.isDirectory()) {
+    // Loose map: sync readFileSync per path
+    return {
+      kind: 'dir',
+      hasFile: (p) => {
+        const filePath = path.join(mpqAbsPath, ...p.split(/[\\\/]/));
+        try { return fs.existsSync(filePath); } catch (_) { return false; }
+      },
+      readFile: (p) => {
+        const filePath = path.join(mpqAbsPath, ...p.split(/[\\\/]/));
+        return fs.readFileSync(filePath);
+      },
+      close: () => {},
+    };
+  }
+  let archive;
+  try { archive = await MPQ.open(toStormPath(dataPath, mpqAbsPath), 'r'); }
+  catch (_) { return null; }
+  return {
+    kind: 'mpq',
+    hasFile: (p) => {
+      try { return archive.hasFile(p); } catch (_) { return false; }
+    },
+    readFile: (p) => {
+      if (!archive.hasFile(p)) return null;
+      const f = archive.openFile(p);
+      const raw = f.read();
+      f.close();
+      return Buffer.from(raw);
+    },
+    close: () => { try { archive.close(); } catch (_) {} },
+  };
+}
+
 function listBlpInDir(allPaths, dirPrefix) {
   const norm = dirPrefix.replace(/\//g, '\\').replace(/\\+$/, '').toLowerCase();
   return allPaths.filter((p) => {
@@ -344,7 +454,87 @@ async function discoverCreatureBlps(dataPath, modelDir, stem) {
   return sorted;
 }
 
+// Vind in welke MPQ-archive(s) de opgegeven BLP-paden zitten. Bedoeld als fallback
+// voor paden die NIET in de listfile staan (de listfile is namelijk niet altijd
+// compleet — texture varianten 09..17 staan er bijv. vaak niet in).
+// Opent elke MPQ maximaal 1× en checkt alle pads via hasFile (cheap, geen read).
+// Resultaat: Map<mpqAbsPath, [blpPath, ...]> — pads die nergens gevonden worden
+// worden weggelaten. Cache: per pad wordt het resultaat opgeslagen in
+// archiveDiscoveryCache zodat herhaalde lookups direct zijn.
+async function findArchivesForPaths(dataPath, blpPaths) {
+  const result = new Map();
+  const needLookup = [];
+  for (const blpPath of blpPaths) {
+    if (!blpPath) continue;
+    const k = blpPath.replace(/\//g, '\\').toLowerCase();
+    const ck = `${dataPath}|${k}`;
+    if (archiveDiscoveryCache.has(ck)) {
+      const mpqPath = archiveDiscoveryCache.get(ck);
+      if (mpqPath) {
+        if (!result.has(mpqPath)) result.set(mpqPath, []);
+        result.get(mpqPath).push(blpPath);
+      }
+    } else {
+      needLookup.push(blpPath);
+    }
+  }
+  if (!needLookup.length) return result;
+
+  const remaining = new Set(needLookup);
+  for (const mpqPath of findMpqFiles(dataPath)) {
+    if (!remaining.size) break;
+
+    let stat;
+    try { stat = fs.statSync(mpqPath); } catch (_) { continue; }
+
+    if (stat.isDirectory()) {
+      // Loose MPQ-map: direct op filesystem
+      for (const blpPath of [...remaining]) {
+        const filePath = path.join(mpqPath, ...blpPath.split(/[\\\/]/));
+        try {
+          if (fs.existsSync(filePath)) {
+            if (!result.has(mpqPath)) result.set(mpqPath, []);
+            result.get(mpqPath).push(blpPath);
+            remaining.delete(blpPath);
+            const k = blpPath.replace(/\//g, '\\').toLowerCase();
+            archiveDiscoveryCache.set(`${dataPath}|${k}`, mpqPath);
+          }
+        } catch (_) {}
+      }
+      continue;
+    }
+
+    // Normale MPQ: open 1× en check alle remaining pads
+    let archive;
+    try { archive = await MPQ.open(toStormPath(dataPath, mpqPath), 'r'); }
+    catch (_) { continue; }
+    try {
+      for (const blpPath of [...remaining]) {
+        let has = false;
+        try { has = archive.hasFile(blpPath); } catch (_) { has = false; }
+        if (has) {
+          if (!result.has(mpqPath)) result.set(mpqPath, []);
+          result.get(mpqPath).push(blpPath);
+          remaining.delete(blpPath);
+          const k = blpPath.replace(/\//g, '\\').toLowerCase();
+          archiveDiscoveryCache.set(`${dataPath}|${k}`, mpqPath);
+        } else {
+          // Negatief cachen zodat we niet elke keer opnieuw voor niets scannen
+          const k = blpPath.replace(/\//g, '\\').toLowerCase();
+          if (!archiveDiscoveryCache.has(`${dataPath}|${k}`)) {
+            archiveDiscoveryCache.set(`${dataPath}|${k}`, null);
+          }
+        }
+      }
+    } finally {
+      try { archive.close(); } catch (_) {}
+    }
+  }
+  return result;
+}
+
 module.exports = {
   isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer,
-  validateDataPath, readFileFromMpqs, collectListfilePaths, discoverCreatureBlps,
+  validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
+  buildBlpIndex, openArchive, findArchivesForPaths,
 };
