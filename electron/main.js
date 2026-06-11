@@ -1,6 +1,15 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const net = require('net');
+const { spawn } = require('child_process');
+let nodePty = null;
+try { nodePty = require('node-pty'); } catch (e) { console.warn('node-pty not available, falling back to pipe spawn'); }
+
+let BetterSqlite3 = null;
+try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('better-sqlite3 not available'); }
+
+const { parseDbc, serializeDbc } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
 const http = require('http');
 const AdmZip = require('adm-zip');
@@ -32,6 +41,231 @@ let iconsZip = null;
 let iconCache = {};
 let spellDbcCache = null;
 let soapRequestId = 0;
+
+// ─── Server process management ──────────────────────────────────────────────
+let authProc = null;
+let worldProc = null;
+
+function checkTcpPort(host, port) {
+  return new Promise(resolve => {
+    const socket = new net.Socket();
+    socket.setTimeout(1500);
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => { socket.destroy(); resolve(false); });
+    socket.once('timeout', () => { socket.destroy(); resolve(false); });
+    socket.connect(port, host);
+  });
+}
+
+ipcMain.handle('server:status', async (_, { authHost, authPort, worldHost, worldPort }) => {
+  const [auth, world] = await Promise.all([
+    checkTcpPort(authHost || '127.0.0.1', authPort || 3724),
+    checkTcpPort(worldHost || '127.0.0.1', worldPort || 8085),
+  ]);
+  return {
+    auth: auth ? 'online' : (authProc ? 'starting' : 'offline'),
+    world: world ? 'online' : (worldProc ? 'starting' : 'offline'),
+  };
+});
+
+ipcMain.handle('server:start', async (_, { type, exePath }) => {
+  if (!exePath || !fs.existsSync(exePath)) return { success: false, error: 'Executable not found: ' + exePath };
+  try {
+    const emit = (line) => {
+      if (mainWindow && !mainWindow.isDestroyed())
+        mainWindow.webContents.send('server:output', { type, line });
+    };
+
+    if (nodePty) {
+      // PTY mode: process thinks it's writing to a real console — no buffering, full output
+      const spawnPty = () => nodePty.spawn(exePath, [], {
+        name: 'xterm',
+        cols: 220,
+        rows: 50,
+        cwd: path.dirname(exePath),
+        env: { ...process.env, TERM: 'xterm' },
+      });
+
+      if (type === 'auth') {
+        if (authProc) return { success: false, error: 'Already running' };
+        authProc = spawnPty();
+        authProc.onData(data => data.split(/\r?\n/).forEach(l => l.trim() && emit(l)));
+        authProc.onExit(({ exitCode }) => { authProc = null; emit(`[Process exited: ${exitCode}]`); });
+      } else {
+        if (worldProc) return { success: false, error: 'Already running' };
+        worldProc = spawnPty();
+        worldProc.onData(data => data.split(/\r?\n/).forEach(l => l.trim() && emit(l)));
+        worldProc.onExit(({ exitCode }) => { worldProc = null; emit(`[Process exited: ${exitCode}]`); });
+      }
+    } else {
+      // Fallback: regular pipe spawn (buffered, but better than nothing)
+      const pipe = (proc) => {
+        const onData = (d) => d.toString().split(/\r?\n/).forEach(l => l.trim() && emit(l));
+        proc.stdout?.on('data', onData);
+        proc.stderr?.on('data', onData);
+      };
+      if (type === 'auth') {
+        if (authProc) return { success: false, error: 'Already running' };
+        authProc = spawn(exePath, [], { cwd: path.dirname(exePath), detached: false });
+        pipe(authProc);
+        authProc.on('exit', (code) => { authProc = null; emit(`[Process exited: ${code}]`); });
+      } else {
+        if (worldProc) return { success: false, error: 'Already running' };
+        worldProc = spawn(exePath, [], { cwd: path.dirname(exePath), detached: false });
+        pipe(worldProc);
+        worldProc.on('exit', (code) => { worldProc = null; emit(`[Process exited: ${code}]`); });
+      }
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('server:sendCommand', async (_, { type, command }) => {
+  const proc = type === 'auth' ? authProc : worldProc;
+  if (!proc) return { success: false, error: 'Process not running' };
+  try {
+    // PTY uses .write(), pipe uses .stdin.write()
+    if (nodePty && proc.write) {
+      proc.write(command + '\r');
+    } else if (proc.stdin) {
+      proc.stdin.write(command + '\n');
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('server:stop', async (_, { type, exePath }) => {
+  const proc = type === 'auth' ? authProc : worldProc;
+  const { exec } = require('child_process');
+  const kill = (cmd) => new Promise(resolve => exec(cmd, () => resolve()));
+
+  try {
+    if (proc) {
+      try { proc.kill ? proc.kill() : proc.pid && (await kill(`taskkill /pid ${proc.pid} /f /t`)); } catch {}
+      if (type === 'auth') authProc = null; else worldProc = null;
+    }
+    if (exePath) {
+      const exeName = path.basename(exePath);
+      await kill(`taskkill /im "${exeName}" /f`);
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dialog:openFile', async (_, { title, filters }) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: title || 'Select file',
+    properties: ['openFile'],
+    filters: filters || [{ name: 'Executables', extensions: ['exe'] }, { name: 'All Files', extensions: ['*'] }],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+ipcMain.handle('dialog:openFolder', async (_, { title }) => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: title || 'Select folder',
+    properties: ['openDirectory'],
+  });
+  return result.canceled ? null : result.filePaths[0];
+});
+
+// ─── DBC SQL ────────────────────────────────────────────────────────────────
+ipcMain.handle('dbcSql:listFiles', async (_, { folder }) => {
+  try {
+    if (!fs.existsSync(folder)) return { success: true, files: [] };
+    const files = fs.readdirSync(folder)
+      .filter(f => f.toLowerCase().endsWith('.dbc'))
+      .sort()
+      .map(name => {
+        try {
+          const buf = fs.readFileSync(path.join(folder, name));
+          if (buf.length >= 20 && buf.toString('ascii', 0, 4) === 'WDBC') {
+            return { name, records: buf.readUInt32LE(4), fields: buf.readUInt32LE(8) };
+          }
+        } catch {}
+        return { name, records: null, fields: null };
+      });
+    return { success: true, files };
+  } catch (e) {
+    return { success: false, error: e.message, files: [] };
+  }
+});
+
+ipcMain.handle('dbcSql:query', async (_, { filePath, sql, writeBack }) => {
+  if (!BetterSqlite3) return { success: false, error: 'better-sqlite3 not installed.\nRun: npm install better-sqlite3 --legacy-peer-deps && npm run rebuild' };
+  try {
+    const buffer = fs.readFileSync(filePath);
+    const { records, fieldCount, recordCount } = parseDbc(buffer);
+
+    const db = new BetterSqlite3(':memory:');
+    const colDefs = Array.from({ length: fieldCount }, (_, i) => `field_${i} INTEGER`).join(', ');
+    db.exec(`CREATE TABLE dbc (${colDefs})`);
+
+    if (records.length) {
+      const insert = db.prepare(`INSERT INTO dbc VALUES (${Array(fieldCount).fill('?').join(',')})`);
+      db.transaction(rs => { for (const r of rs) insert.run(...r); })(records);
+    }
+
+    const trimmed = sql.trim().toUpperCase();
+    let result;
+
+    if (trimmed.startsWith('SELECT')) {
+      const stmt = db.prepare(sql);
+      const rows = stmt.all();
+      const columns = rows.length > 0 ? Object.keys(rows[0]) : stmt.columns().map(c => c.name);
+      result = { success: true, rows, columns, changes: 0 };
+    } else {
+      const info = db.prepare(sql).run();
+      result = { success: true, rows: [], columns: [], changes: info.changes };
+      if (writeBack && info.changes > 0) {
+        const newBuf = serializeDbc(buffer, db, fieldCount, recordCount);
+        fs.writeFileSync(filePath, newBuf);
+        result.written = true;
+      }
+    }
+
+    db.close();
+    return result;
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('fs:listFolder', async (_, { folder }) => {
+  try {
+    if (!fs.existsSync(folder)) return { success: true, files: [] };
+    const files = fs.readdirSync(folder).filter(f => fs.statSync(path.join(folder, f)).isFile());
+    return { success: true, files };
+  } catch (e) {
+    return { success: false, error: e.message, files: [] };
+  }
+});
+
+ipcMain.handle('fs:copyFiles', async (_, { files, srcDir, destDir }) => {
+  try {
+    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+    const copied = [];
+    const missing = [];
+    for (const file of files) {
+      const src = path.join(srcDir, file);
+      if (fs.existsSync(src)) {
+        fs.copyFileSync(src, path.join(destDir, file));
+        copied.push(file);
+      } else {
+        missing.push(file);
+      }
+    }
+    return { success: true, copied, missing };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
 // Offset = MySQL column index × 4 (each DBC field is 4 bytes)
@@ -149,12 +383,6 @@ function createWindow() {
     minHeight: 700,
     icon: path.join(__dirname, '../src/assets/icon.ico'),
     backgroundColor: '#0a0c10',
-    titleBarStyle: 'hidden',
-    titleBarOverlay: {
-      color: '#0a0c10',
-      symbolColor: '#c8a96e',
-      height: 32
-    },
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -168,8 +396,8 @@ function createWindow() {
         ...details.responseHeaders,
         'Content-Security-Policy': [
           "default-src 'self' 'unsafe-inline' 'unsafe-eval';" +
-          "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://wowgaming.altervista.org https://code.jquery.com http://wow.zamimg.com https://wow.zamimg.com;" +
-          "connect-src 'self' https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com ws://localhost:*;" +
+          "script-src 'self' 'unsafe-inline' 'unsafe-eval' blob: https://wowgaming.altervista.org https://code.jquery.com http://wow.zamimg.com https://wow.zamimg.com;" +
+          "connect-src 'self' https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com https://cdn.jsdelivr.net ws://localhost:*;" +
           "img-src 'self' data: blob: https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com;" +
           "style-src 'self' 'unsafe-inline' https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com https://fonts.googleapis.com;" +
           "font-src 'self' data: https://fonts.gstatic.com https://wowgaming.altervista.org http://wow.zamimg.com https://wow.zamimg.com;" +
@@ -1401,8 +1629,65 @@ function decodeDXT5(src, rgba, w, h) {
     }
 }
 
+function decodeBLP1(buffer) {
+  // BLP1 header layout:
+  // 0x00 magic "BLP1", 0x04 compression (1=palette,0=JPEG), 0x08 alphaBits,
+  // 0x0C width, 0x10 height, 0x14 pictureType, 0x18 pictureSubType,
+  // 0x1C mipOffsets[16], 0x5C mipSizes[16], 0x9C palette[256×BGRA]
+  const compression = buffer.readUInt32LE(4);
+  const alphaBits   = buffer.readUInt32LE(8);
+  const w           = buffer.readUInt32LE(12);
+  const h           = buffer.readUInt32LE(16);
+  const mipOffset   = buffer.readUInt32LE(0x1C);
+  const mipSize     = buffer.readUInt32LE(0x5C);
+
+  if (compression !== 1) {
+    // JPEG: jpegHeaderSize @ 0x9C, jpegHeader @ 0xA0, mipData @ mipOffset
+    const { nativeImage } = require('electron');
+    const jpegHeaderSize = buffer.readUInt32LE(0x9C);
+    const jpegHeader = buffer.slice(0xA0, 0xA0 + jpegHeaderSize);
+    const mipData    = buffer.slice(mipOffset, mipOffset + mipSize);
+    const jpeg       = Buffer.concat([jpegHeader, mipData]);
+    const img        = nativeImage.createFromBuffer(jpeg);
+    if (img.isEmpty()) throw new Error('BLP1 JPEG: nativeImage leeg');
+    const size   = img.getSize();
+    const bitmap = img.getBitmap(); // BGRA, 32-bit
+    const rgba   = Buffer.alloc(size.width * size.height * 4, 255);
+    for (let i = 0; i < size.width * size.height; i++) {
+      rgba[i*4]   = bitmap[i*4 + 2]; // R (BGRA→RGBA)
+      rgba[i*4+1] = bitmap[i*4 + 1]; // G
+      rgba[i*4+2] = bitmap[i*4];     // B
+      rgba[i*4+3] = 255;
+    }
+    return { rgba, w: size.width, h: size.height };
+  }
+
+  const rgba = Buffer.alloc(w * h * 4, 255);
+  const pixels = Math.min(w * h, mipSize);
+  for (let i = 0; i < pixels; i++) {
+    const idx = buffer[mipOffset + i];
+    const p   = 0x9C + idx * 4; // palette: BGRA
+    rgba[i*4]   = buffer[p + 2]; // R
+    rgba[i*4+1] = buffer[p + 1]; // G
+    rgba[i*4+2] = buffer[p];     // B
+    if (alphaBits === 8) {
+      rgba[i*4+3] = buffer[mipOffset + mipSize + i] ?? 255;
+    } else if (alphaBits === 1) {
+      rgba[i*4+3] = (buffer[mipOffset + mipSize + (i >> 3)] >> (i & 7)) & 1 ? 255 : 0;
+    } else if (alphaBits === 4) {
+      const byte = buffer[mipOffset + mipSize + (i >> 1)];
+      rgba[i*4+3] = (i & 1) ? ((byte >> 4) * 17) : ((byte & 0xF) * 17);
+    }
+    // alphaBits === 0: alpha al 255 door Buffer.alloc(..., 255)
+  }
+  return { rgba, w, h };
+}
+
 function decodeBLP(buffer) {
-  if (buffer.toString('ascii', 0, 4) !== 'BLP2') throw new Error('Geen BLP2');
+  const magic = buffer.toString('ascii', 0, 4);
+  if (magic === 'BLP1') return decodeBLP1(buffer);
+  if (magic !== 'BLP2') throw new Error(`Onbekend BLP magic: ${magic}`);
+
   const encoding      = buffer.readUInt8(8);
   const alphaDepth    = buffer.readUInt8(9);
   const alphaEncoding = buffer.readUInt8(10);
@@ -1516,7 +1801,8 @@ ipcMain.handle('spawns:load', async (_, { mapId, limit = 1000 }) => {
        JOIN gameobject_template gt ON g.id = gt.entry
        WHERE g.map = ${m} LIMIT ${lg}`
     );
-    return { success: true, data: [...creatures, ...gameobjects] };
+    const allSpawns = [...creatures, ...gameobjects];
+    return { success: true, data: allSpawns };
   } catch (err) {
     return { success: false, error: err.message };
   }
@@ -1608,6 +1894,10 @@ function parseAdt(buf) {
 
     if (!offsMCVT || ds + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
 
+    // Valideer MCVT magic ('TVCM' = reversed 'MCVT')
+    const mcvtMagic = buf.slice(ds + offsMCVT, ds + offsMCVT + 4).toString('ascii');
+    if (mcvtMagic !== 'TVCM') { chunks.push(null); continue; }
+
     const hStart = ds + offsMCVT + 8;
     // MCVT: 17 floats per rij: 9 outer + 8 inner (staggered centers)
     // outer[r][c] = hStart + (r*17 + c) * 4          (r=0..8, c=0..8)
@@ -1615,29 +1905,436 @@ function parseAdt(buf) {
     const outer = new Float32Array(9 * 9);
     const inner = new Float32Array(8 * 8);
     for (let r = 0; r < 9; r++)
-      for (let c = 0; c < 9; c++)
-        outer[r * 9 + c] = buf.readFloatLE(hStart + (r * 17 + c) * 4);
+      for (let c = 0; c < 9; c++) {
+        const v = buf.readFloatLE(hStart + (r * 17 + c) * 4);
+        outer[r * 9 + c] = isFinite(v) ? v : 0;
+      }
     for (let r = 0; r < 8; r++)
-      for (let c = 0; c < 8; c++)
-        inner[r * 8 + c] = buf.readFloatLE(hStart + (r * 17 + 9 + c) * 4);
-    // ── DEBUG HEIGHT OFFSET ──────────────────────────────────────────────────
-    if (ix === 8 && iy === 8) {
-      console.log('[ADT DEBUG] chunk ix=8 iy=8 —',
-        'posX=', posX.toFixed(4),
-        'posY=', posY.toFixed(4),
-        'posZ=', posZ.toFixed(4),
-        '| outer[0]=',   outer[0].toFixed(4),
-        'outer[40]=',  outer[40].toFixed(4),
-        'outer[80]=',  outer[80].toFixed(4),
-        '| posZ+outer[40]=', (posZ + outer[40]).toFixed(4)
-      );
-    }
-    // ── END DEBUG ────────────────────────────────────────────────────────────
+      for (let c = 0; c < 8; c++) {
+        const v = buf.readFloatLE(hStart + (r * 17 + 9 + c) * 4);
+        inner[r * 8 + c] = isFinite(v) ? v : 0;
+      }
     chunks.push({ ix, iy, posX, posY, posZ, outer, inner });
   }
   return chunks;
 }
+const MAP_NAME_TO_ID = { Azeroth: 0, Kalimdor: 1, Expansion01: 530, Northrend: 571 };
+
+function parseMapFile(buf) {
+  if (buf.length < 44) return null;
+  const heightMapOffset = buf.readUInt32LE(20);
+  if (buf.length < heightMapOffset + 16) return null;
+  const flags      = buf.readUInt32LE(heightMapOffset + 4);
+  const gridHeight = buf.readFloatLE(heightMapOffset + 8);
+  const gridMaxH   = buf.readFloatLE(heightMapOffset + 12);
+  const dataStart  = heightMapOffset + 16;
+  const V9C = 129 * 129, V8C = 128 * 128;
+  const v9 = new Float32Array(V9C), v8 = new Float32Array(V8C);
+  if (flags & 0x0001) { v9.fill(gridHeight); v8.fill(gridHeight); return { v9, v8 }; }
+  if (flags & 0x0002) {
+    if (buf.length < dataStart + V9C * 2 + V8C * 2) return null;
+    const mult = (gridMaxH - gridHeight) / 65535;
+    for (let i = 0; i < V9C; i++) v9[i] = gridHeight + buf.readUInt16LE(dataStart + i * 2) * mult;
+    const s = dataStart + V9C * 2;
+    for (let i = 0; i < V8C; i++) v8[i] = gridHeight + buf.readUInt16LE(s + i * 2) * mult;
+  } else if (flags & 0x0004) {
+    if (buf.length < dataStart + V9C + V8C) return null;
+    const mult = (gridMaxH - gridHeight) / 255;
+    for (let i = 0; i < V9C; i++) v9[i] = gridHeight + buf[dataStart + i] * mult;
+    const s = dataStart + V9C;
+    for (let i = 0; i < V8C; i++) v8[i] = gridHeight + buf[s + i] * mult;
+  } else {
+    if (buf.length < dataStart + V9C * 4 + V8C * 4) return null;
+    for (let i = 0; i < V9C; i++) v9[i] = buf.readFloatLE(dataStart + i * 4);
+    const s = dataStart + V9C * 4;
+    for (let i = 0; i < V8C; i++) v8[i] = buf.readFloatLE(s + i * 4);
+  }
+  return { v9, v8 };
+}
+
+function chunksToV9V8(chunks) {
+  const v9 = new Float32Array(129 * 129);
+  const v8 = new Float32Array(128 * 128);
+  for (const chunk of chunks) {
+    if (!chunk) continue;
+    const { ix, iy, posZ, outer, inner } = chunk;
+    const baseZ = isFinite(posZ) ? posZ : 0;
+    for (let r = 0; r < 9; r++)
+      for (let c = 0; c < 9; c++)
+        v9[(iy * 8 + r) * 129 + (ix * 8 + c)] = baseZ + outer[r * 9 + c];
+    for (let r = 0; r < 8; r++)
+      for (let c = 0; c < 8; c++)
+        v8[(iy * 8 + r) * 128 + (ix * 8 + c)] = baseZ + inner[r * 8 + c];
+  }
+  return { v9, v8 };
+}
+
 ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
+  try {
+    const cfgPath = getConfigPath();
+    if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+
+    const mapsPath = cfg.mapsPath;
+    if (mapsPath && fs.existsSync(mapsPath)) {
+      const mapId = MAP_NAME_TO_ID[mapName] ?? 0;
+      const result = [];
+      for (const { tileX, tileY } of tiles) {
+        const fname = `${String(mapId).padStart(3,'0')}${String(tileY).padStart(2,'0')}${String(tileX).padStart(2,'0')}.map`;
+        const fpath = path.join(mapsPath, fname);
+        if (!fs.existsSync(fpath)) continue;
+        const rawBuf = fs.readFileSync(fpath);
+        const parsed = parseMapFile(rawBuf);
+        if (parsed) {
+          result.push({ tileX, tileY, ...parsed });
+        }
+      }
+      return { success: true, data: result };
+    }
+
+    const dataPath = cfg.worldmapMpqPath;
+    if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
+
+    const result = [];
+    for (const { tileX, tileY } of tiles) {
+      const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
+      if (!buf) continue;
+      const chunks = parseAdt(buf);
+      if (chunks) {
+        const v9v8 = chunksToV9V8(chunks);
+        const firstChunk = chunks.find(c => c);
+        const minH = Math.min(...v9v8.v9.filter(isFinite));
+        const maxH = Math.max(...v9v8.v9.filter(isFinite));
+        console.log(`[terrain ADT] tile(${tileX},${tileY}) posZ=${firstChunk?.posZ?.toFixed(1)} heights min=${minH.toFixed(1)} max=${maxH.toFixed(1)} sample=[${Array.from(v9v8.v9.slice(0,5)).map(v=>v.toFixed(1)).join(',')}]`);
+        result.push({ tileX, tileY, ...v9v8 });
+      }
+    }
+    return { success: true, data: result };
+  } catch (e) {
+    console.error('adt:getTerrain error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// WDL: low-res heightmap van de hele map. MAOF = 64×64 offsets, MARE = 17×17 outer heights.
+function parseWdl(buf) {
+  let offset = 0;
+  let maofData = -1;
+  while (offset + 8 <= buf.length) {
+    const magic = buf.toString('ascii', offset, offset + 4);
+    const size  = buf.readUInt32LE(offset + 4);
+    if (magic === 'FOAM') { maofData = offset + 8; break; }
+    offset += 8 + size;
+  }
+  if (maofData === -1 || maofData + 64 * 64 * 4 > buf.length) return null;
+
+  const tiles = [];
+  for (let y = 0; y < 64; y++) {
+    for (let x = 0; x < 64; x++) {
+      const off = buf.readUInt32LE(maofData + (y * 64 + x) * 4);
+      if (!off || off + 8 + 17 * 17 * 2 > buf.length) continue;
+      if (buf.toString('ascii', off, off + 4) !== 'ERAM') continue;
+      const ds = off + 8;
+      const heights = new Int16Array(17 * 17);
+      let minH = Infinity, maxH = -Infinity;
+      for (let i = 0; i < 17 * 17; i++) {
+        const v = buf.readInt16LE(ds + i * 2);
+        heights[i] = v;
+        if (v < minH) minH = v;
+        if (v > maxH) maxH = v;
+      }
+      if (minH < -2000 || maxH > 3000 || (maxH - minH) > 1500) continue;
+      // Zelfde index-swap als ADT bestandsnamen: file (x,y) → renderer (tileX=y, tileY=x)
+      tiles.push({ tileX: y, tileY: x, heights });
+    }
+  }
+  return tiles;
+}
+
+ipcMain.handle('adt:getWdl', async (_, { mapName }) => {
+  try {
+    const cfgPath = getConfigPath();
+    if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const dataPath = cfg.worldmapMpqPath;
+    if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
+
+    const buf = await getMpqReader().readWdlBuffer(dataPath, mapName);
+    if (!buf) return { success: true, data: [] };
+    return { success: true, data: parseWdl(buf) ?? [] };
+  } catch (e) {
+    console.error('adt:getWdl error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+const minimapTexCache = new Map(); // `${dataPath}|${mapName}|${tileX}|${tileY}` → dataURL
+
+ipcMain.handle('adt:getTileTextures', async (_, { mapName, tiles }) => {
+  try {
+    const cfgPath = getConfigPath();
+    if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const dataPath = cfg.worldmapMpqPath;
+    if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
+
+    const result = [];
+    for (const { tileX, tileY } of tiles) {
+      const key = `${dataPath}|${mapName}|${tileX}|${tileY}`;
+      let png = minimapTexCache.get(key);
+      if (png === undefined) {
+        // Zelfde index-swap als readAdtBuffer: bestandsnaam is map<Y>_<X>.blp
+        const buf = await getMpqReader().readMinimapBlp(dataPath, mapName, tileY, tileX);
+        if (buf) {
+          try {
+            const { rgba, w, h } = decodeBLP(buf);
+            png = `data:image/png;base64,${rgbaToPNG(rgba, w, h).toString('base64')}`;
+          } catch (_) { png = null; }
+        } else {
+          png = null;
+        }
+        minimapTexCache.set(key, png);
+      }
+      if (png) result.push({ tileX, tileY, png });
+    }
+    return { success: true, data: result };
+  } catch (e) {
+    console.error('adt:getTileTextures error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+// ─── ADT composite texture builder ───────────────────────────────────────────
+// ── Terrain compositing (in main process, geen IPC round-trip voor ruwe BLPs) ──
+// Zelfde logica als de oude terrainCompositor.worker.js, maar draait hier zodat
+// alleen de finale RGBA (512×512) via IPC gaat in plaats van meerdere ruwe BLPs.
+
+function terrainSampleBlp(blp, ix, iy, px, py, pixPerChunk) {
+  const { data, w, h } = blp;
+  const tileSize = 16 * pixPerChunk;
+  const ux = ((ix * pixPerChunk + px) * 8 % tileSize) / tileSize;
+  const uy = ((iy * pixPerChunk + py) * 8 % tileSize) / tileSize;
+  const sx = Math.floor(ux * w) % w;
+  const sy = Math.floor(uy * h) % h;
+  const si = (sy * w + sx) * 4;
+  return [data[si], data[si+1], data[si+2]];
+}
+
+function compositeTerrainTile(blpRgba, chunks, pixPerChunk = 32) {
+  const W = 16 * pixPerChunk;
+  const d = new Uint8Array(W * W * 4);
+
+  for (const chunk of chunks) {
+    if (!chunk || !chunk.layers.length) continue;
+    const { ix, iy, layers } = chunk;
+
+    let baseBlp = blpRgba[layers[0].textureIdx];
+    let baseLayerIdx = 0;
+    if (!baseBlp) {
+      for (let li = 1; li < layers.length; li++) {
+        if (blpRgba[layers[li].textureIdx]) { baseBlp = blpRgba[layers[li].textureIdx]; baseLayerIdx = li; break; }
+      }
+    }
+    if (!baseBlp) continue;
+
+    for (let py = 0; py < pixPerChunk; py++) {
+      for (let px = 0; px < pixPerChunk; px++) {
+        const base = terrainSampleBlp(baseBlp, ix, iy, px, py, pixPerChunk);
+        let cr = base[0], cg = base[1], cb = base[2];
+        for (let li = 1; li < layers.length; li++) {
+          if (li === baseLayerIdx) continue;
+          const blp = blpRgba[layers[li].textureIdx];
+          const alphaMap = layers[li].alphaMap;
+          if (!blp || !alphaMap) continue;
+          const ax = Math.floor(px * 64 / pixPerChunk);
+          const ay = Math.floor(py * 64 / pixPerChunk);
+          const alpha = alphaMap[ay * 64 + ax] / 255;
+          if (alpha < 0.004) continue;
+          const lyr = terrainSampleBlp(blp, ix, iy, px, py, pixPerChunk);
+          cr = cr + (lyr[0] - cr) * alpha;
+          cg = cg + (lyr[1] - cg) * alpha;
+          cb = cb + (lyr[2] - cb) * alpha;
+        }
+        const di = ((iy * pixPerChunk + py) * W + (ix * pixPerChunk + px)) * 4;
+        d[di] = cr; d[di+1] = cg; d[di+2] = cb; d[di+3] = 255;
+      }
+    }
+  }
+  return { rgba: d, w: W, h: W };
+}
+
+function decompressAlpha(buf, offset, maxOffset) {
+  const out = new Uint8Array(4096);
+  let outPos = 0, pos = offset;
+  while (outPos < 4096 && pos < maxOffset) {
+    const ctrl = buf[pos++];
+    const count = ctrl & 0x7f;  // geen +1: zelfde als TrinityCore / MangosSuperUI
+    if (count === 0) break;
+    if (ctrl & 0x80) {
+      const val = buf[pos++];
+      for (let i = 0; i < count && outPos < 4096; i++) out[outPos++] = val;
+    } else {
+      for (let i = 0; i < count && outPos < 4096; i++) out[outPos++] = buf[pos++];
+    }
+  }
+  return out;
+}
+
+function unpackAlpha4bit(buf, offset) {
+  // 2048 bytes: per byte twee nibbles (laag = eerste texel, hoog = tweede texel)
+  // Output: 64×64 = 4096 bytes, 8 bit per texel
+  const out = new Uint8Array(4096);
+  let inIdx = 0;
+  for (let x = 0; x < 64; x++) {
+    for (let y = 0; y < 64; y += 2) {
+      const packed = buf[offset + inIdx++];
+      const lo = packed & 0x0f, hi = (packed >> 4) & 0x0f;
+      out[x * 64 + y]     = lo | (lo << 4);
+      out[x * 64 + y + 1] = hi | (hi << 4);
+    }
+  }
+  // Garbage in laatste rij/kolom (4-bit formaat quirk)
+  for (let e = 0; e < 64; e++) {
+    out[e * 64 + 63] = out[e * 64 + 62];
+    out[63 * 64 + e] = out[62 * 64 + e];
+  }
+  out[63 * 64 + 63] = out[62 * 64 + 62];
+  return out;
+}
+
+function parseAdtTextureLayers(buf) {
+  let off = 0, mtexData = -1, mtexSize = 0, mcinData = -1, bigAlpha = false;
+
+  // MHDR zit op vaste positie: MVER (12 bytes) + MHDR header
+  if (buf.length > 24 && buf.slice(12, 16).toString('ascii') === 'RDHM') {
+    const mhdrFlags = buf.readUInt32LE(20);
+    bigAlpha = (mhdrFlags & 0x4) !== 0 || (mhdrFlags & 0x80) !== 0; // 0x4=BigAlpha, 0x80=HeightTexturing (beide = 4096-byte flat alpha)
+  }
+
+  while (off + 8 <= buf.length) {
+    const magic = buf.slice(off, off + 4).toString('ascii');
+    const size  = buf.readUInt32LE(off + 4);
+    if (magic === 'XETM') { mtexData = off + 8; mtexSize = size; }
+    if (magic === 'NICM') { mcinData = off + 8; }
+    if (mtexData !== -1 && mcinData !== -1) break;
+    if (size === 0) break;
+    off += 8 + size;
+  }
+  if (mcinData === -1) return null;
+
+  // MTEX: null-terminated texture paths
+  const texturePaths = [];
+  if (mtexData !== -1) {
+    let tp = mtexData;
+    while (tp < mtexData + mtexSize) {
+      const end = buf.indexOf(0, tp);
+      if (end === -1 || end >= mtexData + mtexSize) break;
+      if (end > tp) texturePaths.push(buf.slice(tp, end).toString('ascii'));
+      tp = end + 1;
+    }
+  }
+
+  const chunks = [];
+  for (let i = 0; i < 256; i++) {
+    const mcnkOff = buf.readUInt32LE(mcinData + i * 16);
+    if (!mcnkOff || mcnkOff + 8 > buf.length) { chunks.push(null); continue; }
+    if (buf.slice(mcnkOff, mcnkOff + 4).toString('ascii') !== 'KNCM') { chunks.push(null); continue; }
+
+    const ds       = mcnkOff + 8;
+    const ix       = buf.readUInt32LE(ds + 4);
+    const iy       = buf.readUInt32LE(ds + 8);
+    const nLayers  = buf.readUInt32LE(ds + 12);
+    const ofsLayer = buf.readUInt32LE(ds + 28); // 0x1C
+    const ofsAlpha = buf.readUInt32LE(ds + 36); // 0x24
+    const sizeAlpha = buf.readUInt32LE(ds + 40); // 0x28
+
+    if (!nLayers || !ofsLayer) { chunks.push({ ix, iy, layers: [] }); continue; }
+
+    // MCLY: max 4 records van 16 bytes
+    const mclyPos = ds + ofsLayer;
+    if (mclyPos + 8 > buf.length) { chunks.push({ ix, iy, layers: [] }); continue; }
+    let mclyDataOff, mclyDataSize;
+    const mclyMagic = buf.slice(mclyPos, mclyPos + 4).toString('ascii');
+    if (mclyMagic === 'YLCM') {
+      mclyDataSize = buf.readUInt32LE(mclyPos + 4);
+      mclyDataOff  = mclyPos + 8;
+    } else {
+      mclyDataOff  = mclyPos;
+      mclyDataSize = nLayers * 16;
+    }
+
+    const layerCount = Math.min(nLayers, 4, Math.floor(mclyDataSize / 16));
+    const layers = [];
+    for (let l = 0; l < layerCount; l++) {
+      const lp = mclyDataOff + l * 16;
+      if (lp + 16 > buf.length) break;
+      layers.push({
+        textureIdx:   buf.readUInt32LE(lp),
+        flags:        buf.readUInt32LE(lp + 4),
+        offsetInMcal: buf.readUInt32LE(lp + 8),
+      });
+    }
+
+    // MCAL: alpha maps voor layer 1-3
+    if (ofsAlpha > 0 && sizeAlpha > 0 && layers.length > 1) {
+      const mcalPos = ds + ofsAlpha;
+      if (mcalPos + 4 <= buf.length) {
+        let mcalDataOff, mcalDataSize;
+        if (buf.slice(mcalPos, mcalPos + 4).toString('ascii') === 'LACM') {
+          mcalDataSize = buf.readUInt32LE(mcalPos + 4);
+          mcalDataOff  = mcalPos + 8;
+        } else {
+          mcalDataOff  = mcalPos;
+          mcalDataSize = sizeAlpha;
+        }
+        for (let l = 1; l < layers.length; l++) {
+          const layer = layers[l];
+          const alphaOff = mcalDataOff + layer.offsetInMcal;
+          if (alphaOff >= buf.length) continue;
+          if (layer.flags & 0x200) {
+            // Compressed RLE alpha
+            layer.alphaMap = decompressAlpha(buf, alphaOff, mcalDataOff + mcalDataSize);
+          } else {
+            // Bepaal werkelijke grootte via gap naar volgende layer (betrouwbaarder dan flags).
+            // Sommige vanilla ADTs zetten 0x100 maar hebben toch 2048-byte data.
+            let actualSize;
+            const nextLayer = layers[l + 1];
+            if (nextLayer && !(nextLayer.flags & 0x200)) {
+              actualSize = nextLayer.offsetInMcal - layer.offsetInMcal;
+            } else {
+              actualSize = mcalDataSize - layer.offsetInMcal;
+            }
+            const readSize = (actualSize >= 4096) ? 4096 : 2048;
+            if (readSize === 4096) {
+              layer.alphaMap = Uint8Array.from(buf.slice(alphaOff, alphaOff + 4096));
+            } else {
+              layer.alphaMap = unpackAlpha4bit(buf, alphaOff);
+            }
+          }
+        }
+      }
+    }
+
+    chunks.push({ ix, iy, layers });
+  }
+
+  return { texturePaths, chunks, bigAlpha };
+}
+
+// WoW 3.3.5a: terrain BLPs staan primair in deze MPQs (volgorde = prioriteit)
+//   common.MPQ      → Azeroth + Kalimdor  (TILESET\Terrain\Ashenvale, Barrens, ...)
+//   expansion.MPQ   → Outland             (TILESET\Terrain\Outland, ...)
+//   lichking.MPQ    → Northrend           (TILESET\Terrain\Northrend, ...)
+//   patch*.MPQ      → kunnen base-textures overschrijven
+// ADT-bestanden (World\Maps\<map>\...) staan in dezelfde base-MPQs.
+// De BLP-index in mpq-reader.js scant alle MPQs eenmalig en cached het resultaat.
+
+// terrainBlpCache: path.toLowerCase() → { data: Uint8Array, w, h } | null
+// Alleen I/O + BLP decode hier — de pixel-blending draait in de renderer Web Worker.
+const terrainBlpCache = new Map();
+
+ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
+  const t0 = Date.now();
   try {
     const cfgPath = getConfigPath();
     if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
@@ -1649,14 +2346,108 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
     for (const { tileX, tileY } of tiles) {
       const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
       if (!buf) continue;
-      const chunks = parseAdt(buf);
-      if (chunks) result.push({ tileX, tileY, chunks });
+      const parsed = parseAdtTextureLayers(buf);
+      if (!parsed?.texturePaths.length) {
+        console.log(`[terrain] ${tileX}_${tileY}: geen texturePaths (MTEX leeg of ontbreekt)`);
+        continue;
+      }
+      console.log(`[terrain] ${tileX}_${tileY}: ${parsed.texturePaths.length} textures, bigAlpha=${parsed.bigAlpha ?? false}`);
+
+      // Verzamel unieke texture-indices
+      const usedIdx = new Set();
+      for (const chunk of parsed.chunks) {
+        if (chunk) for (const l of chunk.layers) usedIdx.add(l.textureIdx);
+      }
+
+      // Laad BLPs parallel → ruwe RGBA (geen PNG encode, dat doet de worker)
+      const blpRgba = {};
+      await Promise.all([...usedIdx].map(async idx => {
+        if (idx >= parsed.texturePaths.length) return;
+        const rawPath = parsed.texturePaths[idx];
+        const cacheKey = rawPath.replace(/\//g, '\\').toLowerCase();
+        if (terrainBlpCache.has(cacheKey)) {
+          const hit = terrainBlpCache.get(cacheKey);
+          if (hit) blpRgba[idx] = hit;
+          return;
+        }
+        try {
+          const blpBuf = await getMpqReader().readBlpFromMpqs(dataPath, rawPath);
+          if (blpBuf) {
+            try {
+              const { rgba, w, h } = decodeBLP(blpBuf);
+              const entry = { data: new Uint8Array(rgba), w, h };
+              terrainBlpCache.set(cacheKey, entry);
+              blpRgba[idx] = entry;
+            } catch (decErr) {
+              console.log(`[terrain] decodeBLP fout voor ${rawPath}: ${decErr.message}`);
+              terrainBlpCache.set(cacheKey, null);
+            }
+          } else {
+            console.log(`[terrain] BLP niet gevonden in MPQs: ${rawPath}`);
+            terrainBlpCache.set(cacheKey, null);
+          }
+        } catch (readErr) {
+          console.log(`[terrain] readBlpFromMpqs fout voor ${rawPath}: ${readErr.message}`);
+          terrainBlpCache.set(cacheKey, null);
+        }
+      }));
+
+      const missing = [...usedIdx].filter(i => !blpRgba[i]).map(i => parsed.texturePaths[i]);
+      console.log(`[terrain] ${tileX}_${tileY}: ${Object.keys(blpRgba).length}/${usedIdx.size} BLPs geladen${missing.length ? ` | ontbreekt: ${missing.slice(0,3).join(', ')}` : ''}`);
+      if (!Object.keys(blpRgba).length) continue;
+
+      // Composite hier in main process — geen ruwe BLP data via IPC sturen
+      const chunks = parsed.chunks.map(c => {
+        if (!c) return null;
+        return {
+          ix: c.ix, iy: c.iy,
+          layers: c.layers.map(l => ({ textureIdx: l.textureIdx, alphaMap: l.alphaMap ?? null })),
+        };
+      });
+      const tComp = Date.now();
+      const { rgba, w, h } = compositeTerrainTile(blpRgba, chunks, 32);
+      console.log(`[composite] ${tileX}_${tileY}: ${Date.now()-tComp}ms composite, ${Object.keys(blpRgba).length} BLPs`);
+      result.push({ tileX, tileY, rgba, w, h });
     }
+    console.log(`[getTextureLayers] ${tiles.length} tiles → ${result.length} composited in ${Date.now()-t0}ms total`);
     return { success: true, data: result };
   } catch (e) {
-    console.error('adt:getTerrain error:', e);
+    console.error('adt:getTextureLayers error:', e);
     return { success: false, error: e.message };
   }
+});
+
+// Diagnostiek: test een BLP-pad en log welke MPQs gevonden worden
+ipcMain.handle('adt:diagBLP', async (_, { blpPath }) => {
+  const cfgPath = getConfigPath();
+  if (!fs.existsSync(cfgPath)) return { error: 'geen config' };
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const dataPath = cfg.worldmapMpqPath;
+  if (!dataPath) return { error: 'geen dataPath in config' };
+
+  const reader = getMpqReader();
+  const mpqs = reader.findMpqFiles(dataPath);
+  console.log(`[diagBLP] dataPath=${dataPath}, MPQs: ${mpqs.map(p => path.basename(p)).join(', ')}`);
+  console.log(`[diagBLP] zoeken naar: ${blpPath}`);
+
+  // BLP-index bouwen en kijken of het pad erin zit
+  const index = await reader.buildBlpIndex(dataPath);
+  const key = blpPath.replace(/\//g, '\\').toLowerCase();
+  const inIndex = index.has(key);
+  console.log(`[diagBLP] in BLP-index (${index.size} entries): ${inIndex} ${inIndex ? '→ ' + path.basename(index.get(key)) : ''}`);
+
+  // Volledige lookup
+  const buf = await reader.readBlpFromMpqs(dataPath, blpPath);
+  console.log(`[diagBLP] readBlpFromMpqs resultaat: ${buf ? buf.length + ' bytes' : 'null (niet gevonden)'}`);
+
+  return {
+    dataPath,
+    mpqs: mpqs.map(p => path.basename(p)),
+    indexSize: index.size,
+    inIndex,
+    found: !!buf,
+    size: buf ? buf.length : 0,
+  };
 });
 
 ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath) => {
@@ -2555,6 +3346,7 @@ ipcMain.handle('dbc:writeItemSet', async (_, dbcPath, set) => {
     } else {
       newBuf = Buffer.from(buf);
     }
+
 
     // Append new name string
     const nameStr = Buffer.from((set.name || '') + '\0', 'utf8');

@@ -4,6 +4,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { wowToThree } from './wowCoords';
 import { useM2Model, getCachedM2Asset, subscribeM2Asset } from './m2Loader';
+import { getTerrainHeight } from './spawnLod';
 import { useSpawnLod } from './spawnLod';
 
 function M2Mesh({ asset, selected, hovered, onClick, onOver, onOut }) {
@@ -357,7 +358,8 @@ function Editor3DSpawn({ spawn, selected, onSelect, activeTool, onTransform }) {
   const attachAnchor = useCallback((node) => {
     anchorRef.current = node;
     if (node) {
-      const [tx, ty, tz] = wowToThree(spawn.x, spawn.y, spawn.z);
+      const th = getTerrainHeight(spawn.x, spawn.y);
+      const [tx, ty, tz] = wowToThree(spawn.x, spawn.y, th ?? spawn.z);
       node.position.set(tx, ty, tz);
       visualRef.current?.position.set(tx, ty, tz);
     }
@@ -366,7 +368,8 @@ function Editor3DSpawn({ spawn, selected, onSelect, activeTool, onTransform }) {
   const attachVisual = useCallback((node) => {
     visualRef.current = node;
     if (node) {
-      const [tx, ty, tz] = wowToThree(spawn.x, spawn.y, spawn.z);
+      const th = getTerrainHeight(spawn.x, spawn.y);
+      const [tx, ty, tz] = wowToThree(spawn.x, spawn.y, th ?? spawn.z);
       node.position.set(tx, ty, tz);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

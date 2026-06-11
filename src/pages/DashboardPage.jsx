@@ -1,7 +1,70 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Swords, Package, ScrollText, Sparkles, Database, Activity } from 'lucide-react';
+import { Swords, Package, ScrollText, Sparkles, Database, Activity, Server, Play, Square, Terminal, Send } from 'lucide-react';
 import './DashboardPage.css';
+
+const MAX_LINES = 500;
+
+function ServerConsole({ type, label, serverStatus }) {
+  const [lines, setLines] = useState([]);
+  const [input, setInput] = useState('');
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    const h = window.azeroth.server.onOutput(({ type: t, line }) => {
+      if (t !== type) return;
+      setLines(prev => {
+        const next = [...prev, line];
+        return next.length > MAX_LINES ? next.slice(next.length - MAX_LINES) : next;
+      });
+    });
+    return () => window.azeroth.server.offOutput(h);
+  }, [type]);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [lines]);
+
+  const sendCmd = async () => {
+    const cmd = input.trim();
+    if (!cmd) return;
+    setInput('');
+    await window.azeroth.server.sendCommand({ type, command: cmd });
+  };
+
+  const isActive = serverStatus !== 'offline';
+
+  return (
+    <div className={`server-console${isActive ? ' active' : ''}`}>
+      <div className="console-header">
+        <Terminal size={13} />
+        <span>{label}</span>
+        <span className={`status-dot ${serverStatus}`} style={{ marginLeft: 'auto' }} />
+      </div>
+      <div className="console-output">
+        {lines.length === 0
+          ? <span className="console-empty">{isActive ? 'Waiting for output...' : 'Server offline'}</span>
+          : lines.map((l, i) => <div key={i} className="console-line">{l}</div>)
+        }
+        <div ref={bottomRef} />
+      </div>
+      <div className="console-input-row">
+        <input
+          className="console-input"
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && sendCmd()}
+          placeholder={isActive ? 'Enter command...' : 'Server offline'}
+          disabled={!isActive}
+          spellCheck={false}
+        />
+        <button className="console-send" onClick={sendCmd} disabled={!isActive || !input.trim()}>
+          <Send size={13} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({ icon: Icon, label, value, color }) {
   return (
@@ -18,10 +81,42 @@ function StatCard({ icon: Icon, label, value, color }) {
 }
 
 export default function DashboardPage() {
-  const { query, dbConfig } = useConnection();
+  const { query, dbConfig, serverPaths, soapConfig } = useConnection();
   const [stats, setStats] = useState({});
   const [recentCreatures, setRecentCreatures] = useState([]);
   const [loading, setLoading] = useState(true);
+
+  const [serverStatus, setServerStatus] = useState({ auth: 'offline', world: 'offline' });
+  const [serverBusy, setServerBusy] = useState({ auth: false, world: false });
+  const pollRef = useRef(null);
+
+  const pollStatus = useCallback(async () => {
+    const result = await window.azeroth.server.status({
+      authHost: '127.0.0.1', authPort: 3724,
+      worldHost: soapConfig.host || '127.0.0.1', worldPort: 8085,
+    });
+    setServerStatus(result);
+  }, [soapConfig.host]);
+
+  useEffect(() => {
+    pollStatus();
+    pollRef.current = setInterval(pollStatus, 5000);
+    return () => clearInterval(pollRef.current);
+  }, [pollStatus]);
+
+  async function handleServer(type, action) {
+    setServerBusy(b => ({ ...b, [type]: true }));
+    const exePath = type === 'auth' ? serverPaths.authExe : serverPaths.worldExe;
+    if (action === 'start') {
+      await window.azeroth.server.start({ type, exePath });
+      setServerStatus(s => ({ ...s, [type]: 'starting' }));
+    } else {
+      await window.azeroth.server.stop({ type, exePath });
+      setServerStatus(s => ({ ...s, [type]: 'offline' }));
+    }
+    setServerBusy(b => ({ ...b, [type]: false }));
+    setTimeout(pollStatus, 2000);
+  }
 
   useEffect(() => {
     loadStats();
@@ -68,6 +163,52 @@ export default function DashboardPage() {
         <StatCard icon={Package}   label="Items"     value={stats.items?.toLocaleString()}     color="var(--accent-blue)" />
         <StatCard icon={ScrollText}label="Quests"    value={stats.quests?.toLocaleString()}    color="var(--accent-green)" />
         <StatCard icon={Sparkles}  label="Spells"    value={stats.spells?.toLocaleString()}    color="var(--accent-purple)" />
+      </div>
+
+      <div style={{ padding: '16px 28px 0' }}>
+        <div className="panel">
+          <div className="panel-header">
+            <Server size={14} />
+            <span>Server Control</span>
+          </div>
+          {[
+            { type: 'auth',  label: 'Authserver',  hasPath: !!serverPaths.authExe },
+            { type: 'world', label: 'Worldserver', hasPath: !!serverPaths.worldExe },
+          ].map(({ type, label, hasPath }) => {
+            const status = serverStatus[type];
+            const busy = serverBusy[type];
+            const isOnline = status === 'online';
+            return (
+              <div key={type} className="server-row">
+                <div className="server-row-left">
+                  <span className={`status-dot ${status}`} />
+                  <div>
+                    <div className="server-label">{label}</div>
+                    <div className="server-status-text">{status}</div>
+                  </div>
+                </div>
+                <div className="server-actions">
+                  {!hasPath ? (
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pad instellen in Settings</span>
+                  ) : isOnline ? (
+                    <button className="btn-ghost" style={{ fontSize: 12 }} disabled={busy} onClick={() => handleServer(type, 'stop')}>
+                      <Square size={11} /> Stop
+                    </button>
+                  ) : (
+                    <button className="btn-primary" style={{ fontSize: 12 }} disabled={busy || status === 'starting'} onClick={() => handleServer(type, 'start')}>
+                      <Play size={11} /> Start
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="server-consoles">
+        <ServerConsole type="auth"  label="Authserver"  serverStatus={serverStatus.auth} />
+        <ServerConsole type="world" label="Worldserver" serverStatus={serverStatus.world} />
       </div>
 
       <div className="dashboard-panels">

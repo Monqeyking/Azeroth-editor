@@ -9,6 +9,7 @@ import MinimapOverlay from '../components/editor3d/MinimapOverlay';
 import './Editor3DPage.css';
 import { cameraInput } from '../components/editor3d/cameraInputState';
 import { wowToThree, threeToWow } from '../components/editor3d/wowCoords';
+import { setTerrainData } from '../components/editor3d/spawnLod';
 
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
@@ -28,15 +29,15 @@ function worldToTile(x, y) {
 }
 
 // Three.js → WoW coördinaten (inverse van wowToThree in Editor3DSpawn)
-// wowToThree: [-y, z, x]  →  Three(x,y,z) = WoW(-y, z, x)
-// inverse:    WoW(x,y,z)  = Three(z, y, -x) → wow_x=t.z, wow_y=-t.x, wow_z=t.y
+// wowToThree: [y, z, -x]  →  Three(x,y,z) = WoW(y, z, -x)
+// inverse:    WoW(x,y,z)  = Three(y, z, -x) → wow_x=-t.z, wow_y=t.x, wow_z=t.y
 function spawnThreePosition(spawn, transform) {
   if (transform?.pos) return [transform.pos.x, transform.pos.y, transform.pos.z];
   return wowToThree(spawn.x, spawn.y, spawn.z);
 }
 
 export default function Editor3DPage() {
-  const { query, soapCommand, soapConfig } = useConnection();
+  const { query, soapCommand, soapConfig, mapsPath } = useConnection();
   const [activeTool, setActiveTool] = useState('select');
   const [selectedId, setSelectedId] = useState(null);
   const [spawns,     setSpawns]     = useState([]);
@@ -45,12 +46,20 @@ export default function Editor3DPage() {
   const [resetKeys,  setResetKeys]  = useState({});
   const [saving,     setSaving]     = useState(false);
   const [saveError,  setSaveError]  = useState(null);
-  const [mapId,      setMapId]      = useState(1);
+  const [mapId,         setMapId]         = useState(1);
+  const [spawnsVisible, setSpawnsVisible] = useState(false);
   const [loading,    setLoading]    = useState(false);
   const [terrain,    setTerrain]    = useState(null);
+  const [tileTextures, setTileTextures] = useState({});
+
   const [error,      setError]      = useState(null);
   const [focusTick,  setFocusTick]  = useState(0);
+  const [streamKey,  setStreamKey]  = useState(0);
+  const [worldLoading, setWorldLoading] = useState(true);
+  const worldLoadTimeoutRef = useRef(null);
   const camPosRef = useRef({ wx: 0, wy: 0 });
+  const invalidateRef = useRef(null);
+  const [debugInfo, setDebugInfo] = useState({ batchMs: 0, tilesLoaded: 0, texLoaded: 0, inFlight: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +69,7 @@ export default function Editor3DPage() {
       setError(null);
       setSpawns([]);
       setTerrain(null);
+      setTileTextures({});
       setSelectedId(null);
       setTransforms({});
 
@@ -69,146 +79,20 @@ export default function Editor3DPage() {
         if (!res.success) { setError(res.error ?? 'Kan spawns niet laden'); return; }
         setSpawns(res.data);
 
-        const mapName = MAP_ADT_NAME[mapId];
-        if (mapName && res.data.length > 0) {
-          // Centroïd-tile berekenen en 4×4 blok eromheen laden
-          let sumX = 0, sumY = 0, count = 0;
-          res.data.forEach(s => {
-            const { tileX, tileY } = worldToTile(s.x, s.y);
-            if (tileX >= 0 && tileX < 64 && tileY >= 0 && tileY < 64) {
-              sumX += tileX; sumY += tileY; count++;
-            }
-          });
-          const tiles = [];
-          if (count > 0) {
-            const cX = Math.round(sumX / count);
-            const cY = Math.round(sumY / count);
-            for (let dy = -2; dy <= 3; dy++) {
-              for (let dx = -2; dx <= 3; dx++) {
-                const tx = cX + dx, ty = cY + dy;
-                if (tx >= 0 && tx < 64 && ty >= 0 && ty < 64)
-                  tiles.push({ tileX: tx, tileY: ty });
-              }
-            }
-          }
-          const tr = await window.azeroth.adt.getTerrain({ mapName, tiles });
-          if (!cancelled && tr.success) {
-            setTerrain(tr.data);
-
-            // ── DEBUG HEIGHT OFFSET ──────────────────────────────────────────
-            // Bouw een snel lookup: per geladen tile een lijst van chunks geïndexeerd op (ix,iy)
-            const CHUNK_SIZE = TILE_SIZE / 16;          // 33.333 yards per chunk
-            const UNIT       = CHUNK_SIZE / 8;          // 4.1666 yards per outer vertex step
-            const MAP_HALF_L = 32 * TILE_SIZE;
-
-            function terrainHeightAt(terrainData, wowX, wowY) {
-              const tileX = Math.floor((MAP_HALF_L - wowX) / TILE_SIZE);
-              const tileY = Math.floor((MAP_HALF_L - wowY) / TILE_SIZE);
-              const tile  = terrainData.find(t => t.tileX === tileX && t.tileY === tileY);
-              if (!tile) return null;
-              // Positie binnen tile (0..TILE_SIZE)
-              const lx = (MAP_HALF_L - wowX) - tileX * TILE_SIZE; // richting ix
-              const ly = (MAP_HALF_L - wowY) - tileY * TILE_SIZE; // richting iy
-              const ix = Math.min(15, Math.floor(lx / CHUNK_SIZE));
-              const iy = Math.min(15, Math.floor(ly / CHUNK_SIZE));
-              const chunk = tile.chunks?.find(c => c?.ix === ix && c?.iy === iy);
-              if (!chunk) return null;
-              // Vertex binnen chunk
-              const cx = (lx - ix * CHUNK_SIZE) / UNIT;
-              const cy = (ly - iy * CHUNK_SIZE) / UNIT;
-              const r  = Math.min(8, Math.round(cy));
-              const c  = Math.min(8, Math.round(cx));
-              return {
-                height: chunk.posZ + chunk.outer[r * 9 + c],
-                tileX, tileY, ix, iy, r, c,
-                posZ: chunk.posZ,
-                outerVal: chunk.outer[r * 9 + c],
-              };
-            }
-
-            // Scan ALLE spawns in geladen tiles, bereken terrain-spawn verschil
-            const loadedTileSet = new Set(tr.data.map(t => `${t.tileX}_${t.tileY}`));
-            const results = [];
-            for (const s of res.data) {
-              if (s.z == null) continue;
-              const { tileX, tileY } = worldToTile(s.x, s.y);
-              if (!loadedTileSet.has(`${tileX}_${tileY}`)) continue;
-              const info = terrainHeightAt(tr.data, s.x, s.y);
-              if (!info) continue;
-              results.push({ s, info, diff: info.height - s.z });
-            }
-
-            console.log(`[SPAWN DEBUG] ${results.length} spawns in geladen tiles gevonden`);
-
-            // Top 5 spawns ONDER terrein (diff > 0 = spawn ligt onder maaiveld)
-            const buried = results.filter(r => r.diff > 0).sort((a, b) => b.diff - a.diff).slice(0, 5);
-            // Top 5 spawns BOVEN terrein (diff < 0)
-            const floating = results.filter(r => r.diff < 0).sort((a, b) => a.diff - b.diff).slice(0, 5);
-
-            // Sluit garbage-waarden uit (>1 miljoen) voor de sortering
-            const validResults = results.filter(r => Math.abs(r.diff) < 1e6);
-
-            if (buried.length) {
-              console.log('[SPAWN DEBUG] === BEGRAVEN spawns (terrein > spawn.z) ===');
-              buried.forEach(({ s, info, diff }) => {
-                const tile = tr.data.find(t => t.tileX === info.tileX && t.tileY === info.tileY);
-                const chunk = tile?.chunks?.find(c => c?.ix === info.ix && c?.iy === info.iy);
-                console.log(
-                  ` guid=${s.guid} name=${s.name ?? '?'}`,
-                  `| spawn WoW(x=${s.x?.toFixed(1)} y=${s.y?.toFixed(1)} z=${s.z.toFixed(2)})`,
-                  `| tile ${info.tileX}_${info.tileY} chunk ix=${info.ix} iy=${info.iy} r=${info.r} c=${info.c}`,
-                  `| chunk posX=${chunk?.posX?.toFixed(2)} posY=${chunk?.posY?.toFixed(2)} posZ=${info.posZ?.toFixed(2)}`,
-                  `| terrain=${info.height.toFixed(2)} VERSCHIL=+${diff.toFixed(2)}`
-                );
-              });
-            }
-            if (floating.length) {
-              console.log('[SPAWN DEBUG] === ZWEVENDE spawns (spawn.z > terrein) ===');
-              floating.forEach(({ s, info, diff }) => {
-                const tile = tr.data.find(t => t.tileX === info.tileX && t.tileY === info.tileY);
-                const chunk = tile?.chunks?.find(c => c?.ix === info.ix && c?.iy === info.iy);
-                console.log(
-                  ` guid=${s.guid} name=${s.name ?? '?'}`,
-                  `| spawn WoW(x=${s.x?.toFixed(1)} y=${s.y?.toFixed(1)} z=${s.z.toFixed(2)})`,
-                  `| tile ${info.tileX}_${info.tileY} chunk ix=${info.ix} iy=${info.iy} r=${info.r} c=${info.c}`,
-                  `| chunk posX=${chunk?.posX?.toFixed(2)} posY=${chunk?.posY?.toFixed(2)} posZ=${info.posZ?.toFixed(2)}`,
-                  `| terrain=${info.height.toFixed(2)} VERSCHIL=${diff.toFixed(2)}`
-                );
-              });
-            }
-
-            if (validResults.length) {
-              const avg = validResults.reduce((acc, r) => acc + r.diff, 0) / validResults.length;
-
-              // Mediaan (gesorteerd)
-              const sorted = [...validResults].sort((a, b) => a.diff - b.diff);
-              const mid    = Math.floor(sorted.length / 2);
-              const median = sorted.length % 2 === 0
-                ? (sorted[mid - 1].diff + sorted[mid].diff) / 2
-                : sorted[mid].diff;
-
-              // Gefilterd gemiddelde: alleen spawns waarbij |diff| < 50 (platte terreinen)
-              const flat    = validResults.filter(r => Math.abs(r.diff) < 50);
-              const flatAvg = flat.length
-                ? flat.reduce((acc, r) => acc + r.diff, 0) / flat.length
-                : null;
-
-              console.log(`[SPAWN DEBUG] ${validResults.length} geldig | gemiddeld: ${avg.toFixed(2)} | mediaan: ${median.toFixed(2)} | vlak (<50): n=${flat.length} avg=${flatAvg?.toFixed(2) ?? 'n/a'} | begraven: ${validResults.filter(r=>r.diff>0).length} | zwevend: ${validResults.filter(r=>r.diff<0).length}`);
-
-              // Histogram: spreiding van diff-waarden
-              const bins = [-300,-100,-50,-20,-5,5,20,50,100,300];
-              const counts = new Array(bins.length + 1).fill(0);
-              validResults.forEach(({ diff }) => {
-                let i = 0;
-                while (i < bins.length && diff >= bins[i]) i++;
-                counts[i]++;
-              });
-              const labels = [`<${bins[0]}`, ...bins.map((b, i) => i < bins.length-1 ? `${b}..${bins[i+1]}` : `>=${b}`), `>=${bins[bins.length-1]}`];
-              console.log('[SPAWN DEBUG] histogram:', labels.map((l, i) => `${l}: ${counts[i]}`).join(' | '));
-            }
-            // ── END DEBUG ────────────────────────────────────────────────────
-          }
+        if (res.data.length && camPosRef.current.wx === 0 && camPosRef.current.wy === 0) {
+          const n = res.data.length;
+          const wx = res.data.reduce((s, sp) => s + sp.x, 0) / n;
+          const wy = res.data.reduce((s, sp) => s + sp.y, 0) / n;
+          camPosRef.current = { wx, wy };
+          invalidateRef.current?.();
+          // Debug: log eerste 5 spawns met hun hoogte
+          const sample = res.data.slice(0, 5);
+          console.log('[spawns] hoogte sample (WoW Z = Three.js Y):',
+            sample.map(s => `${s.name ?? s.guid} z=${s.z?.toFixed(1)}`).join(', '));
+          console.log('[spawns] centroid:', { wx: wx.toFixed(1), wy: wy.toFixed(1) });
         }
+
+        // Terrein wordt gestreamd rond de camera (zie streaming-effect hieronder)
       } catch (e) {
         if (!cancelled) setError(e.message);
       } finally {
@@ -219,6 +103,163 @@ export default function Editor3DPage() {
     load();
     return () => { cancelled = true; };
   }, [mapId]);
+
+  // ── World loading overlay ────────────────────────────────────────────────────
+  useEffect(() => {
+    setWorldLoading(true);
+    clearTimeout(worldLoadTimeoutRef.current);
+    worldLoadTimeoutRef.current = setTimeout(() => setWorldLoading(false), 4000);
+    return () => clearTimeout(worldLoadTimeoutRef.current);
+  }, [mapId]);
+
+  // Clear overlay wanneer eerste terrain batch klaar is
+  const terrainReady = !!(terrain?.length);
+  useEffect(() => {
+    if (terrainReady) {
+      clearTimeout(worldLoadTimeoutRef.current);
+      setWorldLoading(false);
+    }
+  }, [terrainReady]);
+
+  // Sync terrain tiles naar spawnLod module voor height snapping
+  useEffect(() => { setTerrainData(terrain); }, [terrain]);
+
+  // ── Terrain streaming: laad tiles rond de camera, evict wat ver weg is ──────
+  const TILE_RADIUS = 4;   // 9×9 blok rond camera
+  const MAX_TILES   = 200;
+  const BATCH_MAX   = 16;  // max tiles per IPC zodat main process responsief blijft
+
+  useEffect(() => {
+    const mapName = MAP_ADT_NAME[mapId];
+    if (!mapName) return;
+
+    let disposed = false;
+    let terrainInFlight = false;
+    let textureInFlight = false;
+    const loaded   = new Set();
+    const missing  = new Set();
+    const texQueue = []; // tiles die terrain hebben maar nog geen texture
+
+    async function tickTerrain() {
+      if (disposed || terrainInFlight) return;
+      const { wx, wy } = camPosRef.current;
+      if (wx === 0 && wy === 0) return;
+
+      const { tileX: cX, tileY: cY } = worldToTile(wx, wy);
+      const want = [];
+      for (let dy = -TILE_RADIUS; dy <= TILE_RADIUS; dy++) {
+        for (let dx = -TILE_RADIUS; dx <= TILE_RADIUS; dx++) {
+          const tx = cX + dx, ty = cY + dy;
+          if (tx < 0 || tx >= 64 || ty < 0 || ty >= 64) continue;
+          const key = `${tx}_${ty}`;
+          if (loaded.has(key) || missing.has(key)) continue;
+          want.push({ tileX: tx, tileY: ty, d: Math.abs(dx) + Math.abs(dy) });
+        }
+      }
+      if (!want.length) return;
+
+      want.sort((a, b) => a.d - b.d);
+      const batch = want.slice(0, BATCH_MAX).map(({ tileX, tileY }) => ({ tileX, tileY }));
+      batch.forEach(t => loaded.add(`${t.tileX}_${t.tileY}`));
+
+      terrainInFlight = true;
+      setDebugInfo(p => ({ ...p, inFlight: true }));
+      const t0 = performance.now();
+      try {
+        const tr = await window.azeroth.adt.getTerrain({ mapName, tiles: batch });
+        if (disposed) return;
+        if (!tr.success) { batch.forEach(t => loaded.delete(`${t.tileX}_${t.tileY}`)); return; }
+
+        const got = new Set(tr.data.map(t => `${t.tileX}_${t.tileY}`));
+        batch.forEach(t => {
+          const key = `${t.tileX}_${t.tileY}`;
+          if (!got.has(key)) { missing.add(key); loaded.delete(key); }
+        });
+        if (!tr.data.length) return;
+
+        const evicted = [];
+        const { tileX: curX, tileY: curY } = worldToTile(camPosRef.current.wx, camPosRef.current.wy);
+        setTerrain(prev => {
+          const merged = [...(prev ?? []), ...tr.data];
+          if (merged.length > MAX_TILES) {
+            merged.sort((a, b) =>
+              (Math.abs(a.tileX - curX) + Math.abs(a.tileY - curY)) -
+              (Math.abs(b.tileX - curX) + Math.abs(b.tileY - curY)));
+            for (const t of merged.splice(MAX_TILES)) {
+              const key = `${t.tileX}_${t.tileY}`;
+              loaded.delete(key);
+              evicted.push(key);
+            }
+          }
+          return merged;
+        });
+
+        const tileBatch = tr.data.map(({ tileX, tileY }) => ({ tileX, tileY }));
+
+        // Minimap placeholder (niet-blocking, geen await)
+        window.azeroth.adt.getTileTextures({ mapName, tiles: tileBatch }).then(tex => {
+          if (disposed || !tex.success) return;
+          setTileTextures(prev => {
+            const next = { ...prev };
+            for (const key of evicted) delete next[key];
+            for (const { tileX, tileY, png } of tex.data) {
+              const key = `${tileX}_${tileY}`;
+              if (!next[key] || typeof next[key] === 'string') next[key] = png;
+            }
+            return next;
+          });
+          invalidateRef.current?.();
+        });
+
+        // Voeg toe aan texture queue (in batches van TEX_BATCH verwerkt door tickTexture)
+        for (const { tileX, tileY } of tileBatch) texQueue.push({ tileX, tileY, evicted });
+        setDebugInfo(p => ({ ...p, tilesLoaded: p.tilesLoaded + tileBatch.length }));
+        console.log(`[terrain] batch ${tileBatch.length} tiles in ${(performance.now()-t0).toFixed(0)}ms`);
+      } finally {
+        terrainInFlight = false;
+        setDebugInfo(p => ({ ...p, inFlight: textureInFlight }));
+      }
+    }
+
+    async function tickTexture() {
+      if (disposed || textureInFlight || !texQueue.length) return;
+      const TEX_BATCH = 4; // klein houden: compositing blokkeert main process
+      const items = texQueue.splice(0, TEX_BATCH);
+      const tileBatch = items.map(({ tileX, tileY }) => ({ tileX, tileY }));
+
+      textureInFlight = true;
+      setDebugInfo(p => ({ ...p, inFlight: true }));
+      const t0 = performance.now();
+      try {
+        const tex = await window.azeroth.adt.getTextureLayers({ mapName, tiles: tileBatch });
+        const elapsed = performance.now() - t0;
+        console.log(`[texture] ${tileBatch.length} tiles composited in ${elapsed.toFixed(0)}ms`);
+        if (!disposed && tex.success && tex.data.length) {
+          setTileTextures(prev => {
+            const next = { ...prev };
+            for (const { tileX, tileY, rgba, w, h } of tex.data) {
+              next[`${tileX}_${tileY}`] = { rgba, w, h };
+            }
+            return next;
+          });
+          invalidateRef.current?.();
+          setDebugInfo(p => ({ ...p, texLoaded: p.texLoaded + tex.data.length, batchMs: Math.round(elapsed) }));
+        }
+      } finally {
+        textureInFlight = false;
+        setDebugInfo(p => ({ ...p, inFlight: terrainInFlight }));
+      }
+    }
+
+    const id = setInterval(() => { tickTerrain(); tickTexture(); }, 600);
+    return () => { disposed = true; clearInterval(id); };
+  }, [mapId, streamKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    setTerrain(null);
+    setTileTextures({});
+    setStreamKey(k => k + 1);
+  }, [mapsPath]);
 
   useEffect(() => {
     const onKey = (e) => {
@@ -360,11 +401,11 @@ export default function Editor3DPage() {
     return spawnThreePosition(selectedSpawn, transforms[selectedId]);
   }, [selectedSpawn, selectedId, transforms]);
 
-  // Centroïd in Three.js ruimte (WoW → Three.js: x→Z, y→-X, z→Y)
+  // Centroïd in Three.js ruimte (WoW → Three.js: [y, z, -x])
   const spawnCenter = useMemo(() => {
     if (!spawns.length) return null;
     let sx = 0, sy = 0, sz = 0;
-    for (const s of spawns) { sx += -s.y; sy += s.z; sz += s.x; }
+    for (const s of spawns) { sx += s.y; sy += s.z; sz += -s.x; }
     return [sx / spawns.length, sy / spawns.length, sz / spawns.length];
   }, [spawns]);
 
@@ -377,9 +418,14 @@ export default function Editor3DPage() {
         onMapChange={setMapId}
         loading={loading}
         spawnCount={loading ? null : spawns.length}
+        spawnsVisible={spawnsVisible}
+        onToggleSpawns={() => setSpawnsVisible(v => !v)}
       />
 
       {error && <div className="ed3-error-bar">Fout: {error}</div>}
+      <div style={{position:'absolute',top:40,right:8,zIndex:999,background:'rgba(0,0,0,.65)',color:'#9f9',fontFamily:'monospace',fontSize:11,padding:'4px 8px',borderRadius:4,pointerEvents:'none',lineHeight:1.6}}>
+        tiles: {debugInfo.tilesLoaded} | tex: {debugInfo.texLoaded} | last: {debugInfo.batchMs}ms{debugInfo.inFlight ? ' ⏳' : ''}
+      </div>
 
       <div className="ed3-workspace">
         <Editor3DHierarchy
@@ -391,20 +437,28 @@ export default function Editor3DPage() {
         />
 
         <div className="ed3-viewport">
+          {worldLoading && (
+            <div className="ed3-world-overlay">
+              <span className="ed3-world-overlay-text">Wereld laden…</span>
+            </div>
+          )}
           <Editor3DErrorBoundary>
             <Editor3DScene
-              spawns={spawns}
+              spawns={spawnsVisible ? spawns : []}
               selectedId={selectedId}
               onSelect={handleSelect}
               activeTool={activeTool}
               onTransform={handleTransform}
               terrain={terrain}
+              tileTextures={tileTextures}
+              wdl={null}
               initialTarget={spawnCenter}
               resetKeys={resetKeys}
               focusTarget={focusTarget}
               focusTick={focusTick}
               transforms={transforms}
               camPosRef={camPosRef}
+              invalidateRef={invalidateRef}
             />
           </Editor3DErrorBoundary>
           <MinimapOverlay mapId={mapId} camPosRef={camPosRef} />
@@ -433,7 +487,7 @@ export default function Editor3DPage() {
           <button className="ed3-save-bar-btn save" onClick={handleSave} disabled={saving}>
             {saving ? 'Opslaan…' : 'Opslaan'}
           </button>
-        </div>
+         </div>
       )}
     </div>
   );
