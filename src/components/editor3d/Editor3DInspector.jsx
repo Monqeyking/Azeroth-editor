@@ -9,7 +9,7 @@ function fmt(v, decimals = 3) {
 }
 
 function threeToWow(tx, ty, tz) {
-  return { x: tz, y: -tx, z: ty };
+  return { x: -tz, y: tx, z: ty };
 }
 
 function Vec3Row({ label, x, y, z, decimals = 3 }) {

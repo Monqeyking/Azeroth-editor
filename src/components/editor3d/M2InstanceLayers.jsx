@@ -1,7 +1,7 @@
 import { useRef, useMemo, useLayoutEffect, useState, useEffect, useCallback, useReducer } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getSpawnPose, horizontalDistSq, MODEL_LOAD_DIST } from './spawnLod';
+import { getSpawnPose, horizontalDistSq, MODEL_LOAD_DIST, useTerrainTick } from './spawnLod';
 import {
   fetchM2Model,
   getCachedM2Asset,
@@ -75,6 +75,7 @@ export default function M2InstanceLayers({ spawns, transforms, selectedId, onSel
   const { camera, gl } = useThree();
   const [cacheTick, setCacheTick] = useState(0);
   const [rangeTick, bumpRange] = useReducer(n => n + 1, 0);
+  const terrainTick = useTerrainTick();
   const [hoveredGuid, setHoveredGuid] = useState(null);
   const inRangeRef = useRef(new Set());
   const nextSetRef = useRef(new Set()); // hergebruikt, voorkomt GC-druk
@@ -126,7 +127,7 @@ export default function M2InstanceLayers({ spawns, transforms, selectedId, onSel
       asset,
       entries,
     }));
-  }, [spawns, transforms, selectedId, cacheTick, rangeTick]);
+  }, [spawns, transforms, selectedId, cacheTick, rangeTick, terrainTick]);
 
   useEffect(() => {
     const ids = new Set();

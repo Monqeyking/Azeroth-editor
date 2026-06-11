@@ -81,12 +81,40 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // ADT terrain (3D editor)
   adt: {
-    getTerrain: (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
+    getTerrain:             (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
+    getTileTextures:        (opts) => ipcRenderer.invoke('adt:getTileTextures', opts),
+    getTextureLayers:         (opts) => ipcRenderer.invoke('adt:getTextureLayers', opts),
+    diagBLP:                  (opts) => ipcRenderer.invoke('adt:diagBLP', opts),
+    getWdl:                 (opts) => ipcRenderer.invoke('adt:getWdl', opts),
   },
   // M2 model loader (3D editor)
   m2: {
     loadModel:     (opts) => ipcRenderer.invoke('m2:loadModel', opts),
     prefetch:      (opts) => ipcRenderer.invoke('m2:prefetch', opts),
     loadCharModel: (opts) => ipcRenderer.invoke('m2:loadCharModel', opts),
+  },
+  // Server process control
+  server: {
+    status:      (opts) => ipcRenderer.invoke('server:status', opts),
+    start:       (opts) => ipcRenderer.invoke('server:start', opts),
+    stop:        (opts) => ipcRenderer.invoke('server:stop', opts),
+    sendCommand: (opts) => ipcRenderer.invoke('server:sendCommand', opts),
+    onOutput:  (cb) => { const h = (_, d) => cb(d); ipcRenderer.on('server:output', h); return h; },
+    offOutput: (h)  => ipcRenderer.removeListener('server:output', h),
+  },
+  // DBC SQL editor
+  dbcSql: {
+    listFiles: (opts) => ipcRenderer.invoke('dbcSql:listFiles', opts),
+    query:     (opts) => ipcRenderer.invoke('dbcSql:query', opts),
+  },
+  // Filesystem helpers
+  fs: {
+    listFolder: (opts) => ipcRenderer.invoke('fs:listFolder', opts),
+    copyFiles:  (opts) => ipcRenderer.invoke('fs:copyFiles', opts),
+  },
+  // Native file/folder picker
+  dialog: {
+    openFile:   (opts) => ipcRenderer.invoke('dialog:openFile', opts),
+    openFolder: (opts) => ipcRenderer.invoke('dialog:openFolder', opts),
   },
 });

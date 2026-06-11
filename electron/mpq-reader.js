@@ -159,17 +159,26 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
   // Normaal MPQ-archief via StormLib
   let archive;
   try { archive = await MPQ.open(toStormPath(dataPath, mpqAbsPath), 'r'); }
-  catch (_) { return null; }
+  catch (e) {
+    console.log(`[mpq] open mislukt voor ${path.basename(mpqAbsPath)}: ${e.message}`);
+    return null;
+  }
 
   let buf = null;
   try {
     if (archive.hasFile(internalPath)) {
       const f   = archive.openFile(internalPath);
       const raw = f.read();
+      // raw is een Uint8Array-view in WASM-heap; kopieer naar eigen ArrayBuffer
+      // VÓÓR f.close()/archive.close() anders wordt het geheugen hergebruikt
+      const copy = new Uint8Array(raw.byteLength);
+      copy.set(raw);
+      buf = Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
       f.close();
-      buf = Buffer.from(raw);
     }
-  } catch (_) {}
+  } catch (e) {
+    console.log(`[mpq] hasFile/read fout in ${path.basename(mpqAbsPath)} voor ${internalPath}: ${e.message}`);
+  }
   archive.close();
   return buf;
 }
@@ -209,7 +218,51 @@ async function validateDataPath(dataPath) {
 }
 
 // ── ADT terrain bestanden lezen ───────────────────────────────────────────────
-const adtCache = new Map();
+const adtCache = new Map(); // key → Buffer | null (negative cache voor ontbrekende tiles)
+const ADT_CACHE_MAX = 128;
+
+const adtIndexCache = new Map();
+const adtIndexInFlight = new Map();
+
+async function buildAdtIndex(dataPath) {
+  if (adtIndexCache.has(dataPath)) return adtIndexCache.get(dataPath);
+  if (adtIndexInFlight.has(dataPath)) return adtIndexInFlight.get(dataPath);
+  const p = _indexFromListfile(dataPath, '.adt').then(idx => { adtIndexCache.set(dataPath, idx); return idx; });
+  adtIndexInFlight.set(dataPath, p);
+  return p;
+}
+
+// ── WDL: low-res heightmap van de hele map (voor verre terrein-weergave) ──────
+const wdlCache = new Map();
+const wdlIndexCache = new Map();
+const wdlIndexInFlight = new Map();
+
+async function buildWdlIndex(dataPath) {
+  if (wdlIndexCache.has(dataPath)) return wdlIndexCache.get(dataPath);
+  if (wdlIndexInFlight.has(dataPath)) return wdlIndexInFlight.get(dataPath);
+  const p = _indexFromListfile(dataPath, '.wdl').then(idx => { wdlIndexCache.set(dataPath, idx); return idx; });
+  wdlIndexInFlight.set(dataPath, p);
+  return p;
+}
+
+async function readWdlBuffer(dataPath, mapName) {
+  const key = `${dataPath}|${mapName}`;
+  if (wdlCache.has(key)) return wdlCache.get(key);
+
+  ensureMounted(dataPath);
+  const internalPath = `World\\Maps\\${mapName}\\${mapName}.wdl`;
+
+  let buf = null;
+  const index = await buildWdlIndex(dataPath);
+  const mpqAbsPath = index.get(internalPath.toLowerCase());
+  if (mpqAbsPath) {
+    buf = await readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath);
+  } else if (index.size === 0) {
+    buf = await readFileFromMpqs(dataPath, internalPath);
+  }
+  wdlCache.set(key, buf);
+  return buf;
+}
 
 async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   const key = `${dataPath}|${mapName}|${tileX}|${tileY}`;
@@ -218,11 +271,70 @@ async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   ensureMounted(dataPath);
   const internalPath = `World\\Maps\\${mapName}\\${mapName}_${tileX}_${tileY}.adt`;
 
-  for (const mpqPath of findMpqFiles(dataPath)) {
-    const buf = await readFileFromMpqEntry(dataPath, mpqPath, internalPath);
-    if (buf) { adtCache.set(key, buf); return buf; }
+  let buf = null;
+  const index = await buildAdtIndex(dataPath);
+  const mpqAbsPath = index.get(internalPath.toLowerCase());
+  if (mpqAbsPath) {
+    buf = await readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath);
+  } else if (index.size === 0) {
+    // Geen listfiles beschikbaar — eenmalige fallback full scan
+    for (const mpqPath of findMpqFiles(dataPath)) {
+      buf = await readFileFromMpqEntry(dataPath, mpqPath, internalPath);
+      if (buf) break;
+    }
   }
-  return null;
+
+  if (adtCache.size >= ADT_CACHE_MAX) {
+    adtCache.delete(adtCache.keys().next().value);
+  }
+  adtCache.set(key, buf);
+  return buf;
+}
+
+// ── Minimap BLP per ADT-tile ──────────────────────────────────────────────────
+// Probeert eerst het directe pad, valt terug op md5translate.trs (hashed names).
+const md5TransCache = new Map(); // dataPath → Map<lower "dir\mapX_Y.blp", hashedFilename>
+
+async function getMd5Translate(dataPath) {
+  if (md5TransCache.has(dataPath)) return md5TransCache.get(dataPath);
+  const map = new Map();
+  // Alleen lezen als de listfiles het bestand kennen — voorkomt zinloze full scans
+  const allPaths = await collectListfilePaths(dataPath);
+  const trsPath = allPaths.find(p => /(^|\\)md5translate\.(trs|txt)$/i.test(p));
+  const buf = trsPath ? await readFileFromMpqs(dataPath, trsPath) : null;
+  if (buf) {
+    let dir = '';
+    for (const line of buf.toString('utf8').split(/\r?\n/)) {
+      const t = line.trim();
+      if (!t) continue;
+      if (t.toLowerCase().startsWith('dir:')) { dir = t.slice(4).trim(); continue; }
+      const parts = t.split('\t');
+      if (parts.length !== 2) continue;
+      let plain = parts[0].replace(/\//g, '\\');
+      if (dir && !plain.toLowerCase().startsWith(dir.toLowerCase() + '\\')) plain = `${dir}\\${plain}`;
+      map.set(plain.toLowerCase(), parts[1].trim());
+    }
+  }
+  md5TransCache.set(dataPath, map);
+  return map;
+}
+
+async function readMinimapBlp(dataPath, mapName, tileX, tileY) {
+  ensureMounted(dataPath);
+  // Uitsluitend O(1) lookups via de BLP-index — nooit full MPQ scans per tile,
+  // anders blokkeert het main process en hangt de hele app.
+  const index = await buildBlpIndex(dataPath);
+
+  const directKey = `world\\minimaps\\${mapName}\\map${tileX}_${tileY}.blp`.toLowerCase();
+  const directMpq = index.get(directKey);
+  if (directMpq) return await readFileFromMpqEntry(dataPath, directMpq, directKey);
+
+  const trans = await getMd5Translate(dataPath);
+  const hash = trans.get(`${mapName.toLowerCase()}\\map${tileX}_${tileY}.blp`);
+  if (!hash) return null;
+  const hashPath = (hash.includes('\\') ? hash : `textures\\Minimap\\${hash}`).toLowerCase();
+  const hashMpq = index.get(hashPath);
+  return hashMpq ? await readFileFromMpqEntry(dataPath, hashMpq, hashPath) : null;
 }
 
 function pathVariants(internalPath) {
@@ -264,18 +376,22 @@ async function readFileFromMpqs(dataPath, internalPath) {
 const listfileCache = new Map();
 const blpDirCache   = new Map();
 
-function walkDirBlps(dir, prefix, out) {
+function walkDirFiles(dir, prefix, out, ext) {
   if (!fs.existsSync(dir)) return;
   for (const entry of fs.readdirSync(dir)) {
     const full = path.join(dir, entry);
     let st;
     try { st = fs.statSync(full); } catch (_) { continue; }
     if (st.isDirectory()) {
-      walkDirBlps(full, prefix ? `${prefix}\\${entry}` : entry, out);
-    } else if (entry.toLowerCase().endsWith('.blp')) {
+      walkDirFiles(full, prefix ? `${prefix}\\${entry}` : entry, out, ext);
+    } else if (entry.toLowerCase().endsWith(ext)) {
       out.add(prefix ? `${prefix}\\${entry}` : entry);
     }
   }
+}
+
+function walkDirBlps(dir, prefix, out) {
+  walkDirFiles(dir, prefix, out, '.blp');
 }
 
 async function collectListfilePaths(dataPath) {
@@ -320,7 +436,7 @@ async function collectListfilePaths(dataPath) {
 const blpIndexCache = new Map();   // dataPath → Map<lowerPath, mpqAbsPath>
 const blpIndexBuildInFlight = new Map();
 
-function _indexFromListfile(dataPath) {
+function _indexFromListfile(dataPath, ext = '.blp') {
   return new Promise((resolve) => {
     const idx = new Map();
     const mpqs = findMpqFiles(dataPath);
@@ -332,7 +448,7 @@ function _indexFromListfile(dataPath) {
       try { stat = fs.statSync(mpqPath); } catch (_) { return next(); }
       if (stat.isDirectory()) {
         const set = new Set();
-        walkDirBlps(mpqPath, '', set);
+        walkDirFiles(mpqPath, '', set, ext);
         for (const p of set) {
           const k = p.toLowerCase();
           if (!idx.has(k)) idx.set(k, mpqPath);
@@ -352,7 +468,7 @@ function _indexFromListfile(dataPath) {
             for (const line of text.split(/\r?\n/)) {
               const t = line.trim();
               if (!t) continue;
-              if (!t.toLowerCase().endsWith('.blp')) continue;
+              if (!t.toLowerCase().endsWith(ext)) continue;
               const k = t.replace(/\//g, '\\').toLowerCase();
               if (!idx.has(k)) idx.set(k, mpqPath);
             }
@@ -534,7 +650,7 @@ async function findArchivesForPaths(dataPath, blpPaths) {
 }
 
 module.exports = {
-  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer,
+  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readMinimapBlp, readWdlBuffer,
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
 };

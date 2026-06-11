@@ -18,6 +18,8 @@ import LootEditorPage from './pages/LootEditorPage';
 import ItemSetEditorPage from './pages/ItemSetEditorPage';
 import VendorEditorPage from './pages/VendorEditorPage';
 import SqlEditorPage from './pages/SqlEditorPage';
+import DbcSqlPage from './pages/DbcSqlPage';
+import ExpansionLockPage from './pages/ExpansionLockPage';
 
 const router = createHashRouter([
   { path: '/connect', element: <ConnectPage /> },
@@ -41,6 +43,8 @@ const router = createHashRouter([
       { path: 'item-sets',          element: <ItemSetEditorPage /> },
       { path: 'vendors',            element: <VendorEditorPage /> },
       { path: 'sql',                element: <SqlEditorPage /> },
+      { path: 'dbc-sql',           element: <DbcSqlPage /> },
+      { path: 'expansion-lock',    element: <ExpansionLockPage /> },
       { path: 'settings',           element: <SettingsPage /> },
     ],
   },

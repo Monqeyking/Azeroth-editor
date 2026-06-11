@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useConnection } from '../lib/ConnectionContext';
-import { Database, Globe, Zap, Save } from 'lucide-react';
+import { Database, Zap } from 'lucide-react';
+import ollieLogo from '../assets/Ollie.png';
 import './ConnectPage.css';
 
 export default function ConnectPage() {
@@ -55,7 +56,7 @@ export default function ConnectPage() {
       <div className="connect-card">
         <div className="connect-header">
           <div className="connect-icon">
-            <Globe size={28} />
+            <img src={ollieLogo} alt="Ollie" style={{ height: 52, width: 'auto' }} />
           </div>
           <h1>Azeroth Editor</h1>
           <p>Connect to your AzerothCore database</p>

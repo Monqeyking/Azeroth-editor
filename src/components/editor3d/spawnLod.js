@@ -6,6 +6,39 @@ export const BILLBOARD_LOD_DIST      = 720;
 export const MODEL_PREFETCH_MARGIN   = 50;
 export const MODEL_PREFETCH_DIST     = MODEL_LOAD_DIST + MODEL_PREFETCH_MARGIN;
 
+// ─── Terrain height snapping ──────────────────────────────────────────────────
+const _TS   = 533.33333;
+const _HALF = 32 * _TS;
+const _US   = _TS / 128;
+let _terrainTiles     = [];
+let _terrainTick      = 0;
+const _terrainListeners = new Set();
+
+export function setTerrainData(tiles) {
+  _terrainTiles = tiles ?? [];
+  _terrainTick++;
+  _terrainListeners.forEach(fn => fn(_terrainTick));
+}
+
+export function useTerrainTick() {
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    _terrainListeners.add(setTick);
+    return () => _terrainListeners.delete(setTick);
+  }, []);
+  return tick;
+}
+
+export function getTerrainHeight(wx, wy) {
+  const tileX = Math.floor((_HALF - wx) / _TS);
+  const tileY = Math.floor((_HALF - wy) / _TS);
+  const tile  = _terrainTiles.find(t => t.tileX === tileX && t.tileY === tileY);
+  if (!tile?.v9) return null;
+  const vx = Math.max(0, Math.min(128, Math.round(((32 - tileX) * _TS - wx) / _US)));
+  const vy = Math.max(0, Math.min(128, Math.round(((32 - tileY) * _TS - wy) / _US)));
+  return tile.v9[vy * 129 + vx]; // EW-major
+}
+
 const MODEL_LOAD_SQ     = MODEL_LOAD_DIST * MODEL_LOAD_DIST;
 const BILLBOARD_LOD_SQ    = BILLBOARD_LOD_DIST * BILLBOARD_LOD_DIST;
 const MODEL_PREFETCH_SQ   = MODEL_PREFETCH_DIST * MODEL_PREFETCH_DIST;
@@ -21,7 +54,8 @@ export function getSpawnPose(spawn, transforms) {
       rotY: t.rot?.y ?? spawn.orientation ?? 0,
     };
   }
-  return { pos: wowToThree(spawn.x, spawn.y, spawn.z), rotY: spawn.orientation ?? 0 };
+  const th = getTerrainHeight(spawn.x, spawn.y);
+  return { pos: wowToThree(spawn.x, spawn.y, th ?? spawn.z), rotY: spawn.orientation ?? 0 };
 }
 
 export function horizontalDistSq(camera, pos) {

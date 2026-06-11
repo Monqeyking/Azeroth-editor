@@ -31,6 +31,15 @@ Uses ZamModelViewer (Wowhead cloud renderer) — requires internet.
 - Renderer batching: `src/lib/blpBatchLoader.js` — module-level debounced batcher (16ms window). Meerdere `useBlpTexture` calls in dezelfde tick worden gebundeld tot één IPC.
 - Renderer hook: `src/lib/useBlpTexture.js` — gebruikt de batch loader, module-level dataURL cache, hergebruikt resultaten over component remounts.
 
+## 3D Editor terrain pipeline (Editor3DPage)
+- **Tile streaming**: interval (600ms) laadt ADT-tiles in 5×5 blok rond `camPosRef`, max 12/batch, evict >81 tiles. Negative caching voor ontbrekende tiles (oceaan).
+- **Indexen**: `mpq-reader.js` `_indexFromListfile(dataPath, ext)` bouwt Map<lowerPath, mpqPath> per extensie (.blp/.adt/.wdl). Alle tile/minimap/wdl reads zijn O(1). **Nooit full MPQ scans per tile** — blokkeert main process, bevriest de app.
+- **IPC**: `adt:getTerrain`, `adt:getTileTextures` (minimap BLP → PNG dataURL per tile, md5translate.trs fallback), `adt:getWdl` (low-res 17×17 heightmap hele map).
+- **Rendering**: per-tile mesh met minimap-texture (fallback hoogte-kleuring); `WdlMesh` = heel continent low-res, -1.5y verlaagd onder hi-res tiles. Camera far=60000, OrbitControls maxDistance=30000.
+- **Index-swap**: bestandsnamen `<map>_<A>_<B>` met A = renderer tileY, B = renderer tileX. Consequent aangehouden in readAdtBuffer/readMinimapBlp/parseWdl.
+- **CSP**: `blob:` in script-src + `cdn.jsdelivr.net` in connect-src vereist voor drei `<Text>` (troika worker/fonts).
+- Open issues: WDL garbage-height "pilaren", spawn billboards/labels niet instanced, drei 10 ↔ fiber 8 mismatch. Zie `PROMPT_next_session.md`.
+
 ## Creature Editor — model table inputs
 - Integer columns (Idx, CreatureDisplayID, VerifiedBuild): type="text" inputMode="numeric" + custom ▲▼ buttons using onMouseDown+preventDefault — exactly one step per click, no auto-repeat
 - Decimal columns (DisplayScale, Probability): type="number" step="0.01" with onWheel → blur() to prevent scroll-changing values

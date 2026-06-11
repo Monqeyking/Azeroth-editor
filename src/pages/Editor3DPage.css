@@ -217,6 +217,23 @@
   overflow: hidden;
 }
 
+.ed3-world-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(12, 12, 22, 0.82);
+  pointer-events: none;
+}
+
+.ed3-world-overlay-text {
+  color: #9090c0;
+  font-size: 15px;
+  letter-spacing: 0.04em;
+}
+
 .ed3-viewport canvas:not(.ed3-minimap) {
   display: block;
   width: 100% !important;

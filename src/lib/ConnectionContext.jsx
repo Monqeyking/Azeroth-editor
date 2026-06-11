@@ -22,6 +22,9 @@ export function ConnectionProvider({ children }) {
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
   const [minimapPath, setMinimapPath] = useState('');
   const [worldmapMpqPath, setWorldmapMpqPath] = useState('');
+  const [mapsPath, setMapsPath] = useState('');
+  const [serverPaths, setServerPaths] = useState({ authExe: '', worldExe: '' });
+  const [expansionsFolder, setExpansionsFolder] = useState('D:\\CaioCore\\CaioServer\\data\\Expansions');
 
   const [idRanges, setIdRanges] = useState({
     creature: 4000000,
@@ -38,7 +41,10 @@ export function ConnectionProvider({ children }) {
         if (result.data.dbcPath) setDbcPath(result.data.dbcPath);
         if (result.data.minimapPath) setMinimapPath(result.data.minimapPath);
         if (result.data.worldmapMpqPath) setWorldmapMpqPath(result.data.worldmapMpqPath);
+        if (result.data.mapsPath) setMapsPath(result.data.mapsPath);
         if (result.data.idRanges) setIdRanges(prev => ({ ...prev, ...result.data.idRanges }));
+        if (result.data.serverPaths) setServerPaths(prev => ({ ...prev, ...result.data.serverPaths }));
+        if (result.data.expansionsFolder) setExpansionsFolder(result.data.expansionsFolder);
       }
     });
   }, []);
@@ -223,6 +229,7 @@ export function ConnectionProvider({ children }) {
       dbcPath, setDbcPath,
       minimapPath, setMinimapPath,
       worldmapMpqPath, setWorldmapMpqPath,
+      mapsPath, setMapsPath,
       dbStatus, dbError,
       soapStatus, setSoapStatus,
       connectDb, disconnectDb,
@@ -238,7 +245,9 @@ export function ConnectionProvider({ children }) {
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,
       findNextScalingStatDistributionId, readScalingStatValues,
-      idRanges, setIdRanges
+      idRanges, setIdRanges,
+      serverPaths, setServerPaths,
+      expansionsFolder, setExpansionsFolder,
     }}>
       {children}
     </ConnectionContext.Provider>

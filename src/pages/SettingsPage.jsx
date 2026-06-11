@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Save, Zap, Hash } from 'lucide-react';
+import { Save, Zap, Hash, Server, FolderOpen } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 
@@ -13,11 +13,13 @@ const ID_RANGE_EDITORS = [
 ];
 
 export default function SettingsPage() {
-  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, worldmapMpqPath, setWorldmapMpqPath, idRanges, setIdRanges } = useConnection();
+  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, worldmapMpqPath, setWorldmapMpqPath, mapsPath, setMapsPath, idRanges, setIdRanges, serverPaths, setServerPaths, expansionsFolder, setExpansionsFolder } = useConnection();
   const [form, setForm] = useState(soapConfig);
   const [dbcForm, setDbcForm] = useState(dbcPath);
   const [minimapForm, setMinimapForm] = useState(minimapPath);
   const [worldmapForm, setWorldmapForm] = useState(worldmapMpqPath);
+  const [mapsForm, setMapsForm] = useState(mapsPath);
+  const [mapsSaved, setMapsSaved] = useState(false);
   const [idRangesForm, setIdRangesForm] = useState(idRanges);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState(null);
@@ -28,6 +30,10 @@ export default function SettingsPage() {
   const [worldmapValidating, setWorldmapValidating] = useState(false);
   const [worldmapValidation, setWorldmapValidation] = useState(null);
   const [idRangesSaved, setIdRangesSaved] = useState(false);
+  const [serverPathsForm, setServerPathsForm] = useState(serverPaths);
+  const [serverPathsSaved, setServerPathsSaved] = useState(false);
+  const [expansionsFolderForm, setExpansionsFolderForm] = useState(expansionsFolder);
+  const [expansionsFolderSaved, setExpansionsFolderSaved] = useState(false);
 
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
@@ -49,8 +55,15 @@ export default function SettingsPage() {
   }, [worldmapMpqPath]);
 
   useEffect(() => {
+    setMapsForm(mapsPath);
+  }, [mapsPath]);
+
+  useEffect(() => {
     setIdRangesForm(idRanges);
   }, [idRanges]);
+
+  useEffect(() => { setServerPathsForm(serverPaths); }, [serverPaths]);
+  useEffect(() => { setExpansionsFolderForm(expansionsFolder); }, [expansionsFolder]);
 
   const persistConfig = async (patch) => {
     const result = await window.azeroth.config.load();
@@ -70,6 +83,13 @@ export default function SettingsPage() {
     await persistConfig({ worldmapMpqPath: worldmapForm });
     setWorldmapSaved(true);
     setTimeout(() => setWorldmapSaved(false), 2000);
+  };
+
+  const handleMapsSave = async () => {
+    setMapsPath(mapsForm);
+    await persistConfig({ mapsPath: mapsForm });
+    setMapsSaved(true);
+    setTimeout(() => setMapsSaved(false), 2000);
   };
 
   const handleWorldmapValidate = async () => {
@@ -96,6 +116,20 @@ export default function SettingsPage() {
     await persistConfig({ dbcPath: dbcForm });
     setDbcSaved(true);
     setTimeout(() => setDbcSaved(false), 2000);
+  };
+
+  const handleServerPathsSave = async () => {
+    setServerPaths(serverPathsForm);
+    await persistConfig({ serverPaths: serverPathsForm });
+    setServerPathsSaved(true);
+    setTimeout(() => setServerPathsSaved(false), 2000);
+  };
+
+  const handleExpansionsFolderSave = async () => {
+    setExpansionsFolder(expansionsFolderForm);
+    await persistConfig({ expansionsFolder: expansionsFolderForm });
+    setExpansionsFolderSaved(true);
+    setTimeout(() => setExpansionsFolderSaved(false), 2000);
   };
 
   const handleIdRangesSave = async () => {
@@ -187,6 +221,47 @@ export default function SettingsPage() {
                 <Save size={13} /> {saved ? 'Saved!' : 'Save Settings'}
               </button>
             </div>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <Server size={13} />
+            <span>Server Executables — Dashboard Control</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Paden naar de server executables. Hiermee kun je de auth- en worldserver starten/stoppen vanuit het dashboard.
+            </p>
+            {[
+              { key: 'authExe',  label: 'Authserver executable',  placeholder: 'D:\\CaioCore\\CaioServer\\authserver.exe' },
+              { key: 'worldExe', label: 'Worldserver executable', placeholder: 'D:\\CaioCore\\CaioServer\\worldserver.exe' },
+            ].map(({ key, label, placeholder }) => (
+              <div key={key} className="field-group" style={{ marginBottom: 10 }}>
+                <label>{label}</label>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <input
+                    style={{ flex: 1 }}
+                    value={serverPathsForm[key]}
+                    onChange={e => setServerPathsForm(f => ({ ...f, [key]: e.target.value }))}
+                    placeholder={placeholder}
+                  />
+                  <button
+                    className="btn-ghost"
+                    style={{ flexShrink: 0 }}
+                    onClick={async () => {
+                      const p = await window.azeroth.dialog.openFile({ title: `Select ${label}` });
+                      if (p) setServerPathsForm(f => ({ ...f, [key]: p }));
+                    }}
+                  >
+                    <FolderOpen size={13} />
+                  </button>
+                </div>
+              </div>
+            ))}
+            <button className="btn-primary" onClick={handleServerPathsSave}>
+              <Save size={13} /> {serverPathsSaved ? 'Opgeslagen!' : 'Save Server Paths'}
+            </button>
           </div>
         </div>
 
@@ -289,32 +364,69 @@ export default function SettingsPage() {
 
         <div className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
-            <Zap size={13} />
-            <span>DBC Files — Talent Tree Data</span>
+            <FolderOpen size={13} />
+            <span>Maps — 3D Editor Terrain (AzerothCore)</span>
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Path to DBC files directory (Talent.dbc, TalentTab.dbc, Spell.dbc).
-              <br/>Example: <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>D:\CaioCore\CaioServer\data\dbc</code>
+              Pad naar de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>maps/</code>-map van de AzerothCore server data.
+              Gebruikt voor naadloos terrain in de 3D editor.
+              <br/>Voorbeeld: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\CaioServer\data\maps</code>
             </p>
-
             <div className="field-group" style={{ marginBottom: 16 }}>
-              <label>DBC Path</label>
+              <label>Maps Path (AzerothCore data/maps)</label>
               <input
-                value={dbcForm}
-                onChange={handleDbcChange}
-                placeholder="D:\CaioCore\CaioServer\data\dbc"
+                type="text"
+                value={mapsForm}
+                onChange={e => setMapsForm(e.target.value)}
+                placeholder="D:\CaioCore\CaioServer\data\maps"
               />
             </div>
-
-            {dbcSaved && (
+            {mapsSaved && (
               <div className="editor-msg success" style={{ marginBottom: 12 }}>
-                DBC path saved!
+                Maps path opgeslagen!
               </div>
             )}
-
-            <button className="btn-primary" onClick={handleDbcSave}>
-              <Save size={13} /> {dbcSaved ? 'Saved!' : 'Save DBC Path'}
+            <button className="btn-primary" onClick={handleMapsSave}>
+              <Save size={13} /> {mapsSaved ? 'Opgeslagen!' : 'Save Maps Path'}
+            </button>
+          </div>
+        </div>
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <FolderOpen size={13} />
+            <span>Expansion Snapshots — DBC versie beheer</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Basismap met de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Classic/</code>,{' '}
+              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>TBC/</code> en{' '}
+              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Wotlk/</code> submappen.
+              Gebruikt door Expansion Lock om DBC-bestanden te wisselen.
+            </p>
+            <div className="field-group" style={{ marginBottom: 10 }}>
+              <label>Expansions Folder</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  style={{ flex: 1 }}
+                  value={expansionsFolderForm}
+                  onChange={e => setExpansionsFolderForm(e.target.value)}
+                  placeholder="D:\CaioCore\CaioServer\data\Expansions"
+                />
+                <button
+                  className="btn-ghost"
+                  style={{ flexShrink: 0 }}
+                  onClick={async () => {
+                    const p = await window.azeroth.dialog.openFolder({ title: 'Select Expansions folder' });
+                    if (p) setExpansionsFolderForm(p);
+                  }}
+                >
+                  <FolderOpen size={13} />
+                </button>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={handleExpansionsFolderSave}>
+              <Save size={13} /> {expansionsFolderSaved ? 'Opgeslagen!' : 'Save Expansions Folder'}
             </button>
           </div>
         </div>
