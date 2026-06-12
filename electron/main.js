@@ -9,7 +9,7 @@ try { nodePty = require('node-pty'); } catch (e) { console.warn('node-pty not av
 let BetterSqlite3 = null;
 try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('better-sqlite3 not available'); }
 
-const { parseDbc, serializeDbc } = require('./dbc-sql');
+const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
 const http = require('http');
 const AdmZip = require('adm-zip');
@@ -197,19 +197,29 @@ ipcMain.handle('dbcSql:listFiles', async (_, { folder }) => {
   }
 });
 
-ipcMain.handle('dbcSql:query', async (_, { filePath, sql, writeBack }) => {
+ipcMain.handle('dbcSql:query', async (_, { filePath, sql, writeBack, stringCols = [] }) => {
   if (!BetterSqlite3) return { success: false, error: 'better-sqlite3 not installed.\nRun: npm install better-sqlite3 --legacy-peer-deps && npm run rebuild' };
   try {
     const buffer = fs.readFileSync(filePath);
-    const { records, fieldCount, recordCount } = parseDbc(buffer);
+    const { records, fieldCount, recordCount, stringBlock } = parseDbc(buffer);
 
-    const db = new BetterSqlite3(':memory:');
-    const colDefs = Array.from({ length: fieldCount }, (_, i) => `field_${i} INTEGER`).join(', ');
+    const strSet  = new Set(stringCols);
+    const db      = new BetterSqlite3(':memory:');
+    const colDefs = Array.from({ length: fieldCount }, (_, i) =>
+      `field_${i} ${strSet.has(i) ? 'TEXT' : 'INTEGER'}`
+    ).join(', ');
     db.exec(`CREATE TABLE dbc (${colDefs})`);
 
     if (records.length) {
       const insert = db.prepare(`INSERT INTO dbc VALUES (${Array(fieldCount).fill('?').join(',')})`);
-      db.transaction(rs => { for (const r of rs) insert.run(...r); })(records);
+      db.transaction(rs => {
+        for (const r of rs) {
+          const row = strSet.size
+            ? r.map((v, i) => strSet.has(i) ? getString(stringBlock, v) : v)
+            : r;
+          insert.run(...row);
+        }
+      })(records);
     }
 
     const trimmed = sql.trim().toUpperCase();

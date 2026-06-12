@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Map, Lock, Database
+  Layers, ShoppingBag, Map, Lock, Database, Globe
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -58,6 +58,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/editor3d',        icon: Monitor, label: '3D Editor' },
       { to: '/map',             icon: Map,     label: 'Spawn Map' },
+      { to: '/worldmap',        icon: Globe,   label: 'World Map' },
       { to: '/expansion-lock',  icon: Lock,    label: 'Expansion Lock' },
     ],
   },

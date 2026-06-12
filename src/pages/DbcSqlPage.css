@@ -26,7 +26,6 @@
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
 }
-
 .dbc-file-list-header span { flex: 1; }
 
 .dbc-file-search {
@@ -37,7 +36,6 @@
   border-bottom: 1px solid var(--border);
   color: var(--text-muted);
 }
-
 .dbc-file-search input {
   background: none;
   border: none;
@@ -50,6 +48,7 @@
 .dbc-file-items {
   flex: 1;
   overflow-y: auto;
+  overflow-x: auto;
   padding: 4px 0;
 }
 
@@ -65,7 +64,8 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  width: 100%;
+  width: max-content;
+  min-width: 100%;
   padding: 5px 14px;
   background: none;
   border: none;
@@ -74,19 +74,14 @@
   color: var(--text-secondary);
   transition: background 0.1s;
 }
-
-.dbc-file-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.dbc-file-item:hover  { background: var(--bg-hover); color: var(--text-primary); }
 .dbc-file-item.active { background: var(--bg-active); color: var(--gold); }
-.dbc-file-item svg { flex-shrink: 0; }
+.dbc-file-item svg    { flex-shrink: 0; }
 
 .dbc-file-name {
   font-size: 12px;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-
 .dbc-file-meta {
   font-size: 10px;
   color: var(--text-muted);
@@ -107,18 +102,19 @@
   display: flex;
   flex-direction: column;
   border-bottom: 1px solid var(--border);
-  min-height: 160px;
-  max-height: 40%;
+  flex-shrink: 0;
+  min-height: 100px;
 }
 
 .dbc-editor-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 14px;
+  padding: 7px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 
 .dbc-file-breadcrumb {
@@ -135,9 +131,19 @@
   border-radius: 4px;
 }
 
+.dbc-schema-chip {
+  font-size: 10px;
+  color: var(--accent-green);
+  padding: 2px 6px;
+  background: rgba(74,204,74,0.08);
+  border: 1px solid rgba(74,204,74,0.2);
+  border-radius: 4px;
+}
+
 .dbc-editor-actions {
   margin-left: auto;
   display: flex;
+  align-items: center;
   gap: 6px;
 }
 
@@ -146,6 +152,65 @@
   font-size: 12px;
   gap: 5px;
 }
+
+.dbc-limit-select {
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 3px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  outline: none;
+}
+.dbc-limit-select:hover { border-color: var(--gold); color: var(--text-primary); }
+
+/* History dropdown */
+.dbc-history-wrap {
+  position: relative;
+}
+.dbc-history-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 200;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  width: 380px;
+  max-height: 280px;
+  overflow-y: auto;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.dbc-history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.dbc-history-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 7px 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-family: 'Consolas', monospace;
+  font-size: 11.5px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.03);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dbc-history-item:hover { background: var(--bg-hover); color: var(--text-primary); }
 
 .dbc-sql-editor {
   flex: 1;
@@ -160,8 +225,17 @@
   line-height: 1.6;
   tab-size: 2;
 }
-
 .dbc-sql-editor:disabled { opacity: 0.5; }
+
+/* ── Horizontal resizer ───────────────────────────────────────── */
+.dbc-h-resizer {
+  height: 4px;
+  background: var(--border);
+  cursor: row-resize;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.dbc-h-resizer:hover { background: var(--gold); }
 
 /* ── Results panel ─────────────────────────────────────────────── */
 .dbc-results-panel {
@@ -170,6 +244,7 @@
   flex-direction: column;
   overflow: hidden;
   background: var(--bg-void);
+  min-height: 60px;
 }
 
 .dbc-results-empty,
@@ -179,7 +254,6 @@
   color: var(--text-muted);
   font-style: italic;
 }
-
 .dbc-results-info { color: var(--accent-green); font-style: normal; }
 
 .dbc-results-error {
@@ -191,19 +265,37 @@
 }
 
 .dbc-results-bar {
-  padding: 6px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 14px;
   font-size: 11px;
   color: var(--text-muted);
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
 }
+.dbc-bar-schema { color: var(--accent-green); }
+.dbc-bar-float  { color: var(--gold); }
+
+.dbc-export-btn {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+}
+.dbc-export-btn:hover { border-color: var(--gold); color: var(--gold); }
 
 .dbc-results-scroll {
   flex: 1;
   overflow: auto;
 }
 
+/* ── Results table ─────────────────────────────────────────────── */
 .dbc-results-table {
   width: max-content;
   min-width: 100%;
@@ -216,39 +308,88 @@
   top: 0;
   background: var(--bg-panel);
   border-bottom: 1px solid var(--border);
-  padding: 6px 12px;
+  border-right: 1px solid rgba(255,255,255,0.04);
+  padding: 5px 12px;
   text-align: left;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--text-muted);
   white-space: nowrap;
   z-index: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.dbc-results-table th:hover { background: var(--bg-hover); }
+.dbc-results-table th.col-float { background: rgba(200,169,110,0.08); }
+
+.th-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  display: block;
+}
+.th-raw {
+  font-size: 10px;
+  color: var(--text-muted);
+  display: block;
+}
+.th-float-badge {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 9px;
+  padding: 1px 4px;
+  background: rgba(200,169,110,0.2);
+  color: var(--gold);
+  border-radius: 3px;
+  vertical-align: middle;
 }
 
 .dbc-results-table td {
-  padding: 4px 12px;
+  padding: 3px 12px;
   border-bottom: 1px solid rgba(255,255,255,0.03);
+  border-right: 1px solid rgba(255,255,255,0.02);
   color: var(--text-primary);
   white-space: nowrap;
   font-family: 'Consolas', monospace;
 }
-
 .dbc-results-table tr:hover td { background: var(--bg-hover); }
 
 .cell-null { color: var(--text-muted); font-style: italic; }
 
-/* Utility */
+/* ── Scrollbars ────────────────────────────────────────────────── */
+.dbc-file-items::-webkit-scrollbar,
+.dbc-results-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.dbc-file-items::-webkit-scrollbar-track,
+.dbc-results-scroll::-webkit-scrollbar-track {
+  background: var(--bg-dark);
+}
+.dbc-file-items::-webkit-scrollbar-thumb,
+.dbc-results-scroll::-webkit-scrollbar-thumb {
+  background: var(--bg-active);
+  border-radius: 4px;
+  border: 1px solid var(--border);
+}
+.dbc-file-items::-webkit-scrollbar-thumb:hover,
+.dbc-results-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--gold);
+}
+.dbc-file-items::-webkit-scrollbar-corner,
+.dbc-results-scroll::-webkit-scrollbar-corner {
+  background: var(--bg-dark);
+}
+
+/* ── Utilities ─────────────────────────────────────────────────── */
 .icon-btn {
   background: none;
   border: none;
   cursor: pointer;
   color: var(--text-muted);
-  padding: 2px;
+  padding: 3px;
   border-radius: 3px;
   display: flex;
   align-items: center;
 }
-.icon-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
+.icon-btn:hover   { color: var(--text-primary); background: var(--bg-hover); }
 .icon-btn:disabled { opacity: 0.4; cursor: default; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
