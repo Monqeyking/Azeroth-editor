@@ -20,6 +20,7 @@ import VendorEditorPage from './pages/VendorEditorPage';
 import SqlEditorPage from './pages/SqlEditorPage';
 import DbcSqlPage from './pages/DbcSqlPage';
 import ExpansionLockPage from './pages/ExpansionLockPage';
+import WorldMapPage from './pages/WorldMapPage';
 
 const router = createHashRouter([
   { path: '/connect', element: <ConnectPage /> },
@@ -45,6 +46,7 @@ const router = createHashRouter([
       { path: 'sql',                element: <SqlEditorPage /> },
       { path: 'dbc-sql',           element: <DbcSqlPage /> },
       { path: 'expansion-lock',    element: <ExpansionLockPage /> },
+      { path: 'worldmap',          element: <WorldMapPage /> },
       { path: 'settings',           element: <SettingsPage /> },
     ],
   },

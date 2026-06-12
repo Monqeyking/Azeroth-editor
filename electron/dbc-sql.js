@@ -14,16 +14,17 @@ function parseDbc(buffer) {
   const strBlockOffset = HEADER + recordCount * recordSize;
   const stringBlock = buffer.slice(strBlockOffset, strBlockOffset + strBlockSize);
 
+  const realFields = Math.floor(recordSize / 4);
   const records = [];
   for (let i = 0; i < recordCount; i++) {
     const fields = [];
-    for (let j = 0; j < fieldCount; j++) {
+    for (let j = 0; j < realFields; j++) {
       fields.push(buffer.readInt32LE(HEADER + i * recordSize + j * 4));
     }
     records.push(fields);
   }
 
-  return { recordCount, fieldCount, recordSize, strBlockSize, records, stringBlock };
+  return { recordCount, fieldCount: realFields, recordSize, strBlockSize, records, stringBlock };
 }
 
 function getString(stringBlock, offset) {
