@@ -839,6 +839,28 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
     const termLower = term ? term.toLowerCase() : '';
     const limit = options.limit || 50;
     const trainerFilter = options.trainerSpells === true;
+    const classFilter = options.classFilter !== undefined && options.classFilter !== null && options.classFilter !== ''
+      ? parseInt(options.classFilter) : null;
+    const schoolFilter = options.schoolFilter !== undefined && options.schoolFilter !== null && options.schoolFilter !== ''
+      ? parseInt(options.schoolFilter) : null;
+    const idMin = options.idMin !== undefined && options.idMin !== null && options.idMin !== ''
+      ? parseInt(options.idMin) : (options.customOnly === true ? 4000000 : null);
+    const idMax = options.idMax !== undefined && options.idMax !== null && options.idMax !== ''
+      ? parseInt(options.idMax) : null;
+    const duplicatesOnly = options.duplicatesOnly === true;
+
+    // Duplicate-name detector: pre-pass over the full table to count name occurrences.
+    let nameCounts = null;
+    if (duplicatesOnly) {
+      nameCounts = new Map();
+      for (let i = 0; i < dbc.recordCount; i++) {
+        const off = i * dbc.recordSize;
+        const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
+        const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
+        if (!name) continue;
+        nameCounts.set(name, (nameCounts.get(name) || 0) + 1);
+      }
+    }
 
     for (let i = 0; i < dbc.recordCount && results.length < limit; i++) {
       const off = i * dbc.recordSize;
@@ -846,10 +868,20 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
       const attrs = dbc.dataBuffer.readUInt32LE(off + 16);
       // Trainer spell filter: bit 16 (0x10000) set, bit 19 (0x80000) NOT set
       if (trainerFilter && (!(attrs & 0x10000) || (attrs & 0x80000))) continue;
+      // ID range filter (customOnly is a back-compat alias for idMin=4000000)
+      if (idMin !== null && id < idMin) continue;
+      if (idMax !== null && id > idMax) continue;
+      // Class filter (SpellClassSet, approximate — see PROMPT_next_session_spell_filter.md)
+      if (classFilter !== null && dbc.dataBuffer.readUInt32LE(off + 832) !== classFilter) continue;
+      // School filter (SchoolMask bit check)
+      const schoolMask = dbc.dataBuffer.readUInt32LE(off + 900);
+      if (schoolFilter !== null && !(schoolMask & schoolFilter)) continue;
       if (!term || (isNum && id === termNum) || !isNum) {
         const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
         const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
         if (!name) continue;
+        // Duplicate-name filter: only spells whose name occurs more than once
+        if (duplicatesOnly && (nameCounts.get(name) || 0) <= 1) continue;
         if (isNum ? id === termNum : (!term || name.toLowerCase().includes(termLower))) {
           const subtextRef = dbc.dataBuffer.readUInt32LE(off + 612);
           const subtext = readStringFromBlock(null, subtextRef, dbc.stringBlock);
@@ -859,8 +891,9 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
             NameSubtext_Lang_enUS: subtext,
             Attributes: attrs,
             SpellLevel: dbc.dataBuffer.readUInt32LE(off + 156),
-            SchoolMask: dbc.dataBuffer.readUInt32LE(off + 900),
+            SchoolMask: schoolMask,
             DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
+            SpellClassSet: dbc.dataBuffer.readUInt32LE(off + 832),
           });
         }
       }
@@ -1138,6 +1171,95 @@ ipcMain.handle('dbc:copySpell', async (_, dbcPath, sourceId, newId) => {
     buffer.copy(newBuffer, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + stringBlockSize);
 
     fs.writeFileSync(filePath, newBuffer);
+    spellDbcCache = null;
+    return { success: true, newId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+// Compare tab: copy one full spell record from an external Spell.dbc (different folder,
+// possibly colliding IDs e.g. Project Epoch) into the local Spell.dbc at a free ID.
+// Resolves the source's string fields by value (not by raw offset) since the two files
+// have independent string blocks.
+ipcMain.handle('dbc:copySpellCrossFile', async (_, sourceDbcPath, sourceId, destDbcPath, newId) => {
+  try {
+    const headerSize = 20;
+    const srcFilePath = path.join(sourceDbcPath, 'Spell.dbc');
+    const srcBuffer = fs.readFileSync(srcFilePath);
+    const srcRecordCount = srcBuffer.readUInt32LE(4);
+    const srcRecordSize = srcBuffer.readUInt32LE(12);
+    const srcStringBlockSize = srcBuffer.readUInt32LE(16);
+    const srcDataSize = srcRecordCount * srcRecordSize;
+    const srcStrBlockStart = headerSize + srcDataSize;
+    const srcStrBlock = srcBuffer.slice(srcStrBlockStart, srcStrBlockStart + srcStringBlockSize);
+
+    let srcIndex = -1;
+    for (let i = 0; i < srcRecordCount; i++) {
+      if (srcBuffer.readUInt32LE(headerSize + i * srcRecordSize) === sourceId) { srcIndex = i; break; }
+    }
+    if (srcIndex === -1) return { success: false, error: `Spell ${sourceId} niet gevonden in bronbestand` };
+
+    const srcRecordOff = headerSize + srcIndex * srcRecordSize;
+    const srcRecordBytes = srcBuffer.slice(srcRecordOff, srcRecordOff + srcRecordSize);
+
+    const stringValues = {};
+    for (const [key, f] of Object.entries(SPELL_OFFSETS)) {
+      if (f.type !== 'string') continue;
+      const ref = srcRecordBytes.readUInt32LE(f.offset);
+      stringValues[key] = readStringFromBlock(null, ref, srcStrBlock);
+    }
+
+    const destFilePath = path.join(destDbcPath, 'Spell.dbc');
+    const destBuffer = fs.readFileSync(destFilePath);
+    const destRecordCount = destBuffer.readUInt32LE(4);
+    const destRecordSize = destBuffer.readUInt32LE(12);
+    const destStringBlockSize = destBuffer.readUInt32LE(16);
+
+    if (destRecordSize !== srcRecordSize) {
+      return { success: false, error: `Spell.dbc formaten komen niet overeen (recordSize ${srcRecordSize} vs ${destRecordSize})` };
+    }
+
+    const destDataSize = destRecordCount * destRecordSize;
+    for (let i = 0; i < destRecordCount; i++) {
+      if (destBuffer.readUInt32LE(headerSize + i * destRecordSize) === newId) {
+        return { success: false, error: `ID ${newId} bestaat al` };
+      }
+    }
+
+    const newRecord = Buffer.from(srcRecordBytes);
+    newRecord.writeUInt32LE(newId, 0);
+
+    let extraOffset = destStringBlockSize;
+    const extraParts = [];
+    for (const [key, f] of Object.entries(SPELL_OFFSETS)) {
+      if (f.type !== 'string') continue;
+      const str = stringValues[key] || '';
+      if (str === '') {
+        newRecord.writeUInt32LE(0, f.offset);
+        continue;
+      }
+      newRecord.writeUInt32LE(extraOffset, f.offset);
+      const strBuf = Buffer.from(str + '\0', 'utf8');
+      extraParts.push(strBuf);
+      extraOffset += strBuf.length;
+    }
+
+    const destStrBlockStart = headerSize + destDataSize;
+    const destStrBlock = destBuffer.slice(destStrBlockStart, destStrBlockStart + destStringBlockSize);
+
+    const newBuffer = Buffer.concat([
+      destBuffer.slice(0, headerSize),
+      destBuffer.slice(headerSize, destStrBlockStart),
+      newRecord,
+      destStrBlock,
+      ...extraParts,
+    ]);
+
+    newBuffer.writeUInt32LE(destRecordCount + 1, 4);
+    newBuffer.writeUInt32LE(extraOffset, 16);
+
+    fs.writeFileSync(destFilePath, newBuffer);
     spellDbcCache = null;
     return { success: true, newId };
   } catch (e) {
@@ -2460,7 +2582,7 @@ ipcMain.handle('adt:diagBLP', async (_, { blpPath }) => {
   };
 });
 
-ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath) => {
+ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath, preferOldest = false) => {
   try {
     const COLS = 4, ROWS = 3;
     const tileW = 256, tileH = 256;
@@ -2476,7 +2598,7 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
         let blpBuf = null;
 
         if (useMpq) {
-          blpBuf = await getMpqReader().readTileBuffer(dataPath, folderName, idx);
+          blpBuf = await getMpqReader().readTileBuffer(dataPath, folderName, idx, preferOldest);
         } else {
           const dir = resolveWorldmapDir(dataPath);
           if (dir) {

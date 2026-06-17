@@ -184,14 +184,21 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
 }
 
 // ── Tile-buffer lezen (BLP) ────────────────────────────────────────────────────
-async function readTileBuffer(dataPath, zoneName, tileIndex) {
-  const key = `${dataPath}|${zoneName}|${tileIndex}`;
+// preferOldest: doorzoek archieven van oud naar nieuw (base-MPQ's vóór patches),
+// zodat de ORIGINELE (pre-WotLK) versie van een bestand gevonden wordt als die nog
+// onaangetast in een vroeg archief zit — bijv. de vanilla World-overview tiles
+// zonder Northrend, die in lichking.mpq/patch-3.mpq zijn overschreven.
+async function readTileBuffer(dataPath, zoneName, tileIndex, preferOldest = false) {
+  const key = `${dataPath}|${zoneName}|${tileIndex}|${preferOldest ? 'old' : 'new'}`;
   if (tileCache.has(key)) return tileCache.get(key);
 
   ensureMounted(dataPath);
   const internalPath = `Interface\\WorldMap\\${zoneName}\\${zoneName}${tileIndex}.blp`;
 
-  for (const mpqPath of findMpqFiles(dataPath)) {
+  const mpqFiles = findMpqFiles(dataPath);
+  const order = preferOldest ? [...mpqFiles].reverse() : mpqFiles;
+
+  for (const mpqPath of order) {
     const buf = await readFileFromMpqEntry(dataPath, mpqPath, internalPath);
     if (buf) { tileCache.set(key, buf); return buf; }
   }
