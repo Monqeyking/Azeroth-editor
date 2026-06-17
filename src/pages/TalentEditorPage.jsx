@@ -6,6 +6,7 @@ import './EditorPage.css';
 import './TalentEditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
+import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
 
 const CLASSES = [
 	{ id: 1, name: 'Warrior', color: '#C79C6E' },
@@ -22,7 +23,7 @@ const CLASSES = [
 
 const CELL = 60;
 const GAP = 19;
-const MAX_TIERS = 10;
+const MAX_TIERS = 11;
 const MAX_COLS = 4;
 
 // ─── Prereq validatie ──────────────────────────────────────────────────────
@@ -46,7 +47,7 @@ function canMoveTalent(talent, newTier, allTalents) {
 
 export default function TalentEditorPage() {
 	const {
-		readTalentTabs, readTalents, readSpells, readSpellIcons,
+		readTalentTabs, readTalents, readSpells, readSpellIcons, readSpellFull,
 		saveTalent, getIcon, deleteTalent, insertTalent,
 		findNextTalentId, copyTalentDbc, idRanges,
 	} = useConnection();
@@ -76,6 +77,8 @@ export default function TalentEditorPage() {
 	const [dragTalentId, setDragTalentId] = useState(null);
 	const [dragOver, setDragOver] = useState(null);
 	const [backgroundImage, setBackgroundImage] = useState(null);
+	const [rankTooltips, setRankTooltips] = useState({});
+	const [tooltipsLoading, setTooltipsLoading] = useState(false);
 
 	// ─── laden ───────────────────────────────────────────────────────────────
 	const loadTabs = useCallback(async (cls) => {
@@ -284,24 +287,31 @@ export default function TalentEditorPage() {
 			if ((e.ctrlKey || e.metaKey) && e.key === 's') {
 				e.preventDefault();
 				if (dirty && selected) handleSave();
+				return;
+			}
+			if (e.key === 'Delete' && !isNew && selected && !confirmDelete) {
+				const tag = e.target?.tagName;
+				if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+				e.preventDefault();
+				setConfirmDelete(true);
 			}
 		};
 		window.addEventListener('keydown', down);
 		return () => window.removeEventListener('keydown', down);
-	}, [dirty, selected, handleSave]);
+	}, [dirty, selected, isNew, confirmDelete, handleSave]);
 
 	// ─── verwijderen ──────────────────────────────────────────────────────────
 	const handleDelete = async () => {
 		if (!selected || isNew) return;
 		setDeleting(true);
 		setMsg(null);
+		setConfirmDelete(false);
 		try {
 			const result = await deleteTalent(selected.ID);
 			if (result.success) {
 				setMsg({ type: 'success', text: `✓ Talent #${selected.ID} verwijderd uit DBC.` });
 				setSelected(null);
 				setIsNew(false);
-				setConfirmDelete(false);
 				if (activeTab) await loadTalents(activeTab.ID);
 			} else {
 				setMsg({ type: 'error', text: result.error });
@@ -437,6 +447,35 @@ export default function TalentEditorPage() {
 		});
 	}, [primarySpellId]); // eslint-disable-line
 
+	// ─── tooltips per rank (Description_Lang_enUS uit Spell.dbc) ──────────────
+	useEffect(() => {
+		if (!selected) { setRankTooltips({}); return; }
+		const rankIds = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+			.map(i => form[`SpellRank_${i}`])
+			.filter(id => id > 0);
+		if (!rankIds.length) { setRankTooltips({}); return; }
+
+		let cancelled = false;
+		setTooltipsLoading(true);
+		(async () => {
+			const entries = {};
+			for (const id of [...new Set(rankIds)]) {
+				const result = await readSpellFull(id);
+				if (cancelled) return;
+				if (result.success) {
+					entries[id] = {
+						name: result.data.Name_Lang_enUS,
+						subtext: result.data.NameSubtext_Lang_enUS,
+						description: result.data.Description_Lang_enUS,
+						auraDescription: result.data.AuraDescription_Lang_enUS,
+					};
+				}
+			}
+			if (!cancelled) { setRankTooltips(entries); setTooltipsLoading(false); }
+		})();
+		return () => { cancelled = true; };
+	}, [selected?.ID, form.SpellRank_1, form.SpellRank_2, form.SpellRank_3, form.SpellRank_4, form.SpellRank_5, form.SpellRank_6, form.SpellRank_7, form.SpellRank_8, form.SpellRank_9, readSpellFull]);
+
 	// ─── grid hulpdata ───────────────────────────────────────────────────────
 	const talentAt = (row, col) => talents.find(t => (t.TierID || 0) === row && (t.ColumnIndex || 0) === col);
 	const treeW = MAX_COLS * (CELL + GAP) - GAP;
@@ -446,6 +485,14 @@ export default function TalentEditorPage() {
 	return (
 		<>
 			{unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
+			{confirmDelete && selected && (
+				<DeleteConfirmModal
+					title="Talent verwijderen"
+					message={`Talent #${selected.ID} verwijderen uit Talent.dbc? Dit kan niet ongedaan worden gemaakt.`}
+					onConfirm={handleDelete}
+					onCancel={() => setConfirmDelete(false)}
+				/>
+			)}
 			<div className="talent-layout fade-in">
 			{/* ── Class sidebar ── */}
 			<div className="talent-class-list">
@@ -650,19 +697,9 @@ export default function TalentEditorPage() {
 							{/* Delete — uiterst rechts */}
 							{!isNew && (
 								<div className="talent-delete-inline">
-									{!confirmDelete ? (
-										<button className="btn-ghost" onClick={() => setConfirmDelete(true)} title="Delete this talent">
-											<Trash2 size={13} /> Delete
-										</button>
-									) : (
-										<>
-											<span className="delete-confirm-label">Sure?</span>
-											<button className="btn-ghost btn-ghost-confirm" onClick={handleDelete} disabled={deleting}>
-												{deleting ? '...' : 'Yes'}
-											</button>
-											<button className="btn-ghost" onClick={() => setConfirmDelete(false)}>No</button>
-										</>
-									)}
+									<button className="btn-ghost" onClick={() => setConfirmDelete(true)} title="Delete this talent (Delete-toets)">
+										<Trash2 size={13} /> Delete
+									</button>
 								</div>
 							)}
 						</div>
@@ -738,6 +775,40 @@ export default function TalentEditorPage() {
 									</div>
 								);
 							})}
+
+							{/* Tooltips per rank */}
+							{Object.keys(rankTooltips).length > 0 && (
+								<>
+									<div className="talent-edit-section">Tooltip{tooltipsLoading ? ' (laden…)' : ''}</div>
+									{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => {
+										const spellId = form[`SpellRank_${i}`];
+										const tt = spellId > 0 ? rankTooltips[spellId] : null;
+										if (!tt) return null;
+										return (
+											<div key={`tt-${i}`} className="field-group" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+												<label>
+													Rank {i} — {tt.name}{tt.subtext ? ` (${tt.subtext})` : ''}
+												</label>
+												<div style={{
+													fontSize: '12px',
+													lineHeight: 1.4,
+													color: 'var(--text-secondary, #ccc)',
+													background: 'var(--bg-inset, rgba(0,0,0,0.2))',
+													border: '1px solid var(--border)',
+													borderRadius: 4,
+													padding: '6px 8px',
+													whiteSpace: 'pre-wrap',
+												}}>
+													{tt.description || <em>Geen description tekst</em>}
+													{tt.auraDescription && (
+														<div style={{ marginTop: 4, opacity: 0.8 }}>{tt.auraDescription}</div>
+													)}
+												</div>
+											</div>
+										);
+									})}
+								</>
+							)}
 						</div>
 					</>
 				)}

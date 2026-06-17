@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Wand2, X } from 'lucide-react';
 import './DashboardPage.css';
@@ -440,7 +440,7 @@ const SPELL_FIELDS = [
 ];
 
 export default function SpellEditorPage() {
-  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges } = useConnection();
+  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges, dbcPath } = useConnection();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -459,16 +459,120 @@ export default function SpellEditorPage() {
   const [castTimes, setCastTimes] = useState({});
   const [durations, setDurations] = useState({});
   const [ranges, setRanges] = useState({});
+  const [trainerOnly, setTrainerOnly] = useState(false);
+  const [classFilter, setClassFilter] = useState('');
+  const [schoolFilter, setSchoolFilter] = useState('');
+  const [idMin, setIdMin] = useState('');
+  const [idMax, setIdMax] = useState('');
+  const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+  const [activeView, setActiveView] = useState('spells'); // 'spells' | 'compare'
+  const [compareDbcPath, setCompareDbcPath] = useState(null);
+  const [compareResults, setCompareResults] = useState([]);
+  const [compareLoading, setCompareLoading] = useState(false);
+  const [copyingCompareId, setCopyingCompareId] = useState(null);
+  const [compareSelected, setCompareSelected] = useState(null);
+  const [hideCompareMatches, setHideCompareMatches] = useState(false);
   const searchRef = useRef(null);
+
+  // Fingerprint: name + subtext (rank) + level/school/class/attributes — so a same-named
+  // spell that Epoch tuned differently (different level/school/attrs) is NOT treated as a
+  // duplicate and stays visible, while a truly identical spell gets hidden.
+  const spellSignature = (s) => [
+    (s.Name_Lang_enUS || '').trim().toLowerCase(),
+    (s.NameSubtext_Lang_enUS || '').trim().toLowerCase(),
+    s.SpellLevel, s.SchoolMask, s.SpellClassSet, s.Attributes,
+  ].join('|');
+
+  const localSigSet = useMemo(
+    () => new Set(spells.map(spellSignature)),
+    [spells]
+  );
+  const compareSigSet = useMemo(
+    () => new Set(compareResults.map(spellSignature)),
+    [compareResults]
+  );
+  const visibleSpells = useMemo(() => {
+    if (!hideCompareMatches || activeView !== 'compare') return spells;
+    return spells.filter(s => !compareSigSet.has(spellSignature(s)));
+  }, [spells, hideCompareMatches, activeView, compareSigSet]);
+  const visibleCompareResults = useMemo(() => {
+    if (!hideCompareMatches) return compareResults;
+    return compareResults.filter(s => !localSigSet.has(spellSignature(s)));
+  }, [compareResults, hideCompareMatches, localSigSet]);
 
   const searchSpells = useCallback(async (term) => {
     setLoading(true);
-    const result = await searchSpellsDbc(term);
+    const options = { limit: 200 };
+    if (trainerOnly) options.trainerSpells = true;
+    if (classFilter !== '') options.classFilter = classFilter;
+    if (schoolFilter !== '') options.schoolFilter = schoolFilter;
+    if (idMin !== '') options.idMin = idMin;
+    if (idMax !== '') options.idMax = idMax;
+    if (duplicatesOnly) options.duplicatesOnly = true;
+    const result = await searchSpellsDbc(term, options);
     setSpells(result.data || []);
     setLoading(false);
-  }, [searchSpellsDbc]);
 
-  useEffect(() => { searchSpells(''); }, []);
+    if (compareDbcPath) {
+      setCompareLoading(true);
+      const cmpResult = await window.azeroth.dbc.searchSpells(compareDbcPath, term, options);
+      setCompareResults(cmpResult.data || []);
+      setCompareLoading(false);
+    } else {
+      setCompareResults([]);
+    }
+  }, [searchSpellsDbc, trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, compareDbcPath]);
+
+  useEffect(() => { searchSpells(search); }, [trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, compareDbcPath]);
+
+  const handlePickCompareFile = async () => {
+    const filePath = await window.azeroth.dialog.openFile({
+      title: 'Select external Spell.dbc',
+      filters: [{ name: 'DBC files', extensions: ['dbc'] }],
+    });
+    if (!filePath) return;
+    const folder = filePath.replace(/[\\/][^\\/]*$/, '');
+    setCompareDbcPath(folder);
+    setActiveView('compare');
+  };
+
+  const handleClearCompareFile = () => {
+    setCompareDbcPath(null);
+    setCompareResults([]);
+    setActiveView('spells');
+  };
+
+  const handleCopyFromCompare = async (row) => {
+    if (!compareDbcPath) return;
+    const label = row.Name_Lang_enUS || '(unnamed)';
+    if (!window.confirm(`Copy "${label}" (#${row.ID}) from the compare file into the local Spell.dbc at a new custom ID?`)) return;
+    setCopyingCompareId(row.ID);
+    setMsg(null);
+    try {
+      const idResult = await findNextSpellId(idRanges.spell);
+      if (!idResult.success) throw new Error(idResult.error);
+      const newId = idResult.nextId;
+      const result = await window.azeroth.dbc.copySpellCrossFile(compareDbcPath, row.ID, dbcPath, newId);
+      if (!result.success) throw new Error(result.error);
+      await searchSpells(search);
+      setCompareSelected(null);
+      await selectSpell(newId);
+      setMsg({ type: 'success', text: `✓ "${label}" copied to local ID #${newId}` });
+    } catch (e) {
+      setMsg({ type: 'error', text: `✗ Copy failed: ${e.message}` });
+    }
+    setCopyingCompareId(null);
+  };
+
+  const selectCompareSpell = async (id) => {
+    if (!compareDbcPath) return;
+    const result = await window.azeroth.dbc.readSpellFull(compareDbcPath, id);
+    if (result.success) {
+      setSelected(null);
+      setCompareSelected(result.data);
+      setMsg(null);
+    }
+  };
 
   useEffect(() => {
     readCastTimes().then(r => { if (r.success) setCastTimes(r.data); });
@@ -481,6 +585,7 @@ export default function SpellEditorPage() {
   const selectSpell = async (ID) => {
     const result = await readSpellFull(ID);
     if (result.data) {
+      setCompareSelected(null);
       setSelected(result.data);
       setForm(result.data);
       setDirty(false);
@@ -695,6 +800,27 @@ export default function SpellEditorPage() {
     return '';
   };
 
+  const formatReadOnlyField = (f, value) => {
+    if (f.type === 'bitmask') {
+      const names = Object.entries(f.options).filter(([bit]) => ((Number(value) || 0) & Number(bit)) !== 0).map(([, name]) => name);
+      return names.length ? names.join(', ') : '—';
+    }
+    if (f.type === 'flags') {
+      const names = Object.entries(f.options).filter(([bit]) => ((Number(value) || 0) & (1 << Number(bit))) !== 0).map(([, name]) => name);
+      return names.length ? `${value ?? 0} (${names.join(', ')})` : (value ?? 0);
+    }
+    if (f.type === 'select') {
+      const opt = f.options.find(o => o.split(':')[0] === String(value));
+      return opt ? opt.split(':').slice(1).join(':') : (value ?? '—');
+    }
+    if (f.type === 'enum') {
+      return f.options[value] ?? (value ?? '—');
+    }
+    const hint = getIndexHint(f.key, value);
+    if (hint) return `${value ?? '—'} (${hint})`;
+    return (value === '' || value === null || value === undefined) ? '—' : value;
+  };
+
   const getFieldSections = () => [
     { title: 'Basis Info', keys: ['ID', 'Name_Lang_enUS', 'NameSubtext_Lang_enUS', 'Description_Lang_enUS', 'AuraDescription_Lang_enUS'] },
     { title: 'School & Type', keys: ['SchoolMask', 'DefenseType', 'Category', 'Mechanic'] },
@@ -717,8 +843,34 @@ export default function SpellEditorPage() {
         <p className="editor-page-subtitle">Manage spell data and properties</p>
       </div>
       <div className="editor-layout">
-        <div className="editor-list">
+        <div className="editor-list" style={activeView === 'compare' ? { flex: '2 1 0', minWidth: '520px' } : undefined}>
           <div className="editor-list-header">
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', fontWeight: activeView === 'spells' ? 600 : 400, borderBottom: activeView === 'spells' ? '2px solid var(--accent)' : '2px solid transparent' }}
+                onClick={() => setActiveView('spells')}
+              >
+                Spells
+              </button>
+              <button
+                type="button"
+                className="btn-ghost"
+                style={{ fontSize: '11px', padding: '3px 8px', fontWeight: activeView === 'compare' ? 600 : 400, borderBottom: activeView === 'compare' ? '2px solid var(--accent)' : '2px solid transparent' }}
+                onClick={() => { if (!compareDbcPath) handlePickCompareFile(); else setActiveView('compare'); }}
+              >
+                Compare
+              </button>
+              {compareDbcPath && (
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px', marginLeft: '4px' }}>
+                  ({compareDbcPath.split(/[\\/]/).pop()})
+                  <button type="button" className="btn-ghost" style={{ fontSize: '10px', padding: '1px 5px' }} title="Change/clear compare file" onClick={handleClearCompareFile}>
+                    <X size={10} />
+                  </button>
+                </span>
+              )}
+            </div>
             <div className="search-box">
               <Search size={13} />
               <input
@@ -728,30 +880,215 @@ export default function SpellEditorPage() {
                 onChange={e => { setSearch(e.target.value); searchSpells(e.target.value); }}
               />
             </div>
-          </div>
-          <div className="list-items">
-            {loading && <div className="loading-text">Searching...</div>}
-            {!loading && spells.map(s => (
-              <div
-                key={s.ID}
-                className={`list-item ${selected?.ID === s.ID ? 'active' : ''}`}
-                onClick={() => selectSpell(s.ID)}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginTop: '6px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={trainerOnly} onChange={e => setTrainerOnly(e.target.checked)} />
+                Trainer-visible
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                <input type="checkbox" checked={duplicatesOnly} onChange={e => setDuplicatesOnly(e.target.checked)} />
+                Duplicate names only
+              </label>
+              <select
+                value={classFilter}
+                onChange={e => setClassFilter(e.target.value)}
+                style={{ fontSize: '11px' }}
+                title="Class (Spell Family) — approximate, see SpellClassSet"
               >
-                <div className="list-item-main">
-                  <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
-                  <ChevronRight size={12} className="list-item-arrow" />
+                <option value="">All classes</option>
+                {Object.entries(SPELL_CLASS_SET).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+              <select
+                value={schoolFilter}
+                onChange={e => setSchoolFilter(e.target.value)}
+                style={{ fontSize: '11px' }}
+                title="School (SchoolMask)"
+              >
+                <option value="">All schools</option>
+                {Object.entries(SCHOOL_MASK_BITS).map(([v, l]) => (
+                  <option key={v} value={v}>{l}</option>
+                ))}
+              </select>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px' }}>
+                <span style={{ color: 'var(--text-muted)' }}>ID</span>
+                <input
+                  type="number"
+                  placeholder="min"
+                  value={idMin}
+                  onChange={e => setIdMin(e.target.value)}
+                  style={{ width: '70px', fontSize: '11px' }}
+                />
+                <span style={{ color: 'var(--text-muted)' }}>–</span>
+                <input
+                  type="number"
+                  placeholder="max"
+                  value={idMax}
+                  onChange={e => setIdMax(e.target.value)}
+                  style={{ width: '70px', fontSize: '11px' }}
+                />
+                <button
+                  type="button"
+                  className="btn-ghost"
+                  style={{ fontSize: '11px', padding: '2px 6px' }}
+                  title="Preset: ID ≥ 4,000,000"
+                  onClick={() => { setIdMin('4000000'); setIdMax(''); }}
+                >
+                  Custom range
+                </button>
+                {(idMin !== '' || idMax !== '') && (
+                  <button
+                    type="button"
+                    className="btn-ghost"
+                    style={{ fontSize: '11px', padding: '2px 6px' }}
+                    onClick={() => { setIdMin(''); setIdMax(''); }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+          {activeView === 'spells' ? (
+            <div className="list-items">
+              {loading && <div className="loading-text">Searching...</div>}
+              {!loading && spells.map(s => (
+                <div
+                  key={s.ID}
+                  className={`list-item ${selected?.ID === s.ID ? 'active' : ''}`}
+                  onClick={() => selectSpell(s.ID)}
+                >
+                  <div className="list-item-main">
+                    <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
+                    <ChevronRight size={12} className="list-item-arrow" />
+                  </div>
+                  <div className="list-item-meta">
+                    <span className="mono">#{s.ID}</span>
+                  </div>
                 </div>
-                <div className="list-item-meta">
-                  <span className="mono">#{s.ID}</span>
+              ))}
+              {!loading && spells.length === 0 && <div className="loading-text">No results</div>}
+            </div>
+          ) : (
+            <div style={{ display: 'flex', gap: '8px', flex: 1, minHeight: 0 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border)' }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                  <span>Local</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Verberg spells die ook in het compare-bestand voorkomen (op naam)">
+                    <input
+                      type="checkbox"
+                      checked={hideCompareMatches}
+                      onChange={e => setHideCompareMatches(e.target.checked)}
+                    />
+                    Hide duplicates
+                  </label>
+                </div>
+                <div className="list-items">
+                  {loading && <div className="loading-text">Searching...</div>}
+                  {!loading && visibleSpells.map(s => (
+                    <div
+                      key={s.ID}
+                      className={`list-item ${selected?.ID === s.ID ? 'active' : ''}`}
+                      onClick={() => selectSpell(s.ID)}
+                    >
+                      <div className="list-item-main">
+                        <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
+                        <ChevronRight size={12} className="list-item-arrow" />
+                      </div>
+                      <div className="list-item-meta">
+                        <span className="mono">#{s.ID}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {!loading && visibleSpells.length === 0 && <div className="loading-text">No results</div>}
                 </div>
               </div>
-            ))}
-            {!loading && spells.length === 0 && <div className="loading-text">No results</div>}
-          </div>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
+                  <span>Compare file ({compareDbcPath?.split(/[\\/]/).pop()})</span>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Verberg spells die ook in je lokale Spell.dbc voorkomen (op naam)">
+                    <input
+                      type="checkbox"
+                      checked={hideCompareMatches}
+                      onChange={e => setHideCompareMatches(e.target.checked)}
+                    />
+                    Hide duplicates
+                  </label>
+                </div>
+                <div className="list-items">
+                  {compareLoading && <div className="loading-text">Searching...</div>}
+                  {!compareLoading && visibleCompareResults.map(s => (
+                    <div
+                      key={s.ID}
+                      className={`list-item ${compareSelected?.ID === s.ID ? 'active' : ''}`}
+                      onClick={() => selectCompareSpell(s.ID)}
+                    >
+                      <div className="list-item-main">
+                        <span className="list-item-name">{s.Name_Lang_enUS || '(unnamed)'}</span>
+                        <button
+                          type="button"
+                          className="btn-ghost"
+                          title="Copy to local Spell.dbc"
+                          disabled={copyingCompareId === s.ID}
+                          onClick={(e) => { e.stopPropagation(); handleCopyFromCompare(s); }}
+                          style={{ fontSize: '10px', padding: '2px 5px', display: 'flex', alignItems: 'center', gap: '3px' }}
+                        >
+                          <Copy size={10} /> {copyingCompareId === s.ID ? '...' : 'Copy'}
+                        </button>
+                      </div>
+                      <div className="list-item-meta">
+                        <span className="mono">#{s.ID}</span>
+                      </div>
+                    </div>
+                  ))}
+                  {!compareLoading && visibleCompareResults.length === 0 && <div className="loading-text">No results</div>}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="editor-form">
-          {!selected ? (
+          {compareSelected ? (
+            <>
+              <div className="page-header">
+                <div>
+                  <h1 className="page-title">{compareSelected.Name_Lang_enUS || '(unnamed)'}</h1>
+                  <p className="page-sub">Entry #{compareSelected.ID} · {compareDbcPath?.split(/[\\/]/).pop()} (read-only)</p>
+                </div>
+                <div className="header-actions">
+                  <button
+                    className="btn-primary"
+                    onClick={() => handleCopyFromCompare(compareSelected)}
+                    disabled={copyingCompareId === compareSelected.ID}
+                  >
+                    <Copy size={13}/> {copyingCompareId === compareSelected.ID ? 'Copying...' : 'Copy to local'}
+                  </button>
+                </div>
+              </div>
+              {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
+              <div className="form-fields">
+                {getFieldSections().map((section, idx) => (
+                  <div key={idx}>
+                    <h4 className="field-section-title">{section.title}</h4>
+                    {section.keys.map(key => {
+                      const f = SPELL_FIELDS.find(fld => fld.key === key);
+                      if (!f) return null;
+                      return (
+                        <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
+                          <label>{f.label}</label>
+                          <div className="mono" style={{ fontSize: '13px', padding: '6px 0', whiteSpace: 'pre-wrap' }}>
+                            {formatReadOnlyField(f, compareSelected[f.key])}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : !selected ? (
             <div className="editor-empty">
               <MousePointerClick />
               <p>Select a spell to edit</p>

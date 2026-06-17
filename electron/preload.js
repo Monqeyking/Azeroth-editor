@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeSpellFull: (dbcPath, spell) => ipcRenderer.invoke('dbc:writeSpellFull', dbcPath, spell),
     findNextSpellId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextSpellId', dbcPath, startId),
     copySpell: (dbcPath, sourceId, newId) => ipcRenderer.invoke('dbc:copySpell', dbcPath, sourceId, newId),
+    copySpellCrossFile: (sourceDbcPath, sourceId, destDbcPath, newId) => ipcRenderer.invoke('dbc:copySpellCrossFile', sourceDbcPath, sourceId, destDbcPath, newId),
     writeTalent: (dbcPath, talent) => ipcRenderer.invoke('dbc:writeTalent', dbcPath, talent),
     deleteTalent: (dbcPath, talentId) => ipcRenderer.invoke('dbc:deleteTalent', dbcPath, talentId),
     insertTalent: (dbcPath, talent) => ipcRenderer.invoke('dbc:insertTalent', dbcPath, talent),
@@ -63,7 +64,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // World map BLP tiles
   worldmap: {
-    getZoneImage: (folderName, baseName, dataPath) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName, dataPath),
+    getZoneImage: (folderName, baseName, dataPath, preferOldest = false) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName, dataPath, preferOldest),
     readWorldMapAreas: (dbcPath) => ipcRenderer.invoke('worldmap:readWorldMapAreas', dbcPath),
     listZones: (dataPath) => ipcRenderer.invoke('worldmap:listZones', dataPath),
     validatePath: (dataPath) => ipcRenderer.invoke('worldmap:validatePath', dataPath),
