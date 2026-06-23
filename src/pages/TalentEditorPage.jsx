@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Save, RotateCcw, GitBranch, X, Search, Copy, Trash2, Plus } from 'lucide-react';
+import { Save, RotateCcw, GitBranch, GitCompare, X, Search, Copy, Trash2, Plus } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
@@ -45,9 +45,134 @@ function canMoveTalent(talent, newTier, allTalents) {
 	return { ok: true };
 }
 
+// ─── Herbruikbare talent-grid (lokaal én compare, read-only voor compare) ──
+function TalentTreeGrid({
+	idPrefix = 'main', talents, spellNames, spellIcons, backgroundImage, treeW, treeH,
+	readOnly = false, selected, isNew,
+	dragTalentId, dragOver,
+	onSelectTalent, onSelectEmpty, onDragStart, onDragOver, onDragLeave, onDrop,
+}) {
+	const talentAt = (row, col) => talents.find(t => (t.TierID || 0) === row && (t.ColumnIndex || 0) === col);
+
+	return (
+		<div className="talent-tree" style={{ width: treeW, height: treeH, backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none', backgroundSize: 'initial', backgroundRepeat: 'repeat' }}>
+			<svg width={treeW} height={treeH} className="talent-arrows" style={{ overflow: 'visible' }}>
+				<defs>
+					<marker id={`arrowhead-${idPrefix}`} markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
+						<path d="M0,0 L8,4 L0,8 Z" fill="#ff4444" />
+					</marker>
+				</defs>
+				{talents.map(t => {
+					const pid = t.PrereqTalent_1;
+					if (!pid) return null;
+					const pre = talents.find(x => x.ID === pid);
+					if (!pre) return null;
+
+					const x1 = (pre.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+					const y1 = (pre.TierID || 0) * (CELL + GAP) + CELL / 2;
+					const x2 = (t.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
+					const y2 = (t.TierID || 0) * (CELL + GAP) + CELL / 2;
+
+					const endX = x2;
+					const endY = y2 - CELL / 2 - 4;
+
+					let path = '';
+					if (x1 === x2) {
+						const startX = x1;
+						const startY = y1 + CELL / 2;
+						path = `M ${startX} ${startY} L ${endX} ${endY}`;
+					} else if (y1 === y2) {
+						const startX = x2 > x1 ? x1 + CELL / 2 : x1 - CELL / 2;
+						const startY = y1;
+						const adjustedEndX = x2 > x1 ? x2 - CELL / 2 - 4 : x2 + CELL / 2 + 4;
+						path = `M ${startX} ${startY} L ${adjustedEndX} ${startY}`;
+					} else {
+						const startX = x1;
+						const startY = y1 + CELL / 2;
+						const midY = startY + GAP / 2;
+						path = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
+					}
+
+					return (
+						<path
+							key={`arrow-${pid}-${t.ID}`}
+							d={path}
+							className="talent-prereq-line"
+							markerEnd={`url(#arrowhead-${idPrefix})`}
+						/>
+					);
+				})}
+			</svg>
+
+			{Array.from({ length: MAX_TIERS }).map((_, row) =>
+				Array.from({ length: MAX_COLS }).map((_, col) => {
+					const t = talentAt(row, col);
+					const isDragSrc = t && dragTalentId === t.ID;
+					const isDragDst = dragOver?.row === row && dragOver?.col === col;
+					const isSelected = selected && (t ? selected.ID === t.ID : isNew && selected.TierID === row && selected.ColumnIndex === col);
+
+					if (t) {
+						const spellId = t.SpellRank_1;
+						const name = spellNames[spellId] || `#${t.ID}`;
+						const icon = spellIcons[spellId];
+						const maxRank = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((m, i) => t[`SpellRank_${i}`] ? i : m, 0);
+						return (
+							<div
+								key={`node-${idPrefix}-${t.ID}`}
+								className={`talent-node${isSelected ? ' selected' : ''}${isDragSrc ? ' dragging' : ''}${isDragDst ? ' drag-over' : ''}`}
+								style={{
+									left: col * (CELL + GAP),
+									top: row * (CELL + GAP),
+									width: CELL, height: CELL,
+									backgroundImage: icon ? `url(${icon})` : 'none',
+									backgroundSize: 'cover',
+									backgroundPosition: 'center',
+									cursor: onSelectTalent ? 'pointer' : 'default',
+								}}
+								draggable={!readOnly}
+								onDragStart={readOnly ? undefined : e => onDragStart(e, t)}
+								onDragOver={readOnly ? undefined : e => onDragOver(e, row, col)}
+								onDragLeave={readOnly ? undefined : onDragLeave}
+								onDrop={readOnly ? undefined : e => onDrop(e, row, col)}
+								onClick={onSelectTalent ? () => onSelectTalent(t) : undefined}
+								title={`${name} (${maxRank} ranks) — Tier ${row}, Kolom ${col}`}
+							>
+								<span className="talent-node-rank">{maxRank}</span>
+								{!icon && <span className="talent-node-name">
+									{name.length > 10 ? name.slice(0, 10) + '…' : name}
+								</span>}
+							</div>
+						);
+					} else {
+						return (
+							<div
+								key={`empty-${idPrefix}-${row}-${col}`}
+								className={`talent-grid-cell${isDragDst ? ' drag-over' : ''}${isSelected ? ' selected-empty' : ''}`}
+								style={{
+									left: col * (CELL + GAP),
+									top: row * (CELL + GAP),
+									width: CELL, height: CELL,
+									cursor: readOnly ? 'default' : 'pointer',
+								}}
+								onDragOver={readOnly ? undefined : e => onDragOver(e, row, col)}
+								onDragLeave={readOnly ? undefined : onDragLeave}
+								onDrop={readOnly ? undefined : e => onDrop(e, row, col)}
+								onClick={readOnly ? undefined : () => onSelectEmpty(row, col)}
+								title={readOnly ? '' : `Leeg slot — Tier ${row}, Kolom ${col}`}
+							>
+								{!readOnly && <span className="grid-cell-plus">+</span>}
+							</div>
+						);
+					}
+				})
+			)}
+		</div>
+	);
+}
+
 export default function TalentEditorPage() {
 	const {
-		readTalentTabs, readTalents, readSpells, readSpellIcons, readSpellFull,
+		dbcPath, readTalentTabs, readTalents, readSpells, readSpellIcons, readSpellFull,
 		saveTalent, getIcon, deleteTalent, insertTalent,
 		findNextTalentId, copyTalentDbc, idRanges,
 	} = useConnection();
@@ -79,6 +204,27 @@ export default function TalentEditorPage() {
 	const [backgroundImage, setBackgroundImage] = useState(null);
 	const [rankTooltips, setRankTooltips] = useState({});
 	const [tooltipsLoading, setTooltipsLoading] = useState(false);
+
+	// ─── Compare tegen extern Talent.dbc + Spell.dbc (read-only) ──────────
+	// TalentTab.dbc (tree/tab-structuur) komt altijd van lokale dbcPath — die
+	// wordt als identiek beschouwd. Talent.dbc én Spell.dbc komen apart uit
+	// hun eigen externe bestand, want IDs verschillen tussen lokaal en Epoch:
+	// zonder het externe Spell.dbc kunnen de externe talent-IDs niet aan een
+	// naam gekoppeld worden. Geen Spell.dbc geselecteerd → namen blijven #ID.
+	const [compareDbcFolder, setCompareDbcFolder] = useState(null);
+	const [compareSpellFolder, setCompareSpellFolder] = useState(null);
+	const [compareVisible, setCompareVisible] = useState(false);
+	const [compareTalents, setCompareTalents] = useState([]);
+	const [compareSpellNames, setCompareSpellNames] = useState({});
+	const [compareSpellIcons, setCompareSpellIcons] = useState({});
+	const [compareLoadError, setCompareLoadError] = useState(null);
+	const [compareSpellSchemaWarning, setCompareSpellSchemaWarning] = useState(null);
+	const [compareSelected, setCompareSelected] = useState(null);
+	const [compareRankTooltips, setCompareRankTooltips] = useState({});
+	const compareLoadIdRef = useRef(0);
+	const [compareTooltipsLoading, setCompareTooltipsLoading] = useState(false);
+	// Welke kant heeft het laatst geklikt — voorkomt infinite loop tussen de twee sync-effects hieronder.
+	const selectionSourceRef = useRef(null);
 
 	// ─── laden ───────────────────────────────────────────────────────────────
 	const loadTabs = useCallback(async (cls) => {
@@ -158,6 +304,163 @@ export default function TalentEditorPage() {
 	useEffect(() => { if (selectedClass) loadTabs(selectedClass); }, [selectedClass, loadTabs]);
 	useEffect(() => { if (activeTab) loadTalents(activeTab.ID); }, [activeTab, loadTalents]);
 
+	// ─── Gekoppelde selectie lokaal ↔ compare (zelfde Tier/ColumnIndex) ───────
+	useEffect(() => {
+		if (!compareVisible || selectionSourceRef.current !== 'local') return;
+		if (!selected) { setCompareSelected(null); return; }
+		const match = compareTalents.find(t => (t.TierID || 0) === (selected.TierID || 0) && (t.ColumnIndex || 0) === (selected.ColumnIndex || 0));
+		setCompareSelected(match || null);
+	}, [selected, compareVisible, compareTalents]);
+
+	useEffect(() => {
+		if (!compareVisible || selectionSourceRef.current !== 'compare') return;
+		if (!compareSelected) { setSelected(null); return; }
+		const match = talents.find(t => (t.TierID || 0) === (compareSelected.TierID || 0) && (t.ColumnIndex || 0) === (compareSelected.ColumnIndex || 0));
+		if (match) selectTalent(match); else setSelected(null);
+	}, [compareSelected, compareVisible, talents]);
+
+	// ─── Compare laden ────────────────────────────────────────────────────────
+	// Tab-structuur (TalentTab.dbc) komt van de lokale dbcPath — zelfde tabId
+	// als de actieve lokale tree-tab wordt gebruikt om Talent.dbc uit
+	// compareDbcFolder te lezen. Voor spellnamen/icons wordt eerst het externe
+	// Spell.dbc geprobeerd; ontbreekt die, dan valt het terug op de lokale.
+	const loadCompareTalents = useCallback(async (tabId, talentFolder, spellFolder) => {
+		const loadId = ++compareLoadIdRef.current;
+		const isStale = () => compareLoadIdRef.current !== loadId;
+
+		setCompareLoadError(null);
+		setCompareSelected(null);
+		const result = await window.azeroth.dbc.readTalents(talentFolder, tabId);
+		if (isStale()) return;
+		if (!result.success) { setCompareLoadError(result.error); setCompareTalents([]); return; }
+		const data = (result.data || []).sort((a, b) =>
+			(a.TierID || 0) !== (b.TierID || 0)
+				? (a.TierID || 0) - (b.TierID || 0)
+				: (a.ColumnIndex || 0) - (b.ColumnIndex || 0)
+		);
+		setCompareTalents(data);
+
+		const ids = [];
+		data.forEach(t => {
+			for (let i = 1; i <= 9; i++) { if (t[`SpellRank_${i}`] > 0) ids.push(t[`SpellRank_${i}`]); }
+		});
+		if (!ids.length) { setCompareSpellNames({}); setCompareSpellIcons({}); return; }
+
+		// Externe talent-IDs verwijzen naar externe spell-IDs (andere build, andere
+		// numbering) — dus zonder een expliciet gekozen extern Spell.dbc kunnen
+		// namen niet betrouwbaar worden opgelost. Val dan terug op lokaal als beste
+		// gok, maar het echte Spell.dbc van dezelfde build geeft de juiste namen.
+		const uniqueIds = [...new Set(ids)];
+		const spellsSource = spellFolder || dbcPath;
+
+		// Spell.dbc veldoffsets zijn hardcoded (server build 3.3.5a-layout) — als
+		// het externe Spell.dbc een ander recordSize heeft (custom client met
+		// extra/andere velden, bijv. Project Epoch) kloppen de offsets niet en
+		// lezen we garbage namen/tooltips. Detecteer dit en waarschuw expliciet
+		// i.p.v. stilzwijgend foute data te tonen.
+		if (spellFolder) {
+			const [extInfo, localInfo] = await Promise.all([
+				window.azeroth.dbc.getSpellDbcInfo(spellFolder),
+				window.azeroth.dbc.getSpellDbcInfo(dbcPath),
+			]);
+			if (isStale()) return;
+			if (extInfo.success && localInfo.success && extInfo.recordSize !== localInfo.recordSize) {
+				setCompareSpellSchemaWarning(
+					`Extern Spell.dbc heeft een ander recordformaat (recordSize ${extInfo.recordSize} vs lokaal ${localInfo.recordSize}) — veldoffsets komen niet overeen, namen en tooltips kunnen fout of leeg zijn.`
+				);
+			} else if (!extInfo.success) {
+				setCompareSpellSchemaWarning(`Extern Spell.dbc kon niet gelezen worden: ${extInfo.error}`);
+			} else {
+				setCompareSpellSchemaWarning(null);
+			}
+		} else {
+			setCompareSpellSchemaWarning(null);
+		}
+
+		const spellsResult = await window.azeroth.dbc.readSpells(spellsSource, uniqueIds);
+		if (isStale()) return;
+		const spellsData = spellsResult.data || {};
+
+		const names = {};
+		const iconIds = new Set();
+		for (const spellId of uniqueIds) {
+			const spell = spellsData[spellId];
+			if (spell) {
+				names[spellId] = spell.name;
+				if (spell.spellIconId) iconIds.add(spell.spellIconId);
+			}
+		}
+		setCompareSpellNames(names);
+		if (!iconIds.size) { setCompareSpellIcons({}); return; }
+
+		// SpellIcon.dbc ontbreekt vaak in een los geëxtraheerd compare-mapje —
+		// val per ontbrekende icon-ID terug op lokaal.
+		const extIcons = await window.azeroth.dbc.readSpellIcons(spellsSource, [...iconIds]);
+		if (isStale()) return;
+		let iconFilenames = extIcons.data || {};
+		const missingIconIds = [...iconIds].filter(id => !iconFilenames[id]);
+		if (missingIconIds.length && spellsSource !== dbcPath) {
+			const localIcons = await window.azeroth.dbc.readSpellIcons(dbcPath, missingIconIds);
+			if (isStale()) return;
+			iconFilenames = { ...iconFilenames, ...(localIcons.data || {}) };
+		}
+
+		const icons = {};
+		for (const spellId of uniqueIds) {
+			const spell = spellsData[spellId];
+			if (spell?.spellIconId) {
+				const filename = iconFilenames[spell.spellIconId];
+				if (filename) {
+					const url = await window.azeroth.icons.get(dbcPath, filename);
+					if (isStale()) return;
+					if (url) icons[spellId] = url;
+				}
+			}
+		}
+		if (!isStale()) setCompareSpellIcons(icons);
+	}, [dbcPath]);
+
+	useEffect(() => {
+		if (activeTab && compareDbcFolder) loadCompareTalents(activeTab.ID, compareDbcFolder, compareSpellFolder);
+	}, [activeTab, compareDbcFolder, compareSpellFolder, loadCompareTalents]);
+
+	const handlePickCompareFile = async () => {
+		const filePath = await window.azeroth.dialog.openFile({
+			title: 'Select external Talent.dbc',
+			filters: [{ name: 'DBC files', extensions: ['dbc'] }],
+		});
+		if (!filePath) return;
+		const folder = filePath.replace(/[\\/][^\\/]*$/, '');
+		setCompareDbcFolder(folder);
+		setCompareVisible(true);
+	};
+
+	const handlePickCompareSpellFile = async () => {
+		const filePath = await window.azeroth.dialog.openFile({
+			title: 'Select external Spell.dbc',
+			filters: [{ name: 'DBC files', extensions: ['dbc'] }],
+		});
+		if (!filePath) return;
+		setCompareSpellFolder(filePath.replace(/[\\/][^\\/]*$/, ''));
+	};
+
+	const toggleCompare = () => {
+		if (!compareDbcFolder) { handlePickCompareFile(); return; }
+		setCompareVisible(v => !v);
+	};
+
+	const handleClearCompareFile = () => {
+		setCompareDbcFolder(null);
+		setCompareSpellFolder(null);
+		setCompareVisible(false);
+		setCompareTalents([]);
+		setCompareSpellNames({});
+		setCompareSpellIcons({});
+		setCompareLoadError(null);
+		setCompareSpellSchemaWarning(null);
+		setCompareSelected(null);
+	};
+
 	useEffect(() => {
 		if (!activeTab) { setBackgroundImage(null); return; }
 		loadBackgroundImage(activeTab);
@@ -217,6 +520,7 @@ export default function TalentEditorPage() {
 
 	// ─── selectie ────────────────────────────────────────────────────────────
 	const selectTalent = (t) => {
+		selectionSourceRef.current = 'local';
 		setSelected(t);
 		setIsNew(false);
 		setForm({ ...t });
@@ -226,6 +530,7 @@ export default function TalentEditorPage() {
 	};
 
 	const selectEmpty = (row, col) => {
+		selectionSourceRef.current = 'local';
 		const blank = {
 			ID: 0,
 			TabID: activeTab?.ID || 0,
@@ -242,6 +547,11 @@ export default function TalentEditorPage() {
 		setDirty(false);
 		setMsg(null);
 		setConfirmDelete(false);
+	};
+
+	const selectCompareTalent = (t) => {
+		selectionSourceRef.current = 'compare';
+		setCompareSelected(t);
 	};
 
 	const handleChange = (key, val) => {
@@ -476,8 +786,48 @@ export default function TalentEditorPage() {
 		return () => { cancelled = true; };
 	}, [selected?.ID, form.SpellRank_1, form.SpellRank_2, form.SpellRank_3, form.SpellRank_4, form.SpellRank_5, form.SpellRank_6, form.SpellRank_7, form.SpellRank_8, form.SpellRank_9, readSpellFull]);
 
+	// ─── tooltips per rank voor compare-selectie (zelfde bron als de namen) ──
+	const compareSpellsSource = compareSpellFolder || dbcPath;
+	useEffect(() => {
+		if (!compareSelected) { setCompareRankTooltips({}); return; }
+		const rankIds = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+			.map(i => compareSelected[`SpellRank_${i}`])
+			.filter(id => id > 0);
+		if (!rankIds.length) { setCompareRankTooltips({}); return; }
+
+		let cancelled = false;
+		setCompareTooltipsLoading(true);
+		(async () => {
+			const entries = {};
+			for (const id of [...new Set(rankIds)]) {
+				let result = await window.azeroth.dbc.readSpellFull(compareSpellsSource, id);
+				if (!result.success && compareSpellsSource !== dbcPath) {
+					result = await window.azeroth.dbc.readSpellFull(dbcPath, id);
+				}
+				if (cancelled) return;
+				entries[id] = result.success
+					? {
+						name: result.data.Name_Lang_enUS,
+						subtext: result.data.NameSubtext_Lang_enUS,
+						description: result.data.Description_Lang_enUS,
+						auraDescription: result.data.AuraDescription_Lang_enUS,
+					}
+					: { error: result.error || 'Niet gevonden' };
+			}
+			if (!cancelled) { setCompareRankTooltips(entries); setCompareTooltipsLoading(false); }
+		})();
+		return () => { cancelled = true; };
+	}, [compareSelected, compareSpellsSource, dbcPath]);
+
+	const comparePrimarySpellId = compareSelected?.SpellRank_1 > 0 ? compareSelected.SpellRank_1 : null;
+	const compareRanksWithPrimary = comparePrimarySpellId
+		? [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(i => compareSelected[`SpellRank_${i}`] === comparePrimarySpellId)
+		: [];
+	const compareRanksAny = compareSelected
+		? [1, 2, 3, 4, 5, 6, 7, 8, 9].filter(i => compareSelected[`SpellRank_${i}`] > 0)
+		: [];
+
 	// ─── grid hulpdata ───────────────────────────────────────────────────────
-	const talentAt = (row, col) => talents.find(t => (t.TierID || 0) === row && (t.ColumnIndex || 0) === col);
 	const treeW = MAX_COLS * (CELL + GAP) - GAP;
 	const treeH = MAX_TIERS * (CELL + GAP) - GAP;
 
@@ -532,128 +882,203 @@ export default function TalentEditorPage() {
 								</button>
 							))}
 							{tabs.length === 0 && <span className="talent-no-tabs">Geen talent tabs gevonden</span>}
+
+							<div className="talent-compare-toggle">
+								<button
+									className={`talent-tab-btn ${compareVisible ? 'active' : ''}`}
+									onClick={toggleCompare}
+									title={compareDbcFolder ? 'Compare paneel tonen/verbergen' : 'Selecteer extern Talent.dbc om te vergelijken'}
+								>
+									<GitCompare size={13} /> Compare
+								</button>
+								{compareDbcFolder && (
+									<span className="compare-file-label">
+										Talent: {compareDbcFolder.split(/[\\/]/).pop()}
+										<button type="button" className="btn-ghost" style={{ fontSize: '10px', padding: '1px 5px' }} title="Compare bestanden wissen" onClick={handleClearCompareFile}>
+											<X size={11} />
+										</button>
+									</span>
+								)}
+								{compareDbcFolder && (
+									<button
+										type="button"
+										className={`talent-tab-btn ${compareSpellFolder ? 'active' : ''}`}
+										onClick={handlePickCompareSpellFile}
+										title="Selecteer extern Spell.dbc (nodig om externe talent-IDs aan namen te koppelen)"
+									>
+										Spell: {compareSpellFolder ? compareSpellFolder.split(/[\\/]/).pop() : '— selecteer —'}
+									</button>
+								)}
+							</div>
 						</div>
 
-						<div className="talent-tree-scroll">
-							{activeTab && (
-								<div className="talent-tree" style={{ width: treeW, height: treeH, backgroundImage: backgroundImage ? `url(${backgroundImage})` : 'none', backgroundSize: 'initial', backgroundRepeat: 'repeat' }}>
-									{/* ── SVG prereq pijlen (Directed L-shaped parent-to-child) ── */}
-									<svg width={treeW} height={treeH} className="talent-arrows" style={{ overflow: 'visible' }}>
-										<defs>
-											<marker id="arrowhead" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto">
-												<path d="M0,0 L8,4 L0,8 Z" fill="#ff4444" />
-											</marker>
-										</defs>
-										{talents.map(t => {
-											const pid = t.PrereqTalent_1;
-											if (!pid) return null;
-											const pre = talents.find(x => x.ID === pid);
-											if (!pre) return null;
+						<div className="talent-panes">
+							<div className="talent-tree-scroll">
+								{activeTab && (
+									<TalentTreeGrid
+										talents={talents}
+										spellNames={spellNames}
+										spellIcons={spellIcons}
+										backgroundImage={backgroundImage}
+										treeW={treeW}
+										treeH={treeH}
+										selected={selected}
+										isNew={isNew}
+										dragTalentId={dragTalentId}
+										dragOver={dragOver}
+										onSelectTalent={selectTalent}
+										onSelectEmpty={selectEmpty}
+										onDragStart={handleDragStart}
+										onDragOver={handleDragOver}
+										onDragLeave={handleDragLeave}
+										onDrop={handleDrop}
+									/>
+								)}
+								{!activeTab && <div className="editor-empty"><p>Geen talent tab geselecteerd</p></div>}
+							</div>
 
-											const x1 = (pre.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
-											const y1 = (pre.TierID || 0) * (CELL + GAP) + CELL / 2;
-											const x2 = (t.ColumnIndex || 0) * (CELL + GAP) + CELL / 2;
-											const y2 = (t.TierID || 0) * (CELL + GAP) + CELL / 2;
-
-											const endX = x2;
-											const endY = y2 - CELL / 2 - 4; // slight offset so the tip touches the node border
-
-											let path = '';
-											if (x1 === x2) {
-												// Rule 1: Direct vertical line down
-												const startX = x1;
-												const startY = y1 + CELL / 2;
-												path = `M ${startX} ${startY} L ${endX} ${endY}`;
-											} else if (y1 === y2) {
-												// Rule 2: Same tier, different columns (horizontal arrow)
-												const startX = x2 > x1 ? x1 + CELL / 2 : x1 - CELL / 2;
-												const startY = y1;
-												const adjustedEndX = x2 > x1 ? x2 - CELL / 2 - 4 : x2 + CELL / 2 + 4;
-												path = `M ${startX} ${startY} L ${adjustedEndX} ${startY}`;
-											} else {
-												// Rule 3: Different columns and down tiers (diagonal arrow)
-												// Starts at bottom of parent, bends in middle of gap, drops down to child
-												const startX = x1;
-												const startY = y1 + CELL / 2;
-												const midY = startY + GAP / 2;
-												path = `M ${startX} ${startY} L ${startX} ${midY} L ${endX} ${midY} L ${endX} ${endY}`;
-											}
-
-											return (
-												<path
-													key={`arrow-${pid}-${t.ID}`}
-													d={path}
-													className="talent-prereq-line"
-													markerEnd="url(#arrowhead)"
-												/>
-											);
-										})}
-									</svg>
-
-									{/* ── Volledige 15×4 grid (lege + gevulde cellen) ── */}
-									{Array.from({ length: MAX_TIERS }).map((_, row) =>
-										Array.from({ length: MAX_COLS }).map((_, col) => {
-											const t = talentAt(row, col);
-											const isDragSrc = t && dragTalentId === t.ID;
-											const isDragDst = dragOver?.row === row && dragOver?.col === col;
-											const isSelected = selected && (t ? selected.ID === t.ID : isNew && selected.TierID === row && selected.ColumnIndex === col);
-
-											if (t) {
-												const spellId = t.SpellRank_1;
-												const name = spellNames[spellId] || `#${t.ID}`;
-												const icon = spellIcons[spellId];
-												const maxRank = [1, 2, 3, 4, 5, 6, 7, 8, 9].reduce((m, i) => t[`SpellRank_${i}`] ? i : m, 0);
-												return (
-													<div
-														key={`node-${t.ID}`}
-														className={`talent-node${isSelected ? ' selected' : ''}${isDragSrc ? ' dragging' : ''}${isDragDst ? ' drag-over' : ''}`}
-														style={{
-															left: col * (CELL + GAP),
-															top: row * (CELL + GAP),
-															width: CELL, height: CELL,
-															backgroundImage: icon ? `url(${icon})` : 'none',
-															backgroundSize: 'cover',
-															backgroundPosition: 'center',
-														}}
-														draggable
-														onDragStart={e => handleDragStart(e, t)}
-														onDragOver={e => handleDragOver(e, row, col)}
-														onDragLeave={handleDragLeave}
-														onDrop={e => handleDrop(e, row, col)}
-														onClick={() => selectTalent(t)}
-														title={`${name} (${maxRank} ranks) — Tier ${row}, Kolom ${col}`}
-													>
-														<span className="talent-node-rank">{maxRank}</span>
-														{!icon && <span className="talent-node-name">
-															{name.length > 10 ? name.slice(0, 10) + '…' : name}
-														</span>}
-													</div>
-												);
-											} else {
-												return (
-													<div
-														key={`empty-${row}-${col}`}
-														className={`talent-grid-cell${isDragDst ? ' drag-over' : ''}${isSelected ? ' selected-empty' : ''}`}
-														style={{
-															left: col * (CELL + GAP),
-															top: row * (CELL + GAP),
-															width: CELL, height: CELL,
-														}}
-														onDragOver={e => handleDragOver(e, row, col)}
-														onDragLeave={handleDragLeave}
-														onDrop={e => handleDrop(e, row, col)}
-														onClick={() => selectEmpty(row, col)}
-														title={`Leeg slot — Tier ${row}, Kolom ${col}`}
-													>
-														<span className="grid-cell-plus">+</span>
-													</div>
-												);
-											}
-										})
+							{compareDbcFolder && compareVisible && (
+								<div className="compare-pane">
+									<div className="talent-tabs compare-tabs-row">
+										<span className="talent-no-tabs">Compare: {activeTab?.Name_Lang_enUS || '—'} ({compareDbcFolder.split(/[\\/]/).pop()})</span>
+									</div>
+									{compareLoadError && (
+										<div className="editor-msg error" style={{ margin: '8px 12px 0' }}>
+											Compare laad error: {compareLoadError}
+										</div>
 									)}
+									{compareSpellSchemaWarning && (
+										<div className="editor-msg error" style={{ margin: '8px 12px 0' }}>
+											{compareSpellSchemaWarning}
+										</div>
+									)}
+									<div className="compare-body">
+										<div className="talent-tree-scroll">
+											{activeTab && !compareLoadError ? (
+												<TalentTreeGrid
+													idPrefix="cmp"
+													readOnly
+													talents={compareTalents}
+													spellNames={compareSpellNames}
+													spellIcons={compareSpellIcons}
+													backgroundImage={null}
+													treeW={treeW}
+													treeH={treeH}
+													selected={compareSelected}
+													onSelectTalent={selectCompareTalent}
+												/>
+											) : !compareLoadError && <div className="editor-empty"><p>Geen talent tab geselecteerd</p></div>}
+										</div>
+
+										<div className="talent-edit-panel">
+											{!compareSelected ? (
+												<div className="editor-empty"><p>Klik op een talent om te bekijken</p></div>
+											) : (
+												<>
+													<div className="panel-header">
+														<GitCompare size={14} />
+														<span>Talent #{compareSelected.ID}</span>
+													</div>
+
+													{comparePrimarySpellId > 0 && (
+														<>
+															<div className="talent-edit-section">Spell Icon</div>
+															<div className="field-group spell-icon-master">
+																<label>
+																	{compareSpellNames[comparePrimarySpellId] || `#${comparePrimarySpellId}`}
+																	<span className="spell-icon-ranks"> ({compareRanksWithPrimary.length} rank{compareRanksWithPrimary.length !== 1 ? 's' : ''})</span>
+																</label>
+																<div className="spell-icon-input-group">
+																	{compareSpellIcons[comparePrimarySpellId] && (
+																		<img src={compareSpellIcons[comparePrimarySpellId]} alt="icon" className="spell-icon-master-preview" />
+																	)}
+																</div>
+															</div>
+														</>
+													)}
+
+													<div className="talent-edit-fields">
+														<div className="talent-edit-section">Positie</div>
+														<div className="field-group">
+															<label>Tier (Rij)</label>
+															<span>{compareSelected.TierID ?? 0}</span>
+														</div>
+														<div className="field-group">
+															<label>Kolom</label>
+															<span>{compareSelected.ColumnIndex ?? 0}</span>
+														</div>
+
+														{compareSelected.PrereqTalent_1 > 0 && (
+															<>
+																<div className="talent-edit-section">Prerequisite</div>
+																<div className="field-group">
+																	<label>Prereq Talent</label>
+																	<span>#{compareSelected.PrereqTalent_1}</span>
+																</div>
+																<div className="field-group">
+																	<label>Prereq Rank</label>
+																	<span>{compareSelected.PrereqRank_1 ?? 0}</span>
+																</div>
+															</>
+														)}
+
+														<div className="talent-edit-section">Spell IDs per Rank</div>
+														{[1, 2, 3, 4, 5].map(i => {
+															const spellId = compareSelected[`SpellRank_${i}`];
+															if (!spellId) return null;
+															const hint = compareSpellNames[spellId];
+															return (
+																<div key={i} className="field-group">
+																	<label>
+																		Rank {i}
+																		{hint && <span className="field-spell-hint"> — {hint}</span>}
+																	</label>
+																	<span>#{spellId}</span>
+																</div>
+															);
+														})}
+
+														{compareRanksAny.length > 0 && (
+															<>
+																<div className="talent-edit-section">Tooltip{compareTooltipsLoading ? ' (laden…)' : ''}</div>
+																{compareRanksAny.map(i => {
+																	const spellId = compareSelected[`SpellRank_${i}`];
+																	const tt = compareRankTooltips[spellId];
+																	if (!tt) return null;
+																	return (
+																		<div key={`cmp-tt-${i}`} className="field-group" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+																			<label>
+																				Rank {i}{tt.name ? ` — ${tt.name}` : ''}{tt.subtext ? ` (${tt.subtext})` : ''}
+																			</label>
+																			<div style={{
+																				fontSize: '12px',
+																				lineHeight: 1.4,
+																				color: 'var(--text-secondary, #ccc)',
+																				background: 'var(--bg-inset, rgba(0,0,0,0.2))',
+																				border: '1px solid var(--border)',
+																				borderRadius: 4,
+																				padding: '6px 8px',
+																				whiteSpace: 'pre-wrap',
+																			}}>
+																				{tt.error
+																					? <em>Geen tooltip gevonden in extern Spell.dbc ({tt.error})</em>
+																					: (tt.description || <em>Geen description tekst</em>)}
+																				{tt.auraDescription && (
+																					<div style={{ marginTop: 4, opacity: 0.8 }}>{tt.auraDescription}</div>
+																				)}
+																			</div>
+																		</div>
+																	);
+																})}
+															</>
+														)}
+													</div>
+												</>
+											)}
+										</div>
+									</div>
 								</div>
 							)}
-							{!activeTab && <div className="editor-empty"><p>Geen talent tab geselecteerd</p></div>}
 						</div>
 					</>
 				)}

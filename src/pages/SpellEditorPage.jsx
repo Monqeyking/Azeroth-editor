@@ -471,6 +471,7 @@ export default function SpellEditorPage() {
   const [compareLoading, setCompareLoading] = useState(false);
   const [copyingCompareId, setCopyingCompareId] = useState(null);
   const [compareSelected, setCompareSelected] = useState(null);
+  const [localMatch, setLocalMatch] = useState(null);
   const [hideCompareMatches, setHideCompareMatches] = useState(false);
   const searchRef = useRef(null);
 
@@ -570,7 +571,15 @@ export default function SpellEditorPage() {
     if (result.success) {
       setSelected(null);
       setCompareSelected(result.data);
+      setLocalMatch(null);
       setMsg(null);
+
+      const name = (result.data.Name_Lang_enUS || '').trim().toLowerCase();
+      const candidate = name && spells.find(s => (s.Name_Lang_enUS || '').trim().toLowerCase() === name);
+      if (candidate) {
+        const localResult = await readSpellFull(candidate.ID);
+        if (localResult.data) setLocalMatch(localResult.data);
+      }
     }
   };
 
@@ -586,6 +595,7 @@ export default function SpellEditorPage() {
     const result = await readSpellFull(ID);
     if (result.data) {
       setCompareSelected(null);
+      setLocalMatch(null);
       setSelected(result.data);
       setForm(result.data);
       setDirty(false);
@@ -1055,7 +1065,19 @@ export default function SpellEditorPage() {
               <div className="page-header">
                 <div>
                   <h1 className="page-title">{compareSelected.Name_Lang_enUS || '(unnamed)'}</h1>
-                  <p className="page-sub">Entry #{compareSelected.ID} · {compareDbcPath?.split(/[\\/]/).pop()} (read-only)</p>
+                  <p className="page-sub">
+                    Entry #{compareSelected.ID} · {compareDbcPath?.split(/[\\/]/).pop()} (read-only)
+                    {localMatch && (
+                      <span style={{ marginLeft: '8px', color: 'var(--gold)' }}>
+                        · local match #{localMatch.ID}
+                      </span>
+                    )}
+                    {!localMatch && (
+                      <span style={{ marginLeft: '8px', color: 'var(--success, #6cba6c)' }}>
+                        · no local match — new
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="header-actions">
                   <button
@@ -1068,6 +1090,11 @@ export default function SpellEditorPage() {
                 </div>
               </div>
               {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
+              {localMatch && (
+                <div className="editor-msg info" style={{ fontSize: '11px' }}>
+                  Vergeleken met lokale #{localMatch.ID} ({localMatch.Name_Lang_enUS}) — afwijkende velden zijn <span style={{ color: 'var(--gold)', fontWeight: 600 }}>geel</span> gemarkeerd, lokale waarde staat erbij.
+                </div>
+              )}
               <div className="form-fields">
                 {getFieldSections().map((section, idx) => (
                   <div key={idx}>
@@ -1075,11 +1102,23 @@ export default function SpellEditorPage() {
                     {section.keys.map(key => {
                       const f = SPELL_FIELDS.find(fld => fld.key === key);
                       if (!f) return null;
+                      const differs = localMatch && String(localMatch[f.key] ?? '') !== String(compareSelected[f.key] ?? '');
                       return (
                         <div key={f.key} className={`field-group ${f.type === 'textarea' ? 'field-wide' : ''}`}>
                           <label>{f.label}</label>
-                          <div className="mono" style={{ fontSize: '13px', padding: '6px 0', whiteSpace: 'pre-wrap' }}>
+                          <div
+                            className="mono"
+                            style={{
+                              fontSize: '13px', padding: '6px 8px', whiteSpace: 'pre-wrap',
+                              ...(differs ? { background: 'rgba(212, 175, 55, 0.12)', border: '1px solid var(--gold)', borderRadius: '4px' } : {}),
+                            }}
+                          >
                             {formatReadOnlyField(f, compareSelected[f.key])}
+                            {differs && (
+                              <span style={{ display: 'block', fontSize: '11px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
+                                local: {formatReadOnlyField(f, localMatch[f.key])}
+                              </span>
+                            )}
                           </div>
                         </div>
                       );

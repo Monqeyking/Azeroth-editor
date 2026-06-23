@@ -36,7 +36,7 @@ export function getTerrainHeight(wx, wy) {
   if (!tile?.v9) return null;
   const vx = Math.max(0, Math.min(128, Math.round(((32 - tileX) * _TS - wx) / _US)));
   const vy = Math.max(0, Math.min(128, Math.round(((32 - tileY) * _TS - wy) / _US)));
-  return tile.v9[vy * 129 + vx]; // EW-major
+  return tile.v9[vx * 129 + vy];
 }
 
 const MODEL_LOAD_SQ     = MODEL_LOAD_DIST * MODEL_LOAD_DIST;

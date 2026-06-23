@@ -13,6 +13,7 @@ import { setTerrainData } from '../components/editor3d/spawnLod';
 
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
+const ENABLE_MINIMAP_FALLBACK = false;
 
 const MAP_ADT_NAME = {
   0:   'Azeroth',
@@ -51,6 +52,7 @@ export default function Editor3DPage() {
   const [loading,    setLoading]    = useState(false);
   const [terrain,    setTerrain]    = useState(null);
   const [tileTextures, setTileTextures] = useState({});
+  const [texturesEnabled, setTexturesEnabled] = useState(true); // debug toggle: 't' = texture aan/uit (isoleert geometry/lighting van texture-bugs)
 
   const [error,      setError]      = useState(null);
   const [focusTick,  setFocusTick]  = useState(0);
@@ -196,20 +198,23 @@ export default function Editor3DPage() {
 
         const tileBatch = tr.data.map(({ tileX, tileY }) => ({ tileX, tileY }));
 
-        // Minimap placeholder (niet-blocking, geen await)
-        window.azeroth.adt.getTileTextures({ mapName, tiles: tileBatch }).then(tex => {
-          if (disposed || !tex.success) return;
-          setTileTextures(prev => {
-            const next = { ...prev };
-            for (const key of evicted) delete next[key];
-            for (const { tileX, tileY, png } of tex.data) {
-              const key = `${tileX}_${tileY}`;
-              if (!next[key] || typeof next[key] === 'string') next[key] = png;
-            }
-            return next;
+        // Minimap tiles look plausible but hide failed splat textures. During
+        // validation, failed tiles deliberately keep their height coloring.
+        if (ENABLE_MINIMAP_FALLBACK) {
+          window.azeroth.adt.getTileTextures({ mapName, tiles: tileBatch }).then(tex => {
+            if (disposed || !tex.success) return;
+            setTileTextures(prev => {
+              const next = { ...prev };
+              for (const key of evicted) delete next[key];
+              for (const { tileX, tileY, png } of tex.data) {
+                const key = `${tileX}_${tileY}`;
+                if (!next[key] || typeof next[key] === 'string') next[key] = png;
+              }
+              return next;
+            });
+            invalidateRef.current?.();
           });
-          invalidateRef.current?.();
-        });
+        }
 
         // Voeg toe aan texture queue (in batches van TEX_BATCH verwerkt door tickTexture)
         for (const { tileX, tileY } of tileBatch) texQueue.push({ tileX, tileY, evicted });
@@ -233,12 +238,12 @@ export default function Editor3DPage() {
       try {
         const tex = await window.azeroth.adt.getTextureLayers({ mapName, tiles: tileBatch });
         const elapsed = performance.now() - t0;
-        console.log(`[texture] ${tileBatch.length} tiles composited in ${elapsed.toFixed(0)}ms`);
+        console.log(`[texture] ${tileBatch.length} tiles palette geladen in ${elapsed.toFixed(0)}ms`);
         if (!disposed && tex.success && tex.data.length) {
           setTileTextures(prev => {
             const next = { ...prev };
-            for (const { tileX, tileY, rgba, w, h } of tex.data) {
-              next[`${tileX}_${tileY}`] = { rgba, w, h };
+            for (const { tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha } of tex.data) {
+              next[`${tileX}_${tileY}`] = { paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha };
             }
             return next;
           });
@@ -274,6 +279,9 @@ export default function Editor3DPage() {
         setFocusTick(t => t + 1);
       }
       if (e.key === 'Escape') setSelectedId(null);
+      if (key === 't' && !e.ctrlKey && !e.metaKey) {
+        setTexturesEnabled(v => { console.log(`[debug] textures ${!v ? 'AAN' : 'UIT'}`); return !v; });
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -405,7 +413,7 @@ export default function Editor3DPage() {
   const spawnCenter = useMemo(() => {
     if (!spawns.length) return null;
     let sx = 0, sy = 0, sz = 0;
-    for (const s of spawns) { sx += s.y; sy += s.z; sz += -s.x; }
+    for (const s of spawns) { sx += -s.y; sy += s.z; sz += -s.x; }
     return [sx / spawns.length, sy / spawns.length, sz / spawns.length];
   }, [spawns]);
 
@@ -450,7 +458,7 @@ export default function Editor3DPage() {
               activeTool={activeTool}
               onTransform={handleTransform}
               terrain={terrain}
-              tileTextures={tileTextures}
+              tileTextures={texturesEnabled ? tileTextures : {}}
               wdl={null}
               initialTarget={spawnCenter}
               resetKeys={resetKeys}

@@ -904,6 +904,16 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
   }
 });
 
+ipcMain.handle('dbc:getSpellDbcInfo', async (_, dbcPath) => {
+  try {
+    const dbc = await loadSpellDbc(dbcPath);
+    if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
+    return { success: true, recordCount: dbc.recordCount, fieldCount: dbc.fieldCount, recordSize: dbc.recordSize };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('dbc:readSpellFull', async (_, dbcPath, id) => {
   try {
     const dbc = await loadSpellDbc(dbcPath);
@@ -2024,13 +2034,14 @@ function parseAdt(buf) {
     const posY     = buf.readFloatLE(ds + 108);
     const posZ     = buf.readFloatLE(ds + 112);
 
-    if (!offsMCVT || ds + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
+    if (!offsMCVT || mcnkOff + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
 
     // Valideer MCVT magic ('TVCM' = reversed 'MCVT')
-    const mcvtMagic = buf.slice(ds + offsMCVT, ds + offsMCVT + 4).toString('ascii');
+    // ofsHeight is relatief aan mcnkOff (chunk start incl. 8-byte header), niet ds — zelfde conventie als ofsLayer/ofsAlpha.
+    const mcvtMagic = buf.slice(mcnkOff + offsMCVT, mcnkOff + offsMCVT + 4).toString('ascii');
     if (mcvtMagic !== 'TVCM') { chunks.push(null); continue; }
 
-    const hStart = ds + offsMCVT + 8;
+    const hStart = mcnkOff + offsMCVT + 8;
     // MCVT: 17 floats per rij: 9 outer + 8 inner (staggered centers)
     // outer[r][c] = hStart + (r*17 + c) * 4          (r=0..8, c=0..8)
     // inner[r][c] = hStart + (r*17 + 9 + c) * 4      (r=0..7, c=0..7)
@@ -2112,7 +2123,9 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
       const mapId = MAP_NAME_TO_ID[mapName] ?? 0;
       const result = [];
       for (const { tileX, tileY } of tiles) {
-        const fname = `${String(mapId).padStart(3,'0')}${String(tileY).padStart(2,'0')}${String(tileX).padStart(2,'0')}.map`;
+        // AzerothCore writes ADT <x>_<y> as MMM<y><x>.map. Renderer tileX/tileY
+        // are already WoW grid X/Y, so no additional swap belongs here.
+        const fname = `${String(mapId).padStart(3,'0')}${String(tileX).padStart(2,'0')}${String(tileY).padStart(2,'0')}.map`;
         const fpath = path.join(mapsPath, fname);
         if (!fs.existsSync(fpath)) continue;
         const rawBuf = fs.readFileSync(fpath);
@@ -2241,58 +2254,88 @@ ipcMain.handle('adt:getTileTextures', async (_, { mapName, tiles }) => {
 // Zelfde logica als de oude terrainCompositor.worker.js, maar draait hier zodat
 // alleen de finale RGBA (512×512) via IPC gaat in plaats van meerdere ruwe BLPs.
 
-function terrainSampleBlp(blp, ix, iy, px, py, pixPerChunk) {
-  const { data, w, h } = blp;
-  const tileSize = 16 * pixPerChunk;
-  const ux = ((ix * pixPerChunk + px) * 8 % tileSize) / tileSize;
-  const uy = ((iy * pixPerChunk + py) * 8 % tileSize) / tileSize;
-  const sx = Math.floor(ux * w) % w;
-  const sy = Math.floor(uy * h) % h;
-  const si = (sy * w + sx) * 4;
-  return [data[si], data[si+1], data[si+2]];
-}
-
-function compositeTerrainTile(blpRgba, chunks, pixPerChunk = 32) {
-  const W = 16 * pixPerChunk;
-  const d = new Uint8Array(W * W * 4);
-
-  for (const chunk of chunks) {
-    if (!chunk || !chunk.layers.length) continue;
-    const { ix, iy, layers } = chunk;
-
-    let baseBlp = blpRgba[layers[0].textureIdx];
-    let baseLayerIdx = 0;
-    if (!baseBlp) {
-      for (let li = 1; li < layers.length; li++) {
-        if (blpRgba[layers[li].textureIdx]) { baseBlp = blpRgba[layers[li].textureIdx]; baseLayerIdx = li; break; }
-      }
-    }
-    if (!baseBlp) continue;
-
-    for (let py = 0; py < pixPerChunk; py++) {
-      for (let px = 0; px < pixPerChunk; px++) {
-        const base = terrainSampleBlp(baseBlp, ix, iy, px, py, pixPerChunk);
-        let cr = base[0], cg = base[1], cb = base[2];
-        for (let li = 1; li < layers.length; li++) {
-          if (li === baseLayerIdx) continue;
-          const blp = blpRgba[layers[li].textureIdx];
-          const alphaMap = layers[li].alphaMap;
-          if (!blp || !alphaMap) continue;
-          const ax = Math.floor(px * 64 / pixPerChunk);
-          const ay = Math.floor(py * 64 / pixPerChunk);
-          const alpha = alphaMap[ay * 64 + ax] / 255;
-          if (alpha < 0.004) continue;
-          const lyr = terrainSampleBlp(blp, ix, iy, px, py, pixPerChunk);
-          cr = cr + (lyr[0] - cr) * alpha;
-          cg = cg + (lyr[1] - cg) * alpha;
-          cb = cb + (lyr[2] - cb) * alpha;
-        }
-        const di = ((iy * pixPerChunk + py) * W + (ix * pixPerChunk + px)) * 4;
-        d[di] = cr; d[di+1] = cg; d[di+2] = cb; d[di+3] = 255;
+// Bilineaire resize van een RGBA buffer naar vaste afmetingen — terrain-textures in WoW zijn
+// meestal 256x256, maar sommige sets wijken af. We normaliseren naar één gemeenschappelijke
+// afmeting zodat alle textures van een tile in dezelfde DataArrayTexture-laag passen.
+function resizeRgbaTo(data, sw, sh, dw, dh) {
+  if (sw === dw && sh === dh) return data;
+  const out = new Uint8Array(dw * dh * 4);
+  for (let y = 0; y < dh; y++) {
+    const fy = ((y + 0.5) / dh) * sh - 0.5;
+    const y0 = Math.max(0, Math.min(sh - 1, Math.floor(fy)));
+    const y1 = Math.min(sh - 1, y0 + 1);
+    const ty = fy - y0;
+    for (let x = 0; x < dw; x++) {
+      const fx = ((x + 0.5) / dw) * sw - 0.5;
+      const x0 = Math.max(0, Math.min(sw - 1, Math.floor(fx)));
+      const x1 = Math.min(sw - 1, x0 + 1);
+      const tx = fx - x0;
+      const i00 = (y0 * sw + x0) * 4, i10 = (y0 * sw + x1) * 4;
+      const i01 = (y1 * sw + x0) * 4, i11 = (y1 * sw + x1) * 4;
+      const di = (y * dw + x) * 4;
+      for (let c = 0; c < 4; c++) {
+        const top = data[i00 + c] * (1 - tx) + data[i10 + c] * tx;
+        const bot = data[i01 + c] * (1 - tx) + data[i11 + c] * tx;
+        out[di + c] = top * (1 - ty) + bot * ty;
       }
     }
   }
-  return { rgba: d, w: W, h: W };
+  return out;
+}
+
+// GPU shader-based terrain blending (vervangt CPU pre-compositing — zie Editor3DScene.jsx
+// TerrainTile voor de shader die dit consumeert). In plaats van één geflatte lage-resolutie
+// texture per tile te bakken (resolutie-gelimiteerd bij 8x tiling, zie git-history), sturen we
+// per-tile een gededuped texture-palette + per-chunk layer-indices + per-chunk alpha-maps. De
+// shader doet de blend (Noggit's formule: t0*(1-(a0+a1+a2)) + t1*a0 + t2*a1 + t3*a2) live, op
+// volle native textuur-resolutie per fragment.
+const PALETTE_TEX_SIZE = 256;
+
+function buildTilePalette(blpRgba, chunks) {
+  // Palette: gededuped lijst van alle gebruikte texture-indices in deze tile.
+  const usedIdx = [...new Set(chunks.filter(Boolean).flatMap(c => c.layers.map(l => l.textureIdx)))]
+    .filter(idx => blpRgba[idx]);
+  const idxToSlot = new Map(usedIdx.map((idx, slot) => [idx, slot]));
+  const n = Math.max(1, usedIdx.length);
+
+  const paletteRgba = new Uint8Array(n * PALETTE_TEX_SIZE * PALETTE_TEX_SIZE * 4);
+  usedIdx.forEach((idx, slot) => {
+    const blp = blpRgba[idx];
+    const resized = resizeRgbaTo(blp.data, blp.w, blp.h, PALETTE_TEX_SIZE, PALETTE_TEX_SIZE);
+    paletteRgba.set(resized, slot * PALETTE_TEX_SIZE * PALETTE_TEX_SIZE * 4);
+  });
+
+  // Per chunk: tot 4 palette-slots (layer0..3), -1 = ongebruikt. Float32 zodat de renderer dit
+  // direct als DataTexture (RGBAFormat/FloatType) kan gebruiken en met texelFetch kan opzoeken.
+  const chunkTexIndices = new Float32Array(256 * 4).fill(-1);
+  // Per chunk: 64x64 alpha-laag, R=layer1, G=layer2, B=layer3 (layer0 = impliciete basis, geen alpha nodig).
+  const chunkAlpha = new Uint8Array(256 * 64 * 64 * 4);
+
+  for (let i = 0; i < 256; i++) {
+    const chunk = chunks[i];
+    if (!chunk || !chunk.layers.length) continue;
+    // Doel-index = chunk.iy*16+chunk.ix (expliciet, niet de MCIN-loopvolgorde i) — zelfde
+    // conventie als parseAdt's v9/v8-vulling. MCIN-volgorde == iy*16+ix klopt meestal, maar
+    // niet aannemen: zelfde axis-bug-klasse die dit project al eerder had bij tile-indexing.
+    const ci = chunk.iy * 16 + chunk.ix;
+    if (ci < 0 || ci > 255) continue;
+    const { layers } = chunk;
+    for (let li = 0; li < Math.min(4, layers.length); li++) {
+      const slot = idxToSlot.get(layers[li].textureIdx);
+      chunkTexIndices[ci * 4 + li] = slot === undefined ? -1 : slot;
+    }
+    const base = ci * 64 * 64 * 4;
+    for (let li = 1; li < Math.min(4, layers.length); li++) {
+      const alphaMap = layers[li].alphaMap;
+      if (!alphaMap) continue;
+      const channel = li - 1; // 0=R(layer1), 1=G(layer2), 2=B(layer3)
+      for (let p = 0; p < 4096; p++) {
+        chunkAlpha[base + p * 4 + channel] = alphaMap[p];
+      }
+    }
+  }
+
+  return { paletteRgba, paletteW: PALETTE_TEX_SIZE, paletteH: PALETTE_TEX_SIZE, paletteCount: n, chunkTexIndices, chunkAlpha };
 }
 
 function decompressAlpha(buf, offset, maxOffset) {
@@ -2312,7 +2355,7 @@ function decompressAlpha(buf, offset, maxOffset) {
   return out;
 }
 
-function unpackAlpha4bit(buf, offset) {
+function unpackAlpha4bit(buf, offset, doNotFixAlpha = false) {
   // 2048 bytes: per byte twee nibbles (laag = eerste texel, hoog = tweede texel)
   // Output: 64×64 = 4096 bytes, 8 bit per texel
   const out = new Uint8Array(4096);
@@ -2325,22 +2368,60 @@ function unpackAlpha4bit(buf, offset) {
       out[x * 64 + y + 1] = hi | (hi << 4);
     }
   }
-  // Garbage in laatste rij/kolom (4-bit formaat quirk)
-  for (let e = 0; e < 64; e++) {
-    out[e * 64 + 63] = out[e * 64 + 62];
-    out[63 * 64 + e] = out[62 * 64 + e];
+  // Garbage in laatste rij/kolom (4-bit formaat quirk) — alleen fixen als de chunk niet al
+  // gefixt is opgeslagen (do_not_fix_alpha_map), anders overschrijf je geldige data.
+  if (!doNotFixAlpha) {
+    for (let e = 0; e < 64; e++) {
+      out[e * 64 + 63] = out[e * 64 + 62];
+      out[63 * 64 + e] = out[62 * 64 + e];
+    }
+    out[63 * 64 + 63] = out[62 * 64 + 62];
   }
-  out[63 * 64 + 63] = out[62 * 64 + 62];
   return out;
 }
 
-function parseAdtTextureLayers(buf) {
-  let off = 0, mtexData = -1, mtexSize = 0, mcinData = -1, bigAlpha = false;
+// WDT MPHD.flags is de autoritatieve bron voor bigAlpha (niet ADT's eigen MHDR.flags — zie wowdev.wiki).
+// 0x4 = adt_has_big_alpha, 0x80 = adt_has_height_texturing (beide impliceren 4096-byte flat alphamaps).
+const wdtFlagsCache = new Map(); // mapName → bool | null (null = onbekend, gebruik heuristiek)
 
-  // MHDR zit op vaste positie: MVER (12 bytes) + MHDR header
+function parseWdtBigAlpha(buf) {
+  if (!buf) return null;
+  let off = 12; // na MVER chunk (8 header + 4 data)
+  while (off + 8 <= buf.length) {
+    const magic = buf.slice(off, off + 4).toString('ascii');
+    const size  = buf.readUInt32LE(off + 4);
+    if (magic === 'DHPM') { // 'MPHD' reversed
+      const flags = buf.readUInt32LE(off + 8);
+      return (flags & 0x4) !== 0 || (flags & 0x80) !== 0;
+    }
+    if (size === 0) break;
+    off += 8 + size;
+  }
+  return null;
+}
+
+async function getWdtBigAlpha(dataPath, mapName) {
+  if (wdtFlagsCache.has(mapName)) return wdtFlagsCache.get(mapName);
+  let result = null;
+  try {
+    const buf = await getMpqReader().readWdtBuffer(dataPath, mapName);
+    result = parseWdtBigAlpha(buf);
+  } catch (e) {
+    console.log(`[terrain] WDT flags fout voor ${mapName}: ${e.message}`);
+  }
+  wdtFlagsCache.set(mapName, result);
+  return result;
+}
+
+function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
+  let off = 0, mtexData = -1, mtexSize = 0, mcinData = -1;
+
+  // bigAlpha: true/false als WDT MPHD.flags bekend is (autoritatief), anders null → gap-heuristiek per layer.
+  // ADT's eigen MHDR.flags is GEEN geldige bron voor dit veld (zie wowdev.wiki) — alleen voor logging.
+  const bigAlpha = wdtBigAlpha;
+  let mhdrFlagsLog = null;
   if (buf.length > 24 && buf.slice(12, 16).toString('ascii') === 'RDHM') {
-    const mhdrFlags = buf.readUInt32LE(20);
-    bigAlpha = (mhdrFlags & 0x4) !== 0 || (mhdrFlags & 0x80) !== 0; // 0x4=BigAlpha, 0x80=HeightTexturing (beide = 4096-byte flat alpha)
+    mhdrFlagsLog = buf.readUInt32LE(20);
   }
 
   while (off + 8 <= buf.length) {
@@ -2373,6 +2454,12 @@ function parseAdtTextureLayers(buf) {
     if (buf.slice(mcnkOff, mcnkOff + 4).toString('ascii') !== 'KNCM') { chunks.push(null); continue; }
 
     const ds       = mcnkOff + 8;
+    const mcnkFlags = buf.readUInt32LE(ds);
+    // do_not_fix_alpha_map (bit16, 0x10000): Noggit zet dit bij het opslaan van een chunk om aan
+    // te geven dat de rand-duplicatie-fix (rij/kolom 63 = 62) AL is toegepast bij het schrijven,
+    // en dus niet nogmaals moet gebeuren bij het lezen (anders overschrijf je geldige data met
+    // gedupliceerde buren). Zie Noggit alphamap.cpp/MapChunk.cpp:1376.
+    const doNotFixAlpha = (mcnkFlags & 0x10000) !== 0;
     const ix       = buf.readUInt32LE(ds + 4);
     const iy       = buf.readUInt32LE(ds + 8);
     const nLayers  = buf.readUInt32LE(ds + 12);
@@ -2383,7 +2470,9 @@ function parseAdtTextureLayers(buf) {
     if (!nLayers || !ofsLayer) { chunks.push({ ix, iy, layers: [] }); continue; }
 
     // MCLY: max 4 records van 16 bytes
-    const mclyPos = ds + ofsLayer;
+    // ofsLayer/ofsAlpha zijn relatief aan mcnkOff (chunk-start incl. 8-byte FourCC+size header),
+    // NIET aan ds (=mcnkOff+8, chunk-data start) — zie Noggit MapChunk.cpp: ofsLayer = lCurrentPosition - lMCNK_Position.
+    const mclyPos = mcnkOff + ofsLayer;
     if (mclyPos + 8 > buf.length) { chunks.push({ ix, iy, layers: [] }); continue; }
     let mclyDataOff, mclyDataSize;
     const mclyMagic = buf.slice(mclyPos, mclyPos + 4).toString('ascii');
@@ -2409,7 +2498,7 @@ function parseAdtTextureLayers(buf) {
 
     // MCAL: alpha maps voor layer 1-3
     if (ofsAlpha > 0 && sizeAlpha > 0 && layers.length > 1) {
-      const mcalPos = ds + ofsAlpha;
+      const mcalPos = mcnkOff + ofsAlpha;
       if (mcalPos + 4 <= buf.length) {
         let mcalDataOff, mcalDataSize;
         if (buf.slice(mcalPos, mcalPos + 4).toString('ascii') === 'LACM') {
@@ -2419,28 +2508,51 @@ function parseAdtTextureLayers(buf) {
           mcalDataOff  = mcalPos;
           mcalDataSize = sizeAlpha;
         }
+        if (global.__dbgChunkCount === undefined) global.__dbgChunkCount = 0;
+        if (global.__dbgChunkCount < 6 && layers.length > 1) {
+          global.__dbgChunkCount++;
+          console.log(`[dbg] chunk ix=${ix} iy=${iy} nLayers=${nLayers} sizeAlpha=${sizeAlpha} mcalDataSize=${mcalDataSize} mcalDataOff=${mcalDataOff}`);
+          layers.forEach((l, li) => console.log(`[dbg]   layer${li} tex=${l.textureIdx} flags=0x${l.flags.toString(16)} use_alpha=${!!(l.flags&0x100)} compressed=${!!(l.flags&0x200)} offsetInMcal=${l.offsetInMcal}`));
+        }
         for (let l = 1; l < layers.length; l++) {
           const layer = layers[l];
+          // use_alpha (0x100) niet gezet → geen geldige MCAL-data voor deze layer, offsetInMcal
+          // kan garbage zijn. Niet lezen, anders krijg je willekeurige ruis-blotches (precies het
+          // "sand random door durotar" symptoom).
+          if (!(layer.flags & 0x100)) continue;
           const alphaOff = mcalDataOff + layer.offsetInMcal;
           if (alphaOff >= buf.length) continue;
-          if (layer.flags & 0x200) {
+          // Noggit (Alphamap::Alphamap, alphamap.cpp): 0x200 (compressed) wordt ALLEEN
+          // gehonoreerd als use_big_alphamaps true is. Bij bigAlpha=false leest Noggit altijd
+          // het legacy 4-bit packed formaat, ook als een MCLY-entry toevallig 0x200 heeft staan
+          // (stale/irrelevant bit in dat formaat). Dit ongeconditioneerd checken gaf precies het
+          // "sand random door durotar" symptoom — een toevallige 0x200-bit op een paar chunks
+          // werd dan fout als RLE gedecodeerd i.p.v. als 4-bit packed.
+          if (bigAlpha === true && (layer.flags & 0x200)) {
             // Compressed RLE alpha
             layer.alphaMap = decompressAlpha(buf, alphaOff, mcalDataOff + mcalDataSize);
           } else {
-            // Bepaal werkelijke grootte via gap naar volgende layer (betrouwbaarder dan flags).
-            // Sommige vanilla ADTs zetten 0x100 maar hebben toch 2048-byte data.
-            let actualSize;
-            const nextLayer = layers[l + 1];
-            if (nextLayer && !(nextLayer.flags & 0x200)) {
-              actualSize = nextLayer.offsetInMcal - layer.offsetInMcal;
+            // bigAlpha (WDT MPHD.flags, autoritatief) bepaalt het formaat als bekend.
+            // Anders: gap naar volgende layer als heuristiek-fallback.
+            let readSize;
+            if (bigAlpha === true) {
+              readSize = 4096;
+            } else if (bigAlpha === false) {
+              readSize = 2048;
             } else {
-              actualSize = mcalDataSize - layer.offsetInMcal;
+              let actualSize;
+              const nextLayer = layers[l + 1];
+              if (nextLayer && !(nextLayer.flags & 0x200)) {
+                actualSize = nextLayer.offsetInMcal - layer.offsetInMcal;
+              } else {
+                actualSize = mcalDataSize - layer.offsetInMcal;
+              }
+              readSize = (actualSize >= 4096) ? 4096 : 2048;
             }
-            const readSize = (actualSize >= 4096) ? 4096 : 2048;
             if (readSize === 4096) {
               layer.alphaMap = Uint8Array.from(buf.slice(alphaOff, alphaOff + 4096));
             } else {
-              layer.alphaMap = unpackAlpha4bit(buf, alphaOff);
+              layer.alphaMap = unpackAlpha4bit(buf, alphaOff, doNotFixAlpha);
             }
           }
         }
@@ -2450,7 +2562,7 @@ function parseAdtTextureLayers(buf) {
     chunks.push({ ix, iy, layers });
   }
 
-  return { texturePaths, chunks, bigAlpha };
+  return { texturePaths, chunks, bigAlpha, mhdrFlagsLog };
 }
 
 // WoW 3.3.5a: terrain BLPs staan primair in deze MPQs (volgorde = prioriteit)
@@ -2474,16 +2586,19 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
     const dataPath = cfg.worldmapMpqPath;
     if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
 
+    const wdtBigAlpha = await getWdtBigAlpha(dataPath, mapName);
+    console.log(`[terrain] ${mapName}: WDT bigAlpha=${wdtBigAlpha === null ? 'onbekend (fallback heuristiek)' : wdtBigAlpha}`);
+
     const result = [];
     for (const { tileX, tileY } of tiles) {
       const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
       if (!buf) continue;
-      const parsed = parseAdtTextureLayers(buf);
+      const parsed = parseAdtTextureLayers(buf, wdtBigAlpha);
       if (!parsed?.texturePaths.length) {
         console.log(`[terrain] ${tileX}_${tileY}: geen texturePaths (MTEX leeg of ontbreekt)`);
         continue;
       }
-      console.log(`[terrain] ${tileX}_${tileY}: ${parsed.texturePaths.length} textures, bigAlpha=${parsed.bigAlpha ?? false}`);
+      console.log(`[terrain] ${tileX}_${tileY}: ${parsed.texturePaths.length} textures, bigAlpha=${parsed.bigAlpha ?? '?'} (adt mhdrFlags=${parsed.mhdrFlagsLog})`);
 
       // Verzamel unieke texture-indices
       const usedIdx = new Set();
@@ -2510,6 +2625,22 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
               const entry = { data: new Uint8Array(rgba), w, h };
               terrainBlpCache.set(cacheKey, entry);
               blpRgba[idx] = entry;
+
+              // TEMP DEBUG: dump rauwe gedecodeerde BLP als PNG, bypassed composite/3D pipeline volledig.
+              if (!global.__dbgBlpDumped) global.__dbgBlpDumped = new Set();
+              if (!global.__dbgBlpDumped.has(cacheKey)) {
+                global.__dbgBlpDumped.add(cacheKey);
+                try {
+                  const dbgDir = path.join(__dirname, '..', 'debug-blp');
+                  if (!fs.existsSync(dbgDir)) fs.mkdirSync(dbgDir, { recursive: true });
+                  const safeName = rawPath.replace(/[\\/:]/g, '_') + `_${w}x${h}.png`;
+                  const dumpPath = path.join(dbgDir, safeName);
+                  fs.writeFileSync(dumpPath, rgbaToPNG(rgba, w, h));
+                  console.log(`[dbg] BLP dump: ${rawPath} -> ${dumpPath}`);
+                } catch (dumpErr) {
+                  console.log(`[dbg] PNG dump fout voor ${rawPath}: ${dumpErr.message}`);
+                }
+              }
             } catch (decErr) {
               console.log(`[terrain] decodeBLP fout voor ${rawPath}: ${decErr.message}`);
               terrainBlpCache.set(cacheKey, null);
@@ -2528,7 +2659,8 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
       console.log(`[terrain] ${tileX}_${tileY}: ${Object.keys(blpRgba).length}/${usedIdx.size} BLPs geladen${missing.length ? ` | ontbreekt: ${missing.slice(0,3).join(', ')}` : ''}`);
       if (!Object.keys(blpRgba).length) continue;
 
-      // Composite hier in main process — geen ruwe BLP data via IPC sturen
+      // Bouw per-tile texture-palette + per-chunk layer/alpha-data — geen CPU-compositing meer,
+      // de renderer blend dit real-time in een shader (zie Editor3DScene.jsx TerrainTile).
       const chunks = parsed.chunks.map(c => {
         if (!c) return null;
         return {
@@ -2537,11 +2669,12 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
         };
       });
       const tComp = Date.now();
-      const { rgba, w, h } = compositeTerrainTile(blpRgba, chunks, 32);
-      console.log(`[composite] ${tileX}_${tileY}: ${Date.now()-tComp}ms composite, ${Object.keys(blpRgba).length} BLPs`);
-      result.push({ tileX, tileY, rgba, w, h });
+      const { paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha } = buildTilePalette(blpRgba, chunks);
+      console.log(`[palette] ${tileX}_${tileY}: ${Date.now()-tComp}ms, ${paletteCount} textures, ${Object.keys(blpRgba).length} BLPs geladen`);
+
+      result.push({ tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha });
     }
-    console.log(`[getTextureLayers] ${tiles.length} tiles → ${result.length} composited in ${Date.now()-t0}ms total`);
+    console.log(`[getTextureLayers] ${tiles.length} tiles → ${result.length} klaar in ${Date.now()-t0}ms total`);
     return { success: true, data: result };
   } catch (e) {
     console.error('adt:getTextureLayers error:', e);

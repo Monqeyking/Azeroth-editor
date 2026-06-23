@@ -271,6 +271,38 @@ async function readWdlBuffer(dataPath, mapName) {
   return buf;
 }
 
+// ── WDT: per-map header, o.a. MPHD.flags (bigAlpha) ───────────────────────────
+const wdtCache = new Map();
+const wdtIndexCache = new Map();
+const wdtIndexInFlight = new Map();
+
+async function buildWdtIndex(dataPath) {
+  if (wdtIndexCache.has(dataPath)) return wdtIndexCache.get(dataPath);
+  if (wdtIndexInFlight.has(dataPath)) return wdtIndexInFlight.get(dataPath);
+  const p = _indexFromListfile(dataPath, '.wdt').then(idx => { wdtIndexCache.set(dataPath, idx); return idx; });
+  wdtIndexInFlight.set(dataPath, p);
+  return p;
+}
+
+async function readWdtBuffer(dataPath, mapName) {
+  const key = `${dataPath}|${mapName}`;
+  if (wdtCache.has(key)) return wdtCache.get(key);
+
+  ensureMounted(dataPath);
+  const internalPath = `World\\Maps\\${mapName}\\${mapName}.wdt`;
+
+  let buf = null;
+  const index = await buildWdtIndex(dataPath);
+  const mpqAbsPath = index.get(internalPath.toLowerCase());
+  if (mpqAbsPath) {
+    buf = await readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath);
+  } else if (index.size === 0) {
+    buf = await readFileFromMpqs(dataPath, internalPath);
+  }
+  wdtCache.set(key, buf);
+  return buf;
+}
+
 async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   const key = `${dataPath}|${mapName}|${tileX}|${tileY}`;
   if (adtCache.has(key)) return adtCache.get(key);
@@ -657,7 +689,7 @@ async function findArchivesForPaths(dataPath, blpPaths) {
 }
 
 module.exports = {
-  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readMinimapBlp, readWdlBuffer,
+  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readMinimapBlp, readWdlBuffer, readWdtBuffer,
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
 };

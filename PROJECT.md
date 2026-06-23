@@ -28,8 +28,8 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 | CreatureEditorPage | `/creatures` | Volledige creature editor. Tabs: General, Models, Addon, Trainer, Vendor, Spawns. ZamModelViewer preview. |
 | ItemEditorPage | `/items` | `item_template` CRUD met class/quality/bonding dropdowns. Filters + bulk edit, Create tab, Scaling tab. |
 | QuestEditorPage | `/quests` | `quest_template` CRUD. Tekstvelden + getallen. |
-| SpellEditorPage | `/spells` | `Spell.dbc` via IPC. SchoolMask checkboxes, dropdowns, Effect/EffectAura, Attributes flags, Clone → Trainer workflow, Ctrl+S. |
-| TalentEditorPage | `/talents` | DBC-based. Visuele 15×4 grid per class/tab. Drag-and-drop, prereq-pijlen, icon picker, live preview. |
+| SpellEditorPage | `/spells` | `Spell.dbc` via IPC. SchoolMask checkboxes, dropdowns, Effect/EffectAura, Attributes flags, Clone → Trainer workflow, Ctrl+S, Compare-tab tegen extern Spell.dbc (read-only, copy-to-local). |
+| TalentEditorPage | `/talents` | DBC-based. Visuele 15×4 grid per class/tab. Drag-and-drop, prereq-pijlen, icon picker, live preview, Compare-toggle tegen extern Talent.dbc (read-only split-view, zelfde class/tree selectie). |
 | TrainerSpellPage | `/trainer-spells` | Beheer `trainer_spell` (nieuw systeem) en `npc_trainer` (oud systeem). Zie architectuursectie. |
 | LootEditorPage | `/loot` | `creature_loot_template` + `item_loot_template` + `gameobject_loot_template`. Multi-row editor. |
 | ItemSetEditorPage | `/item-sets` | `ItemSet.dbc` + custom `item_set_names`. 17 item slots, 8 bonus thresholds. |
