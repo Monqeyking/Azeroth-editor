@@ -84,9 +84,11 @@ function buildTileGeometry(tile) {
     for (let vx = 0; vx < OG; vx++) {
       const vi = vy * OG + vx;
       const h  = Math.min(3000, Math.max(-500, v9[vy * OG + vx]));
-      pos[vi * 3]     =   wowBaseY - vy * UNIT_SIZE;
+      // .map/ADT rows run along WoW X; columns run along WoW Y.
+      // Three.js uses [-WoW Y, WoW Z, -WoW X].
+      pos[vi * 3]     = -(wowBaseY - vx * UNIT_SIZE);
       pos[vi * 3 + 1] = h;
-      pos[vi * 3 + 2] = -(wowBaseX - vx * UNIT_SIZE);
+      pos[vi * 3 + 2] = -(wowBaseX - vy * UNIT_SIZE);
       heightColor(h, col, vi * 3);
       uv[vi * 2] = vx / 128; uv[vi * 2 + 1] = vy / 128;
     }
@@ -96,9 +98,9 @@ function buildTileGeometry(tile) {
     for (let vx = 0; vx < IG; vx++) {
       const ii = vy * IG + vx, vi = V9C + ii;
       const h  = Math.min(3000, Math.max(-500, v8[vy * IG + vx]));
-      pos[vi * 3]     =   wowBaseY - (vy + 0.5) * UNIT_SIZE;
+      pos[vi * 3]     = -(wowBaseY - (vx + 0.5) * UNIT_SIZE);
       pos[vi * 3 + 1] = h;
-      pos[vi * 3 + 2] = -(wowBaseX - (vx + 0.5) * UNIT_SIZE);
+      pos[vi * 3 + 2] = -(wowBaseX - (vy + 0.5) * UNIT_SIZE);
       heightColor(h, col, vi * 3);
       uv[vi * 2] = (vx + 0.5) / 128; uv[vi * 2 + 1] = (vy + 0.5) / 128;
     }
@@ -134,27 +136,115 @@ function InvalidateExporter({ invalidateRef }) {
   return null;
 }
 
+// GPU shader-based terrain texture blending — vervangt de oude CPU pre-compositing aanpak
+// (die resolutie-gelimiteerd was bij 8x per-chunk tiling, zie git-history). Elke MCNK chunk
+// tegelt zijn texture-layers onafhankelijk 8x; de blend-formule is exact Noggit's
+// terrain_frag.glsl texture_blend(): t0*(1-(a0+a1+a2)) + t1*a0 + t2*a1 + t3*a2.
+//
+// vUv2 is de continue "unit"-coördinaat over de hele tile (0..128, want 16 chunks * 8 units).
+// chunkIndex wordt per-fragment berekend (floor(u/8)*16+floor(v/8)) i.p.v. als vertex-attribuut
+// doorgegeven — dat voorkomt ambiguïteit op chunk-grens-vertices die door 2 chunks gedeeld worden.
+const TERRAIN_VERT = /* glsl */ `
+out vec2 vUv2;
+out vec3 vWorldNormal;
+
+void main() {
+  vUv2 = uv * 128.0;
+  vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+const TERRAIN_FRAG = /* glsl */ `
+precision highp float;
+precision highp int;
+
+uniform sampler2D chunkTexIndexMap; // 256x1, RGBA32F: layer0..3 palette-slot (-1 = ongebruikt)
+uniform sampler2DArray paletteArray;
+uniform sampler2DArray alphaArray;
+uniform vec3 ambientColor;
+uniform vec3 lightDir;
+uniform vec3 lightColor;
+
+in vec2 vUv2;
+in vec3 vWorldNormal;
+out vec4 outColor;
+
+vec4 sampleLayer(float idxF, vec2 uv) {
+  int idx = int(idxF + 0.5);
+  if (idx < 0) return vec4(0.0);
+  return texture(paletteArray, vec3(uv, float(idx)));
+}
+
+void main() {
+  int cx = clamp(int(floor(vUv2.x / 8.0)), 0, 15);
+  int cy = clamp(int(floor(vUv2.y / 8.0)), 0, 15);
+  int chunkIndex = cy * 16 + cx;
+
+  vec4 idx4 = texelFetch(chunkTexIndexMap, ivec2(chunkIndex, 0), 0);
+  vec2 localUv = fract(vUv2 / 8.0);
+  vec3 alpha = texture(alphaArray, vec3(localUv, float(chunkIndex))).rgb;
+
+  float a0 = idx4.y < 0.0 ? 0.0 : alpha.r;
+  float a1 = idx4.z < 0.0 ? 0.0 : alpha.g;
+  float a2 = idx4.w < 0.0 ? 0.0 : alpha.b;
+
+  vec4 t0 = sampleLayer(idx4.x, vUv2);
+  vec4 t1 = sampleLayer(idx4.y, vUv2);
+  vec4 t2 = sampleLayer(idx4.z, vUv2);
+  vec4 t3 = sampleLayer(idx4.w, vUv2);
+
+  vec4 blended = t0 * (1.0 - (a0 + a1 + a2)) + t1 * a0 + t2 * a1 + t3 * a2;
+
+  vec3 n = normalize(vWorldNormal);
+  float nDotL = max(dot(n, normalize(-lightDir)), 0.0);
+  vec3 lit = blended.rgb * (ambientColor + lightColor * nDotL);
+
+  outColor = vec4(lit, 1.0);
+}
+`;
+
 function TerrainTile({ tile, textureUrl }) {
   const invalidate = useThree(s => s.invalidate);
   const geometry = useMemo(() => buildTileGeometry(tile), [tile]);
 
-  const texture = useMemo(() => {
-    if (!textureUrl) return null;
+  const shaderTextures = useMemo(() => {
+    if (!textureUrl || !textureUrl.paletteRgba) return null;
+    const { paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha } = textureUrl;
 
-    // Raw RGBA van compositor worker → DataTexture (synchroon, geen PNG decode)
-    if (typeof textureUrl === 'object' && textureUrl.rgba) {
-      const tex = new THREE.DataTexture(
-        new Uint8Array(textureUrl.rgba),
-        textureUrl.w, textureUrl.h,
-        THREE.RGBAFormat
-      );
-      tex.colorSpace = THREE.SRGBColorSpace;
-      tex.minFilter = tex.magFilter = THREE.LinearFilter;
-      tex.anisotropy = 8;
-      tex.needsUpdate = true;
-      return tex;
-    }
+    // Noggit (TextureManager.cpp get_tex_array): GL_RGBA8 zonder sRGB-internalformat + volledige
+    // mipmap-chain met GL_LINEAR_MIPMAP_LINEAR. Zonder mipmaps geeft 8x-tiling op een schuine
+    // camera-hoek zware aliasing (de "strepen door elkaar" — moiré, geen echte blend-bug).
+    // colorSpace blijft NoColorSpace: Noggit doet geen sRGB-decode/encode, dus we matchen dat
+    // 1-op-1 i.p.v. een halve linear-workflow toe te passen (sample sRGB-decode zonder output-
+    // re-encode gaf eerder een te contrastrijke/verzadigde look).
+    const palette = new THREE.DataArrayTexture(new Uint8Array(paletteRgba), paletteW, paletteH, paletteCount);
+    palette.format = THREE.RGBAFormat;
+    palette.type = THREE.UnsignedByteType;
+    palette.colorSpace = THREE.NoColorSpace;
+    palette.wrapS = palette.wrapT = THREE.RepeatWrapping;
+    palette.minFilter = THREE.LinearMipmapLinearFilter;
+    palette.magFilter = THREE.LinearFilter;
+    palette.generateMipmaps = true;
+    palette.anisotropy = 8;
+    palette.needsUpdate = true;
 
+    const alpha = new THREE.DataArrayTexture(new Uint8Array(chunkAlpha), 64, 64, 256);
+    alpha.format = THREE.RGBAFormat;
+    alpha.type = THREE.UnsignedByteType;
+    alpha.wrapS = alpha.wrapT = THREE.ClampToEdgeWrapping;
+    alpha.minFilter = alpha.magFilter = THREE.LinearFilter;
+    alpha.needsUpdate = true;
+
+    const chunkTexIndexMap = new THREE.DataTexture(new Float32Array(chunkTexIndices), 256, 1, THREE.RGBAFormat, THREE.FloatType);
+    chunkTexIndexMap.minFilter = chunkTexIndexMap.magFilter = THREE.NearestFilter;
+    chunkTexIndexMap.needsUpdate = true;
+
+    return { palette, alpha, chunkTexIndexMap };
+  }, [textureUrl]);
+
+  const minimapTexture = useMemo(() => {
+    if (!textureUrl || textureUrl.paletteRgba || typeof textureUrl !== 'string') return null;
     // String URL: minimap placeholder — roteer 90° CCW zodat UV (u=vx=NS, v=vy=EW) klopt
     const tempTex = new THREE.Texture();
     tempTex.colorSpace = THREE.SRGBColorSpace;
@@ -176,15 +266,37 @@ function TerrainTile({ tile, textureUrl }) {
     return tempTex;
   }, [textureUrl, invalidate]);
 
-  useEffect(() => () => { texture?.dispose(); },  [texture]);
+  useEffect(() => () => {
+    shaderTextures?.palette.dispose();
+    shaderTextures?.alpha.dispose();
+    shaderTextures?.chunkTexIndexMap.dispose();
+  }, [shaderTextures]);
+  useEffect(() => () => { minimapTexture?.dispose(); }, [minimapTexture]);
   useEffect(() => () => { geometry?.dispose(); }, [geometry]);
 
   if (!geometry) return null;
   return (
     <mesh geometry={geometry}>
-      {texture
-        ? <meshLambertMaterial map={texture} side={THREE.DoubleSide} />
-        : <meshLambertMaterial vertexColors side={THREE.DoubleSide} />}
+      {shaderTextures
+        ? (
+          <shaderMaterial
+            glslVersion={THREE.GLSL3}
+            side={THREE.DoubleSide}
+            vertexShader={TERRAIN_VERT}
+            fragmentShader={TERRAIN_FRAG}
+            uniforms={{
+              chunkTexIndexMap: { value: shaderTextures.chunkTexIndexMap },
+              paletteArray: { value: shaderTextures.palette },
+              alphaArray: { value: shaderTextures.alpha },
+              ambientColor: { value: new THREE.Vector3(0.6, 0.6, 0.6) },
+              lightColor: { value: new THREE.Vector3(1.2, 1.2, 1.2) },
+              lightDir: { value: new THREE.Vector3(-50, -80, -30).normalize() },
+            }}
+          />
+        )
+        : minimapTexture
+          ? <meshLambertMaterial map={minimapTexture} side={THREE.DoubleSide} />
+          : <meshLambertMaterial vertexColors side={THREE.DoubleSide} />}
     </mesh>
   );
 }
@@ -212,7 +324,7 @@ function WdlMesh({ tiles }) {
           const wy = baseWy - r * WDL_STEP;
           const wx = baseWx - c * WDL_STEP;
           const h  = t.heights[r * 17 + c];
-          pos[vi]     =  wy;
+          pos[vi]     = -wy;
           pos[vi + 1] =  h;
           pos[vi + 2] = -wx;
           heightColor(h, col, vi);

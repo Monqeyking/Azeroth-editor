@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     readSpellIcons: (dbcPath, iconIds) => ipcRenderer.invoke('dbc:readSpellIcons', dbcPath, iconIds),
     searchSpells: (dbcPath, term, options) => ipcRenderer.invoke('dbc:searchSpells', dbcPath, term, options),
     readSpellFull: (dbcPath, id) => ipcRenderer.invoke('dbc:readSpellFull', dbcPath, id),
+    getSpellDbcInfo: (dbcPath) => ipcRenderer.invoke('dbc:getSpellDbcInfo', dbcPath),
     writeSpellFull: (dbcPath, spell) => ipcRenderer.invoke('dbc:writeSpellFull', dbcPath, spell),
     findNextSpellId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextSpellId', dbcPath, startId),
     copySpell: (dbcPath, sourceId, newId) => ipcRenderer.invoke('dbc:copySpell', dbcPath, sourceId, newId),
