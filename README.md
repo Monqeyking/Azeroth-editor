@@ -80,11 +80,11 @@ On launch, enter your MySQL credentials:
 
 | Setting | Example | Used by |
 |---|---|---|
-| DBC path | `D:\CaioCore\CaioServer\data\DBFilesClient` | All DBC editors, DBC SQL Editor |
-| Data path | `D:\CaioCore\CaioServer\data` | 3D Editor (ADT/BLP/MPQ), Spawn Map |
-| Auth server exe | `D:\CaioCore\CaioServer\authserver.exe` | Dashboard terminal |
-| World server exe | `D:\CaioCore\CaioServer\worldserver.exe` | Dashboard terminal |
-| Expansions folder | `D:\CaioCore\CaioServer\data\Expansions` | Expansion Lock DBC snapshots |
+| DBC path | `D:\Server\data\DBFilesClient` | All DBC editors, DBC SQL Editor |
+| Data path | `D:\Server\data` | 3D Editor (ADT/BLP/MPQ), Spawn Map |
+| Auth server exe | `D:\Server\authserver.exe` | Dashboard terminal |
+| World server exe | `D:\Server\worldserver.exe` | Dashboard terminal |
+| Expansions folder | `D:\Server\data\Expansions` | Expansion Lock DBC snapshots |
 
 ### 5. SOAP credentials (optional but recommended)
 

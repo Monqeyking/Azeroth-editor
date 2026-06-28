@@ -451,6 +451,20 @@
   gap: 8px;
 }
 
+.cc-vp-slot-with-action {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.cc-edit-tex-btn {
+  font-size: 10px;
+  padding: 3px 6px;
+  gap: 4px;
+}
+
 /* Selected row highlight */
 .cc-row-selected td {
   background: rgba(196, 156, 89, 0.12) !important;

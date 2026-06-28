@@ -1,4 +1,4 @@
-import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+﻿import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useConnection } from '../../lib/ConnectionContext';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
@@ -17,6 +17,7 @@ const NAV_GROUPS = [
     icon: Swords,
     items: [
       { to: '/creatures',      icon: Swords,      label: 'Creatures' },
+      { to: '/npc-workflow',   icon: GitBranch,   label: 'NPC Workflow' },
       { to: '/trainer-spells', icon: BookOpen,     label: 'Trainers' },
       { to: '/vendors',        icon: ShoppingBag,  label: 'Vendors' },
     ],

@@ -31,19 +31,21 @@ async function flush() {
       const results = await readBlpTexturesFn(dataPath, paths);
       for (let i = 0; i < paths.length; i++) {
         const r = results[i];
-        const { resolve, reject } = group.resolvers.get(paths[i]) || {};
-        if (!resolve) continue;
+        const waiters = group.resolvers.get(paths[i]) || [];
         if (r?.success && r.png) {
           const dataUrl = `data:image/png;base64,${r.png}`;
           const key = `${dataPath}|${paths[i].toLowerCase()}`;
           requestCache.set(key, { w: r.w, h: r.h, dataUrl });
-          resolve({ w: r.w, h: r.h, dataUrl });
+          for (const { resolve } of waiters) resolve({ w: r.w, h: r.h, dataUrl });
         } else {
-          reject(new Error(r?.error || 'Niet gevonden'));
+          const err = new Error(r?.error || 'Niet gevonden');
+          for (const { reject } of waiters) reject(err);
         }
       }
     } catch (e) {
-      for (const { resolve, reject } of group.resolvers.values()) reject(e);
+      for (const waiters of group.resolvers.values()) {
+        for (const { reject } of waiters) reject(e);
+      }
     }
   }));
 }
@@ -58,7 +60,11 @@ export function requestBlpTexture(dataPath, blpPath) {
     if (!pending.has(dataPath)) pending.set(dataPath, { paths: new Set(), resolvers: new Map() });
     const group = pending.get(dataPath);
     group.paths.add(blpPath);
-    group.resolvers.set(blpPath, { resolve, reject });
+    // Meerdere componenten kunnen tegelijk dezelfde blpPath aanvragen binnen één
+    // flush-window (bv. swatch + preview-slot voor dezelfde geselecteerde rij) —
+    // elke aanvrager krijgt een eigen resolver in de lijst, niemand wordt overschreven.
+    if (!group.resolvers.has(blpPath)) group.resolvers.set(blpPath, []);
+    group.resolvers.get(blpPath).push({ resolve, reject });
     scheduleFlush();
   });
 }

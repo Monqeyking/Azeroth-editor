@@ -2,6 +2,7 @@
 dist/
 dist-electron/
 PNG/
+debug-blp/
 .env
 .DS_Store
 *.log
@@ -10,3 +11,4 @@ KEIRA3_UPGRADE_TASKS.MD
 PROMPT_next_session.MD
 3deditor.md
 PROMPT_*
+NPC_WORKFLOW_NOTES.md

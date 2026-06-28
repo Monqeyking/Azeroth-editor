@@ -237,3 +237,23 @@
   padding: 0 4px;
   flex-shrink: 0;
 }
+.tsv-mode-switch {
+  display: flex;
+  gap: 8px;
+  padding: 0 28px 12px;
+}
+
+.tsv-mode-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  border-radius: 999px;
+  padding: 7px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.tsv-mode-btn.active {
+  border-color: var(--gold);
+  background: rgba(212, 175, 55, 0.08);
+}

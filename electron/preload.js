@@ -43,6 +43,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
     readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
+    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath) =>
+      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
     readDurations: (dbcPath) => ipcRenderer.invoke('dbc:readDurations', dbcPath),
     readRanges: (dbcPath) => ipcRenderer.invoke('dbc:readRanges', dbcPath),
