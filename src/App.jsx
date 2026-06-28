@@ -1,4 +1,4 @@
-import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
+﻿import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { ConnectionProvider } from './lib/ConnectionContext';
 import Layout from './components/layout/Layout';
 import ConnectPage from './pages/ConnectPage';
@@ -16,6 +16,7 @@ import TrainerSpellPage from './pages/TrainerSpellPage';
 import CharCustomizationPage from './pages/CharCustomizationPage';
 import LootEditorPage from './pages/LootEditorPage';
 import ItemSetEditorPage from './pages/ItemSetEditorPage';
+import NPCWorkflowPage from './pages/NPCWorkflowPage';
 import VendorEditorPage from './pages/VendorEditorPage';
 import SqlEditorPage from './pages/SqlEditorPage';
 import DbcSqlPage from './pages/DbcSqlPage';
@@ -39,6 +40,7 @@ const router = createHashRouter([
       { path: 'editor3d',           element: <Editor3DPage /> },
       { path: 'races',              element: <RaceClassPage /> },
       { path: 'trainer-spells',     element: <TrainerSpellPage /> },
+      { path: 'npc-workflow',       element: <NPCWorkflowPage /> },
       { path: 'char-customization', element: <CharCustomizationPage /> },
       { path: 'loot',               element: <LootEditorPage /> },
       { path: 'item-sets',          element: <ItemSetEditorPage /> },
@@ -59,3 +61,4 @@ export default function App() {
     </ConnectionProvider>
   );
 }
+

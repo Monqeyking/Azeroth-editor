@@ -766,8 +766,8 @@ async function loadSpellDbc(dbcPath) {
 // SkillLineAbility.dbc: fields per record (recordSize read from header)
 // Offsets: ID(0), SkillLine(4), Spell(8), RaceMask(12), ClassMask(16),
 //          ExcludeRace(20), ExcludeClass(24), MinSkillLineRank(28),
-//          SupercededBySpell(32), AcquireMethod(36), TrivialHigh(40),
-//          TrivialLow(44), ...
+//          SupercededBySpell(32), AcquireMethod(36), TrivialSkillLineRankLow(40),
+//          TrivialSkillLineRankHigh(44), ...
 ipcMain.handle('dbc:readSkillLineAbility', async (_, dbcPath, spellId) => {
   try {
     const filePath = path.join(dbcPath, 'SkillLineAbility.dbc');
@@ -785,6 +785,7 @@ ipcMain.handle('dbc:readSkillLineAbility', async (_, dbcPath, spellId) => {
           ClassMask: dbc.dataBuffer.readUInt32LE(off + 16),
           SupercededBySpell: dbc.dataBuffer.readUInt32LE(off + 32),
           AcquireMethod: dbc.dataBuffer.readUInt32LE(off + 36),
+          TrivialSkillLineRankLow: dbc.dataBuffer.readUInt32LE(off + 40),
         });
       }
     }
@@ -837,6 +838,8 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
     const isNum = /^\d+$/.test(term);
     const termNum = isNum ? parseInt(term) : 0;
     const termLower = term ? term.toLowerCase() : '';
+    const normalizedTerm = termLower.replace(/[^a-z0-9]+/g, ' ').trim();
+    const termTokens = normalizedTerm ? normalizedTerm.split(/\s+/).filter(Boolean) : [];
     const limit = options.limit || 50;
     const trainerFilter = options.trainerSpells === true;
     const classFilter = options.classFilter !== undefined && options.classFilter !== null && options.classFilter !== ''
@@ -848,8 +851,8 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
     const idMax = options.idMax !== undefined && options.idMax !== null && options.idMax !== ''
       ? parseInt(options.idMax) : null;
     const duplicatesOnly = options.duplicatesOnly === true;
+    const excludeProcSpells = options.excludeProcSpells !== false;
 
-    // Duplicate-name detector: pre-pass over the full table to count name occurrences.
     let nameCounts = null;
     if (duplicatesOnly) {
       nameCounts = new Map();
@@ -866,37 +869,51 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
       const off = i * dbc.recordSize;
       const id = dbc.dataBuffer.readUInt32LE(off);
       const attrs = dbc.dataBuffer.readUInt32LE(off + 16);
-      // Trainer spell filter: bit 16 (0x10000) set, bit 19 (0x80000) NOT set
+      const procTypeMask = dbc.dataBuffer.readUInt32LE(off + 136);
+      const procChance = dbc.dataBuffer.readUInt32LE(off + 140);
+      const procCharges = dbc.dataBuffer.readUInt32LE(off + 144);
+      const trigger1 = dbc.dataBuffer.readUInt32LE(off + 464);
+      const trigger2 = dbc.dataBuffer.readUInt32LE(off + 468);
+      const trigger3 = dbc.dataBuffer.readUInt32LE(off + 472);
+      const hasProcLikeBehavior = procTypeMask !== 0 || procChance !== 0 || procCharges !== 0 || trigger1 !== 0 || trigger2 !== 0 || trigger3 !== 0;
+
       if (trainerFilter && (!(attrs & 0x10000) || (attrs & 0x80000))) continue;
-      // ID range filter (customOnly is a back-compat alias for idMin=4000000)
+      if (trainerFilter && excludeProcSpells && hasProcLikeBehavior) continue;
       if (idMin !== null && id < idMin) continue;
       if (idMax !== null && id > idMax) continue;
-      // Class filter (SpellClassSet, approximate — see PROMPT_next_session_spell_filter.md)
       if (classFilter !== null && dbc.dataBuffer.readUInt32LE(off + 832) !== classFilter) continue;
-      // School filter (SchoolMask bit check)
       const schoolMask = dbc.dataBuffer.readUInt32LE(off + 900);
       if (schoolFilter !== null && !(schoolMask & schoolFilter)) continue;
-      if (!term || (isNum && id === termNum) || !isNum) {
-        const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
-        const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
-        if (!name) continue;
-        // Duplicate-name filter: only spells whose name occurs more than once
-        if (duplicatesOnly && (nameCounts.get(name) || 0) <= 1) continue;
-        if (isNum ? id === termNum : (!term || name.toLowerCase().includes(termLower))) {
-          const subtextRef = dbc.dataBuffer.readUInt32LE(off + 612);
-          const subtext = readStringFromBlock(null, subtextRef, dbc.stringBlock);
-          results.push({
-            ID: id,
-            Name_Lang_enUS: name,
-            NameSubtext_Lang_enUS: subtext,
-            Attributes: attrs,
-            SpellLevel: dbc.dataBuffer.readUInt32LE(off + 156),
-            SchoolMask: schoolMask,
-            DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
-            SpellClassSet: dbc.dataBuffer.readUInt32LE(off + 832),
-          });
-        }
-      }
+
+      const nameRef = dbc.dataBuffer.readUInt32LE(off + 544);
+      const name = readStringFromBlock(null, nameRef, dbc.stringBlock);
+      if (!name) continue;
+      const subtextRef = dbc.dataBuffer.readUInt32LE(off + 612);
+      const subtext = readStringFromBlock(null, subtextRef, dbc.stringBlock);
+      const haystack = (name + ' ' + (subtext || '')).toLowerCase();
+      const matches = isNum
+        ? id === termNum
+        : (!term || haystack.includes(termLower) || (termTokens.length > 0 && termTokens.every(tok => haystack.includes(tok))));
+      if (!matches) continue;
+      if (duplicatesOnly && (nameCounts.get(name) || 0) <= 1) continue;
+
+      results.push({
+        ID: id,
+        Name_Lang_enUS: name,
+        NameSubtext_Lang_enUS: subtext,
+        Attributes: attrs,
+        SpellLevel: dbc.dataBuffer.readUInt32LE(off + 156),
+        SchoolMask: schoolMask,
+        DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
+        SpellClassSet: dbc.dataBuffer.readUInt32LE(off + 832),
+        HasProcLikeBehavior: hasProcLikeBehavior,
+        ProcTypeMask: procTypeMask,
+        ProcChance: procChance,
+        ProcCharges: procCharges,
+        EffectTriggerSpell_1: trigger1,
+        EffectTriggerSpell_2: trigger2,
+        EffectTriggerSpell_3: trigger3,
+      });
     }
     return { success: true, data: results };
   } catch (e) {
@@ -1730,7 +1747,12 @@ function decodeDXT1(src, rgba, w, h) {
   for (let by = 0; by < bh; by++)
     for (let bx = 0; bx < bw; bx++) {
       const bi = (by * bw + bx) * 8;
-      writeDXTPixels(src, bi, src.readUInt32LE(bi + 4), rgba, bx, by, w, h, null);
+      const lut = src.readUInt32LE(bi + 4);
+      const transparent = src.readUInt16LE(bi) <= src.readUInt16LE(bi + 2);
+      const alphas = transparent
+        ? Array.from({ length: 16 }, (_, i) => ((lut >>> (i * 2)) & 3) === 3 ? 0 : 255)
+        : null;
+      writeDXTPixels(src, bi, lut, rgba, bx, by, w, h, alphas);
     }
 }
 
@@ -1857,6 +1879,211 @@ function decodeBLP(buffer) {
   return { rgba, w, h };
 }
 
+// ── BLP2 selective-block encoder (DXT1 / DXT3 / DXT5) ──────────────────────
+// Doel: een bewerkt gebied (masker) terugschrijven zonder de rest van de
+// texture opnieuw te comprimeren. DXT1 werkt in onafhankelijke 4×4 blokken,
+// dus blokken die het masker niet overlappen worden 1-op-1 gekopieerd uit de
+// bron-BLP — geen kwaliteitsverlies buiten het bewerkte gebied.
+function rgbToRgb565(r, g, b) {
+  const r5 = Math.round(Math.max(0, Math.min(255, r)) * 31 / 255);
+  const g6 = Math.round(Math.max(0, Math.min(255, g)) * 63 / 255);
+  const b5 = Math.round(Math.max(0, Math.min(255, b)) * 31 / 255);
+  return (r5 << 11) | (g6 << 5) | b5;
+}
+
+function compressDXTColorBlock(block, validMask, allowTransparency = false) {
+  let minL = Infinity, maxL = -Infinity, minC = [0, 0, 0], maxC = [0, 0, 0];
+  let hasTransparent = false;
+  for (let i = 0; i < 16; i++) {
+    if (!validMask[i]) continue;
+    if (allowTransparency && block[i*4+3] < 128) { hasTransparent = true; continue; }
+    const r = block[i*4], g = block[i*4+1], b = block[i*4+2];
+    const l = r*0.299 + g*0.587 + b*0.114;
+    if (l < minL) { minL = l; minC = [r, g, b]; }
+    if (l > maxL) { maxL = l; maxC = [r, g, b]; }
+  }
+  if (minL === Infinity) minC = maxC = [0, 0, 0];
+  let c0v = rgbToRgb565(maxC[0], maxC[1], maxC[2]);
+  let c1v = rgbToRgb565(minC[0], minC[1], minC[2]);
+  if (hasTransparent) {
+    if (c0v > c1v) [c0v, c1v] = [c1v, c0v];
+  } else {
+    if (c0v < c1v) [c0v, c1v] = [c1v, c0v];
+    if (c0v === c1v) {
+      if (c0v < 0xffff) c0v++;
+      else c1v--;
+    }
+  }
+  const c0 = rgb565(c0v), c1 = rgb565(c1v);
+  const palette = c0v > c1v ? [
+    c0, c1,
+    [((c0[0]*2+c1[0])/3)|0, ((c0[1]*2+c1[1])/3)|0, ((c0[2]*2+c1[2])/3)|0],
+    [((c0[0]+c1[0]*2)/3)|0, ((c0[1]+c1[1]*2)/3)|0, ((c0[2]+c1[2]*2)/3)|0],
+  ] : [
+    c0, c1,
+    [((c0[0]+c1[0])/2)|0, ((c0[1]+c1[1])/2)|0, ((c0[2]+c1[2])/2)|0],
+    [0, 0, 0],
+  ];
+  let lut = 0;
+  for (let i = 0; i < 16; i++) {
+    if (hasTransparent && block[i*4+3] < 128) { lut |= 3 << (i * 2); continue; }
+    const r = block[i*4], g = block[i*4+1], b = block[i*4+2];
+    let best = 0, bestD = Infinity;
+    for (let p = 0; p < 4; p++) {
+      const dr = r - palette[p][0], dg = g - palette[p][1], db = b - palette[p][2];
+      const d = dr*dr + dg*dg + db*db;
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    lut |= (best << (i * 2));
+  }
+  const out = Buffer.alloc(8);
+  out.writeUInt16LE(c0v, 0);
+  out.writeUInt16LE(c1v, 2);
+  out.writeUInt32LE(lut >>> 0, 4);
+  return out;
+}
+
+function compressDXT3Block(block, validMask) {
+  const out = Buffer.alloc(16);
+  for (let i = 0; i < 16; i++) {
+    const alpha = validMask[i] ? Math.round(block[i*4+3] / 17) : 0;
+    out[i >> 1] |= (alpha & 0xf) << ((i & 1) * 4);
+  }
+  compressDXTColorBlock(block, validMask).copy(out, 8);
+  return out;
+}
+
+function compressDXT5Block(block, validMask) {
+  const out = Buffer.alloc(16);
+  let minA = 255, maxA = 0;
+  for (let i = 0; i < 16; i++) if (validMask[i]) {
+    minA = Math.min(minA, block[i*4+3]);
+    maxA = Math.max(maxA, block[i*4+3]);
+  }
+  if (maxA === minA) {
+    if (maxA < 255) maxA++;
+    else minA--;
+  }
+  out[0] = maxA;
+  out[1] = minA;
+  const palette = [maxA, minA,
+    Math.round((6*maxA+minA)/7), Math.round((5*maxA+2*minA)/7),
+    Math.round((4*maxA+3*minA)/7), Math.round((3*maxA+4*minA)/7),
+    Math.round((2*maxA+5*minA)/7), Math.round((maxA+6*minA)/7)];
+  let bits = 0n;
+  for (let i = 0; i < 16; i++) {
+    const alpha = validMask[i] ? block[i*4+3] : 0;
+    let best = 0, bestD = Infinity;
+    for (let p = 0; p < palette.length; p++) {
+      const d = Math.abs(alpha - palette[p]);
+      if (d < bestD) { bestD = d; best = p; }
+    }
+    bits |= BigInt(best) << BigInt(i * 3);
+  }
+  for (let i = 0; i < 6; i++) out[i+2] = Number((bits >> BigInt(i*8)) & 0xffn);
+  compressDXTColorBlock(block, validMask).copy(out, 8);
+  return out;
+}
+
+function downsampleRgba(src, w, h) {
+  const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1);
+  const rgba = Buffer.alloc(nw * nh * 4);
+  const sxCount = w > 1 ? 2 : 1, syCount = h > 1 ? 2 : 1;
+  for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+    for (let c = 0; c < 4; c++) {
+      let sum = 0;
+      for (let dy = 0; dy < syCount; dy++) for (let dx = 0; dx < sxCount; dx++) {
+        const sx = Math.min(w-1, x*2+dx), sy = Math.min(h-1, y*2+dy);
+        sum += src[(sy*w+sx)*4+c];
+      }
+      rgba[(y*nw+x)*4+c] = Math.round(sum / (sxCount * syCount));
+    }
+  }
+  return { rgba, w: nw, h: nh };
+}
+
+function downsampleMask(src, w, h) {
+  const nw = Math.max(1, w >> 1), nh = Math.max(1, h >> 1);
+  const mask = new Uint8Array(nw * nh);
+  const sxCount = w > 1 ? 2 : 1, syCount = h > 1 ? 2 : 1;
+  for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+    for (let dy = 0; dy < syCount; dy++) for (let dx = 0; dx < sxCount; dx++) {
+      const sx = Math.min(w-1, x*2+dx), sy = Math.min(h-1, y*2+dy);
+      if (src[sy*w+sx]) mask[y*nw+x] = 1;
+    }
+  }
+  return mask;
+}
+
+// editedRgba: volledige RGBA buffer (w*h*4) na recolor. maskBool: bool[w*h],
+// true = pixel zit binnen het bewerkte masker. Alleen blokken die minstens 1
+// gemaskeerde pixel bevatten worden herschreven.
+function reencodeBlpDxtSelective(originalBuf, editedRgba, maskBool, w, h) {
+  const encoding = originalBuf.readUInt8(8);
+  const alphaEncoding = originalBuf.readUInt8(10);
+  if (encoding !== 2 || ![0, 1, 7].includes(alphaEncoding)) {
+    throw new Error('Recolor ondersteunt alleen BLP2 DXT1, DXT3 en DXT5');
+  }
+
+  const out = Buffer.from(originalBuf);
+  let mipRgba = Buffer.from(editedRgba);
+  let mipMask = Uint8Array.from(maskBool, v => v ? 1 : 0);
+  let mw = w, mh = h;
+  const blockBytes = alphaEncoding === 0 ? 8 : 16;
+
+  for (let mip = 0; mip < 16; mip++) {
+    const offset = originalBuf.readUInt32LE(20 + mip * 4);
+    const size = originalBuf.readUInt32LE(84 + mip * 4);
+    if (!offset || !size) break;
+
+    const mipData = Buffer.from(originalBuf.slice(offset, offset + size));
+    const bw = Math.ceil(mw / 4), bh = Math.ceil(mh / 4);
+    const block = new Uint8Array(16 * 4);
+    const validMask = new Array(16);
+
+    for (let by = 0; by < bh; by++) {
+      for (let bx = 0; bx < bw; bx++) {
+        let touched = false;
+        for (let py = 0; py < 4 && !touched; py++) {
+          for (let px = 0; px < 4; px++) {
+            const ix = bx*4+px, iy = by*4+py;
+            if (ix < mw && iy < mh && mipMask[iy*mw+ix]) { touched = true; break; }
+          }
+        }
+        if (!touched) continue;
+
+        for (let py = 0; py < 4; py++) {
+          for (let px = 0; px < 4; px++) {
+            const ix = Math.min(bx*4+px, mw-1), iy = Math.min(by*4+py, mh-1);
+            const idx = py*4+px;
+            const srcOff = (iy*mw+ix)*4;
+            block[idx*4] = mipRgba[srcOff];
+            block[idx*4+1] = mipRgba[srcOff+1];
+            block[idx*4+2] = mipRgba[srcOff+2];
+            block[idx*4+3] = mipRgba[srcOff+3];
+            validMask[idx] = bx*4+px < mw && by*4+py < mh;
+          }
+        }
+
+        const compressed = alphaEncoding === 7
+          ? compressDXT5Block(block, validMask)
+          : alphaEncoding === 1
+            ? compressDXT3Block(block, validMask)
+            : compressDXTColorBlock(block, validMask, originalBuf.readUInt8(9) > 0);
+        compressed.copy(mipData, (by*bw+bx) * blockBytes);
+      }
+    }
+
+    mipData.copy(out, offset);
+    if (mw === 1 && mh === 1) break;
+    const next = downsampleRgba(mipRgba, mw, mh);
+    mipMask = downsampleMask(mipMask, mw, mh);
+    mipRgba = next.rgba;
+    mw = next.w;
+    mh = next.h;
+  }
+  return out;
+}
 // PNG schrijven zonder externe library (DEFLATE via zlib)
 const zlib = require('zlib');
 
@@ -3375,7 +3602,12 @@ ipcMain.handle('m2:loadCharModel', async (_, { race, gender, skinBlp }) => {
       const key = blpCacheKey(skinBlp);
       let entry = blpTextureCache.get(key);
       if (!entry) {
-        const buf = await reader.readFileFromMpqs(dataPath, skinBlp);
+        const direct = path.join(dataPath, skinBlp.replace(/\\/g, path.sep));
+        let buf = null;
+        if (fs.existsSync(direct)) {
+          buf = fs.readFileSync(direct);
+        }
+        if (!buf) buf = await reader.readFileFromMpqs(dataPath, skinBlp);
         if (buf?.length >= 4 && buf.toString('ascii', 0, 4) === 'BLP2') {
           try {
             const decoded = decodeBLP(buf);
@@ -3795,6 +4027,57 @@ ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
   }
 });
 
+// Schrijft een bewerkt deel van een BLP terug als nieuwe loose-file BLP.
+// editedRgbaBase64: volledige RGBA buffer (w*h*4) van de texture NA recolor.
+// maskBase64: grayscale buffer (w*h, 1 byte/pixel) — >0 = bewerkt (zachte brush-randen tellen ook mee).
+// outRelPath: relatief pad (t.o.v. dataPath) waar de nieuwe BLP komt, bv.
+// "Character\\Human\\Female\\HumanFemaleSkin00_00_custom1.blp".
+ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath) => {
+  try {
+    if (!dataPath || !blpPath || !outRelPath) {
+      return { success: false, error: 'dataPath, blpPath of outRelPath ontbreekt' };
+    }
+    let buf = null;
+    const mpqReader = getMpqReader();
+    if (mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
+      buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
+    }
+    if (!buf) {
+      const direct = path.join(dataPath, blpPath.replace(/\\/g, path.sep));
+      if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
+    }
+    if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {
+      return { success: false, error: 'Bron-BLP niet gevonden of geen BLP2' };
+    }
+
+    const w = buf.readUInt32LE(12);
+    const h = buf.readUInt32LE(16);
+    const editedRgba = Buffer.from(editedRgbaBase64, 'base64');
+    const maskBytes  = Buffer.from(maskBase64, 'base64');
+    if (editedRgba.length !== w * h * 4) {
+      return { success: false, error: `RGBA grootte klopt niet (verwacht ${w*h*4}, kreeg ${editedRgba.length})` };
+    }
+    if (maskBytes.length !== w * h) {
+      return { success: false, error: `Masker grootte klopt niet (verwacht ${w*h}, kreeg ${maskBytes.length})` };
+    }
+
+    const maskBool = new Array(w * h);
+    for (let i = 0; i < w * h; i++) maskBool[i] = maskBytes[i] > 0; // elke aanraking, ook zachte brush-randen, telt mee
+
+    const newBlp = reencodeBlpDxtSelective(buf, editedRgba, maskBool, w, h);
+
+    const outAbs = path.join(dataPath, outRelPath.replace(/\\/g, path.sep));
+    fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+    fs.writeFileSync(outAbs, newBlp);
+
+    blpTextureCache.delete(blpCacheKey(outRelPath)); // forceer herladen van het nieuwe pad
+
+    return { success: true, path: outRelPath };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // Batch-variant: laad meerdere BLP-textures in één IPC. Opent elke MPQ maximaal 1×
 // ongeacht hoeveel BLPs erin zitten — groot verschil met de single-call handler.
 // Geeft een array terug in dezelfde volgorde als de input; ontbrekende BLPs krijgen
@@ -3909,3 +4192,6 @@ ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
     return blpPaths.map(p => ({ success: false, error: e.message, path: p }));
   }
 });
+
+
+

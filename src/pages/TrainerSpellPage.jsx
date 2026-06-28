@@ -1,9 +1,11 @@
-import { useState, useCallback, useEffect, useRef } from 'react';
+﻿import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
+import { useSearchParams } from 'react-router-dom';
 import { Search, ChevronRight, ChevronDown, Trash2, Plus, Save, MousePointerClick } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TrainerSpellPage.css';
+import TrainerSpellVisualPanel from './TrainerSpellVisualPanel';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
@@ -23,11 +25,14 @@ export default function TrainerSpellPage() {
   const [trainerList, setTrainerList] = useState([]);   // alle trainer templates
   const [msg, setMsg] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [uiMode, setUiMode] = useState('visual');
   const searchRef = useRef(null);
+  const [searchParams] = useSearchParams();
+  const prefillRef = useRef(false);
 
   const searchSpells = useCallback(async (term) => {
     setLoading(true);
-    const res = await searchSpellsDbc(term, { trainerSpells: true, limit: 200 });
+    const res = await searchSpellsDbc(term, { trainerSpells: true, limit: 200, excludeProcSpells: true });
     const rows = res.data || [];
     const map = new Map();
     for (const r of rows) {
@@ -95,6 +100,19 @@ export default function TrainerSpellPage() {
     });
   }, []);
 
+  useEffect(() => {
+    const trainerId = Number(searchParams.get('trainerId')) || 0;
+    if (!trainerId || prefillRef.current || trainerList.length === 0) return;
+    const preset = trainerList.find(t => Number(t.TrainerId) === trainerId);
+    setTrainerDraft(d => ({
+      ...d,
+      trainerId: String(trainerId),
+      search: preset?.label || preset?.trainerNames || String(trainerId),
+    }));
+    prefillRef.current = true;
+    setMsg({ type: 'info', text: 'Prefilled trainer #' + trainerId + ' from NPC Workflow' });
+  }, [searchParams, trainerList]);
+
   const loadTrainers = useCallback(async (spellId) => {
     const res = await query(
       `SELECT ts.TrainerId, ts.MoneyCost, ts.ReqLevel,
@@ -117,7 +135,7 @@ export default function TrainerSpellPage() {
     setMsg(null);
 
     // Zoek alle kandidaat-ranks via DBC
-    const res = await searchSpellsDbc(name, { trainerSpells: true, limit: 500 });
+    const res = await searchSpellsDbc(name, { trainerSpells: true, limit: 500, excludeProcSpells: true });
     const candidates = (res.data || []).filter(r => r.Name_Lang_enUS === name);
 
     if (!candidates.length) { setRanks([]); setRankFull({}); setTrainersMap({}); return; }
@@ -152,7 +170,7 @@ export default function TrainerSpellPage() {
         deduplicated.push(...(confirmed.length ? confirmed : group));
       }
     } else {
-      // WotLK single-rank spell: toon één entry
+      // WotLK single-rank spell: toon Ã©Ã©n entry
       const confirmed = unranked.filter(r => inTrainer.has(r.ID));
       if (confirmed.length > 0) {
         deduplicated.push(...confirmed);
@@ -230,9 +248,9 @@ export default function TrainerSpellPage() {
           : rank
       ));
       setRankEdits(e => { const next = { ...e }; delete next[rankId]; return next; });
-      setMsg({ type: 'success', text: `✓ Spell #${rankId} opgeslagen in Spell.dbc` });
+      setMsg({ type: 'success', text: `âœ“ Spell #${rankId} opgeslagen in Spell.dbc` });
     } catch (err) {
-      setMsg({ type: 'error', text: `✗ ${err.message}` });
+      setMsg({ type: 'error', text: `âœ— ${err.message}` });
     }
     setSaving(false);
   };
@@ -282,9 +300,9 @@ export default function TrainerSpellPage() {
       const newTrainers = await loadTrainers(rankId);
       setTrainersMap(m => ({ ...m, [rankId]: newTrainers }));
       setTrainerDraft({ trainerId: '', moneyCost: '0', reqLevel: '0', search: '' });
-      setMsg({ type: 'success', text: `✓ Trainer ${trainerId} toegevoegd aan spell #${rankId}` });
+      setMsg({ type: 'success', text: `âœ“ Trainer ${trainerId} toegevoegd aan spell #${rankId}` });
     } catch (err) {
-      setMsg({ type: 'error', text: `✗ ${err.message}` });
+      setMsg({ type: 'error', text: `âœ— ${err.message}` });
     }
     setSaving(false);
   };
@@ -301,7 +319,7 @@ export default function TrainerSpellPage() {
       const newTrainers = await loadTrainers(rankId);
       setTrainersMap(m => ({ ...m, [rankId]: newTrainers }));
     } catch (err) {
-      setMsg({ type: 'error', text: `✗ ${err.message}` });
+      setMsg({ type: 'error', text: `âœ— ${err.message}` });
     }
     setSaving(false);
   };
@@ -313,7 +331,12 @@ export default function TrainerSpellPage() {
         <h2 className="editor-page-title">Trainer Spell Editor</h2>
         <p className="editor-page-subtitle">Manage spell ranks and trainer assignments</p>
       </div>
-      <div className="editor-layout">
+      <div className="tsv-mode-switch">
+        <button className={`tsv-mode-btn ${uiMode === 'visual' ? 'active' : ''}`} onClick={() => setUiMode('visual')}>Visual</button>
+        <button className={`tsv-mode-btn ${uiMode === 'advanced' ? 'active' : ''}`} onClick={() => setUiMode('advanced')}>Advanced</button>
+      </div>
+      {uiMode === 'visual' && <TrainerSpellVisualPanel />}
+      <div className="editor-layout" style={{ display: uiMode === 'advanced' ? 'flex' : 'none' }}>
 
         <div className="editor-list">
           <div className="editor-list-header">
@@ -359,7 +382,7 @@ export default function TrainerSpellPage() {
               <div className="page-header">
                 <div>
                   <h1 className="page-title">{selectedName}</h1>
-                  <p className="page-sub">{ranks.length} rank{ranks.length !== 1 ? 's' : ''} · Spell.dbc + trainer_spell</p>
+                  <p className="page-sub">{ranks.length} rank{ranks.length !== 1 ? 's' : ''} Â· Spell.dbc + trainer_spell</p>
                 </div>
               </div>
 
@@ -394,16 +417,16 @@ export default function TrainerSpellPage() {
                         >
                           <td>
                             <span className="mono">{rank.rankLabel || `Rank ${idx + 1}`}</span>
-                            {rank.confirmed && <span className="ts-confirmed" title="In npc_trainer"> ●</span>}
+                            {rank.confirmed && <span className="ts-confirmed" title="In npc_trainer"> â—</span>}
                           </td>
                           <td><span className="mono">#{rank.ID}</span></td>
                           <td>{rank.SpellLevel}</td>
                           <td>
                             {rank.EffectBasePoints_1}
-                            {isDirty && <span className="ts-dirty-dot">●</span>}
+                            {isDirty && <span className="ts-dirty-dot">â—</span>}
                           </td>
                           <td className={trainers.length ? '' : 'ts-muted'}>
-                            {trainers.length ? `${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}` : '—'}
+                            {trainers.length ? `${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}` : 'â€”'}
                           </td>
                           <td>
                             {isExpanded
@@ -456,7 +479,7 @@ export default function TrainerSpellPage() {
                                       <div className="ts-trainer-info">
                                         <span className="mono ts-trainer-id">ID {t.TrainerId}</span>
                                         <span className="ts-trainer-name">{tInfo?.label || t.trainerNames || '(unknown)'}</span>
-                                        <span className="ts-trainer-meta">{t.MoneyCost}c · Req {t.ReqLevel}</span>
+                                        <span className="ts-trainer-meta">{t.MoneyCost}c Â· Req {t.ReqLevel}</span>
                                       </div>
                                       <button
                                         className="btn-ghost ts-remove-btn"
@@ -565,3 +588,6 @@ export default function TrainerSpellPage() {
     </>
   );
 }
+
+
+

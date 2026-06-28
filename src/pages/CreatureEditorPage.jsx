@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+﻿import { useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Plus, Save, RotateCcw, Copy, ChevronRight, MousePointerClick, Columns2, ClipboardCopy, Trash2 } from 'lucide-react';
+import { Search, Plus, Save, RotateCcw, Copy, ChevronRight, MousePointerClick, Columns2, ClipboardCopy, Trash2, GitBranch } from 'lucide-react';
 import FlagsSelector from '../components/FlagsSelector';
 import CreatureModelPreview from '../components/creature/CreatureModelPreview';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
@@ -158,6 +159,7 @@ function applyTrainerFlags(npcflag, meta) {
 
 export default function CreatureEditorPage() {
   const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
+  const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [creatures, setCreatures] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -513,13 +515,13 @@ export default function CreatureEditorPage() {
         await soapCommand(`.reload creature_template`);
         if (roles.spawn) await soapCommand(`.reload creature`);
         await soapCommand(`.reload creature entry ${form.entry}`);
-        setMsg({ type: 'success', text: `✓ Saved & reloaded entry ${form.entry}` });
+        setMsg({ type: 'success', text: `âœ“ Saved & reloaded entry ${form.entry}` });
       } else {
-        setMsg({ type: 'success', text: `✓ Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
+        setMsg({ type: 'success', text: `âœ“ Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
       }
       searchCreatures(search);
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Error: ${e.message}` });
+      setMsg({ type: 'error', text: `âœ— Error: ${e.message}` });
     }
     setSaving(false);
   }, [form, roles, trainerSpells, vendorItems, spawnData, addonData, modelRows, query, soapConfig, soapCommand, search, searchCreatures, findNextId]);
@@ -581,9 +583,9 @@ export default function CreatureEditorPage() {
       if (!result.success) throw new Error(result.error);
       await searchCreatures(search);
       await selectCreature(newId);
-      setMsg({ type: 'success', text: `✓ Gekloond naar entry #${newId}` });
+      setMsg({ type: 'success', text: `âœ“ Gekloond naar entry #${newId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `âœ— Klonen mislukt: ${e.message}` });
     }
     setCopying(false);
   };
@@ -724,7 +726,7 @@ export default function CreatureEditorPage() {
           <>
             <h5 className="field-subsection-title">
               Trainer Definition
-              {tDef._isNew && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>NEW — wordt aangemaakt bij Save</span>}
+              {tDef._isNew && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>NEW â€” wordt aangemaakt bij Save</span>}
             </h5>
             <div className="creature-meta-row">
               <div className="field-group">
@@ -745,7 +747,7 @@ export default function CreatureEditorPage() {
                   <label>Required Class</label>
                   <select value={tDef.Requirement ?? 0} disabled={readOnly}
                     onChange={e => { setTDef?.({ ...tDef, Requirement: Number(e.target.value) }); markDirty(); }}>
-                    <option value={0}>—</option>
+                    <option value={0}>â€”</option>
                     {TRAINER_CLASSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
@@ -814,10 +816,10 @@ export default function CreatureEditorPage() {
         <h5 className="field-subsection-title">Spell Templates</h5>
         <p className="field-hint">
           npc_trainer template refs (negatief SpellID). Veelgebruikte templates:
-          <strong> 200003</strong> — level 1–6 basis spells &nbsp;|&nbsp;
-          <strong> 200004</strong> — gedeelde class spells level 8–80 &nbsp;|&nbsp;
-          <strong> 200020</strong> — Alliance exclusief (mount + Seal of Vengeance) &nbsp;|&nbsp;
-          <strong> 200021</strong> — Horde exclusief (mount + Seal of Corruption)
+          <strong> 200003</strong> â€” level 1â€“6 basis spells &nbsp;|&nbsp;
+          <strong> 200004</strong> â€” gedeelde class spells level 8â€“80 &nbsp;|&nbsp;
+          <strong> 200020</strong> â€” Alliance exclusief (mount + Seal of Vengeance) &nbsp;|&nbsp;
+          <strong> 200021</strong> â€” Horde exclusief (mount + Seal of Corruption)
         </p>
         <table className="creature-data-table">
           <thead>
@@ -831,7 +833,7 @@ export default function CreatureEditorPage() {
               const gi = templateGlobalIdx(row);
               const tid = Math.abs(Number(row.SpellID));
               const tm = tmplMeta[tid];
-              const desc = tm ? `${tm.cnt} spell${tm.cnt !== 1 ? 's' : ''} · Lvl ${tm.minLvl}–${tm.maxLvl}` : null;
+              const desc = tm ? `${tm.cnt} spell${tm.cnt !== 1 ? 's' : ''} Â· Lvl ${tm.minLvl}â€“${tm.maxLvl}` : null;
               return (
                 <tr key={i}>
                   <td>
@@ -846,7 +848,7 @@ export default function CreatureEditorPage() {
                     />
                   </td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                    {desc ?? '—'}
+                    {desc ?? 'â€”'}
                   </td>
                   {!readOnly && (
                     <td>
@@ -874,13 +876,13 @@ export default function CreatureEditorPage() {
               <div className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span>
                   <strong>{spellSummary.cnt}</strong> spells in trainer_spell voor TrainerId {tDef.TrainerId}
-                  {spellSummary.minLvl != null && ` · Lvl ${spellSummary.minLvl}–${spellSummary.maxLvl}`}
+                  {spellSummary.minLvl != null && ` Â· Lvl ${spellSummary.minLvl}â€“${spellSummary.maxLvl}`}
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>→ Beheer via Trainer Spell Editor</span>
+                <span style={{ color: 'var(--text-muted)' }}>â†’ Beheer via Trainer Spell Editor</span>
               </div>
             ) : (
               <p className="field-hint" style={{ color: 'var(--accent)' }}>
-                Geen trainer_spell entries gevonden voor TrainerId {tDef.TrainerId} — voeg spells toe via de Trainer Spell Editor.
+                Geen trainer_spell entries gevonden voor TrainerId {tDef.TrainerId} â€” voeg spells toe via de Trainer Spell Editor.
               </p>
             )}
           </div>
@@ -888,7 +890,7 @@ export default function CreatureEditorPage() {
         {directSpells.length > 0 && (
           <div style={{ marginTop: '1rem' }}>
             <h5 className="field-subsection-title">Direct Spells <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>(npc_trainer legacy)</span></h5>
-            <p className="field-hint">Positieve SpellID entries in npc_trainer — legacy, niet meer in gebruik in het nieuwe systeem.</p>
+            <p className="field-hint">Positieve SpellID entries in npc_trainer â€” legacy, niet meer in gebruik in het nieuwe systeem.</p>
             <table className="creature-data-table">
               <thead>
                 <tr><th>SpellID</th><th>Cost</th><th>Req Skill</th><th>Skill Rank</th><th>Req Lvl</th><th>Req Spell</th>{!readOnly && <th></th>}</tr>
@@ -1080,11 +1082,11 @@ export default function CreatureEditorPage() {
                           <button
                             tabIndex={-1}
                             onMouseDown={e => { e.preventDefault(); updateRow(i, col, String(Number(row[col] || 0) + 1)); }}
-                          >▲</button>
+                          >â–²</button>
                           <button
                             tabIndex={-1}
                             onMouseDown={e => { e.preventDefault(); updateRow(i, col, String(Math.max(0, Number(row[col] || 0) - 1))); }}
-                          >▼</button>
+                          >â–¼</button>
                         </>}
                       </div>
                     )}
@@ -1340,13 +1342,16 @@ export default function CreatureEditorPage() {
                   <div>
                     <h1 className="page-title">
                       {selected.name}
-                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>●</span>}
+                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>â—</span>}
                     </h1>
-                    <p className="page-sub">Entry #{selected.entry} · creature_template</p>
+                    <p className="page-sub">Entry #{selected.entry} Â· creature_template</p>
                   </div>
                   <div className="header-actions">
                     <button type="button" className={`btn-ghost ${splitRef ? 'active' : ''}`} onClick={() => setSplitRef(s => !s)} title="Toggle reference split">
                       <Columns2 size={13} /> Reference Split
+                    </button>
+                    <button type="button" className="btn-ghost" onClick={() => navigate(selected ? `/npc-workflow?entry=${selected.entry}` : '/npc-workflow')} title="Open NPC Workflow">
+                      <GitBranch size={13} /> NPC Workflow
                     </button>
                     {dirty && (
                       <button className="btn-ghost" onClick={handleReset} title="Discard changes">
@@ -1370,7 +1375,7 @@ export default function CreatureEditorPage() {
                 <div className="creature-ref-pane">
                   <div className="creature-ref-header">
                     <h3>Reference</h3>
-                    <p className="page-sub">Read-only · copy sections into draft</p>
+                    <p className="page-sub">Read-only Â· copy sections into draft</p>
                   </div>
                   <div className="creature-ref-search">
                     <div className="search-box">
@@ -1417,3 +1422,4 @@ function RankTag({ rank }) {
   const cls = rank === 3 ? 'tag-gold' : rank >= 1 ? 'tag-blue' : 'tag-green';
   return <span className={`tag ${cls}`}>{labels[rank] || 'Normal'}</span>;
 }
+

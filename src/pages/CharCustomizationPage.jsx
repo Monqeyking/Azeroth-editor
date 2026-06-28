@@ -7,6 +7,8 @@ import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { useBlpTexture } from '../lib/useBlpTexture';
 import CharM2Viewer from '../components/char/CharM2Viewer';
 import CharCreationPreview from '../components/char/CharCreationPreview';
+import TextureMaskEditor from '../components/char/TextureMaskEditor';
+import { Pencil } from 'lucide-react';
 
 
 const RACES = [
@@ -77,7 +79,7 @@ function SwatchItem({ row, isSelected, onClick }) {
   );
 }
 
-function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDataPath }) {
+function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDataPath, onEditTexture }) {
   const pickerRef = useRef(null);
 
   const selectedRow = useMemo(
@@ -172,7 +174,18 @@ function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDa
             <span className="cc-vp-detail-flags">{selectedRow.flags === 1 ? 'Player' : 'NPC'}</span>
           </div>
           <div className="cc-vp-slots">
-            <PreviewSlot label="Tex 1" path={selectedRow.tex1} />
+            <div className="cc-vp-slot-with-action">
+              <PreviewSlot label="Tex 1" path={selectedRow.tex1} />
+              {hasDataPath && selectedRow.tex1 && (
+                <button
+                  className="cc-btn cc-btn-ghost cc-edit-tex-btn"
+                  onClick={() => onEditTexture?.(selectedRow)}
+                  title="Texture bewerken (recolor)"
+                >
+                  <Pencil size={12} /> Bewerk
+                </button>
+              )}
+            </div>
             <PreviewSlot label="Tex 2" path={selectedRow.tex2} />
             <PreviewSlot label="Tex 3" path={selectedRow.tex3} />
           </div>
@@ -198,6 +211,7 @@ export default function CharCustomizationPage() {
   const [section,   setSection]  = useState(0);
   const [selectedId, setSelectedId] = useState(null);
   const [viewMode,  setViewMode] = useState('table'); // 'table' | 'preview'
+  const [editingTexRow, setEditingTexRow] = useState(null); // rij waarvan tex1 bewerkt wordt
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -249,6 +263,48 @@ export default function CharCustomizationPage() {
 
   const deleteRow = (id) => {
     setAllRecords(prev => prev.filter(r => r.id !== id));
+    setDirty(true);
+  };
+
+  const handleTextureSaved = (newRelPath) => {
+    const sourceRow = editingTexRow;
+    setEditingTexRow(null);
+    if (!sourceRow || !allRecords) return;
+
+    let nextId = allRecords.reduce((m, r) => Math.max(m, r.id), 0) + 1;
+    const groupRows = allRecords.filter(r =>
+      r.race === sourceRow.race && r.sex === sourceRow.sex && r.baseSection === sourceRow.baseSection
+    );
+
+    if (sourceRow.baseSection === 0) {
+      const nextColor = groupRows.reduce((m, r) => Math.max(m, r.colorIndex), -1) + 1;
+      const linkedSections = new Set([0, 1, 4]);
+      const templates = allRecords.filter(r =>
+        r.race === sourceRow.race && r.sex === sourceRow.sex &&
+        r.flags === sourceRow.flags && r.colorIndex === sourceRow.colorIndex &&
+        linkedSections.has(r.baseSection)
+      );
+      const clones = templates.map(r => ({
+        ...r,
+        id: nextId++,
+        colorIndex: nextColor,
+        tex1: r.id === sourceRow.id ? newRelPath : r.tex1,
+      }));
+      const selected = clones.find(r => r.baseSection === 0 && r.variationIndex === sourceRow.variationIndex);
+      setAllRecords(prev => [...prev, ...clones]);
+      if (selected) setSelectedId(selected.id);
+    } else {
+      const sameColorRows = groupRows.filter(r => r.colorIndex === sourceRow.colorIndex);
+      const nextVariation = sameColorRows.reduce((m, r) => Math.max(m, r.variationIndex), -1) + 1;
+      const newRow = {
+        ...sourceRow,
+        id: nextId,
+        tex1: newRelPath,
+        variationIndex: nextVariation,
+      };
+      setAllRecords(prev => [...prev, newRow]);
+      setSelectedId(newRow.id);
+    }
     setDirty(true);
   };
 
@@ -462,10 +518,20 @@ export default function CharCustomizationPage() {
               race={race}
               gender={gender}
               hasDataPath={!!worldmapMpqPath}
+              onEditTexture={setEditingTexRow}
             />
           </div>
         )}
       </div>
+
+      {editingTexRow && (
+        <TextureMaskEditor
+          dataPath={worldmapMpqPath}
+          blpPath={editingTexRow.tex1}
+          onClose={() => setEditingTexRow(null)}
+          onSaved={handleTextureSaved}
+        />
+      )}
     </div>
     </>
   );
