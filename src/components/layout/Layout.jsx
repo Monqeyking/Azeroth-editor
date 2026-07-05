@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Map, Lock, Database, Globe
+  Layers, ShoppingBag, Map, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -18,6 +18,7 @@ const NAV_GROUPS = [
     items: [
       { to: '/creatures',      icon: Swords,      label: 'Creatures' },
       { to: '/npc-workflow',   icon: GitBranch,   label: 'NPC Workflow' },
+      { to: '/professions',    icon: Hammer,      label: 'Professions' },
       { to: '/trainer-spells', icon: BookOpen,     label: 'Trainers' },
       { to: '/vendors',        icon: ShoppingBag,  label: 'Vendors' },
     ],
@@ -37,7 +38,8 @@ const NAV_GROUPS = [
     label: 'Quests & Story',
     icon: ScrollText,
     items: [
-      { to: '/quests', icon: ScrollText, label: 'Quests' },
+      { to: '/quests',       icon: ScrollText, label: 'Quests' },
+      { to: '/achievements', icon: Trophy,     label: 'Achievements' },
     ],
   },
   {
@@ -57,8 +59,9 @@ const NAV_GROUPS = [
     icon: Monitor,
     wip: true,
     items: [
-      { to: '/editor3d',        icon: Monitor, label: '3D Editor' },
-      { to: '/map',             icon: Map,     label: 'Spawn Map' },
+      { to: '/editor3d',        icon: Monitor,    label: '3D Editor' },
+      { to: '/ui-editor',       icon: LayoutGrid, label: 'UI Editor' },
+      { to: '/map',             icon: Map,        label: 'Spawn Map' },
       { to: '/worldmap',        icon: Globe,   label: 'World Map' },
       { to: '/expansion-lock',  icon: Lock,    label: 'Expansion Lock' },
     ],

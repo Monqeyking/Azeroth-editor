@@ -25,10 +25,12 @@ export default function TrainerSpellPage() {
   const [trainerList, setTrainerList] = useState([]);   // alle trainer templates
   const [msg, setMsg] = useState(null);
   const [saving, setSaving] = useState(false);
-  const [uiMode, setUiMode] = useState('visual');
-  const searchRef = useRef(null);
   const [searchParams] = useSearchParams();
+  const trainerIdParam = Number(searchParams.get('trainerId')) || 0;
+  const [uiMode, setUiMode] = useState(searchParams.get('mode') === 'advanced' ? 'advanced' : 'visual');
+  const searchRef = useRef(null);
   const prefillRef = useRef(false);
+  const trainerAutoSelectRef = useRef(false);
 
   const searchSpells = useCallback(async (term) => {
     setLoading(true);
@@ -101,17 +103,17 @@ export default function TrainerSpellPage() {
   }, []);
 
   useEffect(() => {
-    const trainerId = Number(searchParams.get('trainerId')) || 0;
-    if (!trainerId || prefillRef.current || trainerList.length === 0) return;
-    const preset = trainerList.find(t => Number(t.TrainerId) === trainerId);
+    if (!trainerIdParam || prefillRef.current || trainerList.length === 0) return;
+    const preset = trainerList.find(t => Number(t.TrainerId) === trainerIdParam);
     setTrainerDraft(d => ({
       ...d,
-      trainerId: String(trainerId),
-      search: preset?.label || preset?.trainerNames || String(trainerId),
+      trainerId: String(trainerIdParam),
+      search: preset?.label || preset?.trainerNames || String(trainerIdParam),
     }));
     prefillRef.current = true;
-    setMsg({ type: 'info', text: 'Prefilled trainer #' + trainerId + ' from NPC Workflow' });
-  }, [searchParams, trainerList]);
+    setMsg({ type: 'info', text: 'Prefilled trainer #' + trainerIdParam + ' from NPC Workflow' });
+  }, [trainerIdParam, trainerList]);
+
 
   const loadTrainers = useCallback(async (spellId) => {
     const res = await query(
@@ -211,6 +213,26 @@ export default function TrainerSpellPage() {
     }));
     setTrainersMap(tMap);
   }, [searchSpellsDbc, readSpellFull, loadTrainers]);
+
+  useEffect(() => {
+    if (!trainerIdParam || trainerAutoSelectRef.current || uiMode !== 'advanced') return;
+    let cancelled = false;
+    (async () => {
+      const res = await query('SELECT SpellId FROM trainer_spell WHERE TrainerId = ? ORDER BY ReqLevel, SpellId LIMIT 1', [trainerIdParam]);
+      const spellId = Number(res.data?.[0]?.SpellId || 0);
+      if (!spellId || cancelled) return;
+      const full = await readSpellFull(spellId);
+      const spellName = full.success ? full.data?.Name_Lang_enUS : '';
+      if (!spellName || cancelled) return;
+      trainerAutoSelectRef.current = true;
+      setSearch(spellName);
+      await selectName(spellName);
+      setMsg({ type: 'info', text: 'Opened spells for trainer #' + trainerIdParam });
+    })().catch(err => {
+      if (!cancelled) setMsg({ type: 'error', text: err.message });
+    });
+    return () => { cancelled = true; };
+  }, [query, readSpellFull, selectName, trainerIdParam, uiMode]);
 
   const toggleExpand = (id, spellLevel) => {
     if (expandedId === id) {

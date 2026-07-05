@@ -42,9 +42,22 @@ const PCI_FIELDS = [
 const ACTION_TYPES = { 0: 'Spell', 1: 'Item', 64: 'Macro', 128: 'CMacro' };
 const ICON_BASE = 'https://wow.zamimg.com/images/wow/icons/medium/';
 
+function getMaskFromId(id) {
+  return 1 << (Number(id) - 1);
+}
+
+function rankLabel(rank) {
+  const num = Number(rank) || 0;
+  return num > 0 ? `Rank ${num}` : 'Passive';
+}
+
+function genderLabel(gender) {
+  return gender === 0 ? 'Male' : gender === 1 ? 'Female' : `Gender ${gender}`;
+}
+
 // ── Detail panel ─────────────────────────────────────────────────────────────
 
-function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
+function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readCharStartOutfit, onClose, onMsg }) {
   const [tab, setTab] = useState('position');
   const [posForm, setPosForm] = useState(null);
   const [posDirty, setPosDirty] = useState(false);
@@ -53,10 +66,18 @@ function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
   const [spellNames, setSpellNames] = useState({});
   const [actionsDirty, setActionsDirty] = useState(false);
   const [actionsSaving, setActionsSaving] = useState(false);
+  const [skillRows, setSkillRows] = useState([]);
+  const [skillTree, setSkillTree] = useState([]);
+  const [startBarSpells, setStartBarSpells] = useState([]);
+  const [startOutfits, setStartOutfits] = useState([]);
+  const [outfitNames, setOutfitNames] = useState({});
+  const [skillTreeError, setSkillTreeError] = useState('');
 
   const raceName  = RACES.find(r => r.id === raceId)?.name  ?? raceId;
   const className = CLASSES.find(c => c.id === classId)?.name ?? classId;
   const classColor = CLASSES.find(c => c.id === classId)?.color;
+  const raceMask = getMaskFromId(raceId);
+  const classMask = getMaskFromId(classId);
 
   // Load position
   useEffect(() => {
@@ -96,6 +117,128 @@ function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
       }
     });
   }, [raceId, classId]);
+
+  useEffect(() => {
+    query(
+      'SELECT skill, rank FROM playercreateinfo_skills WHERE raceMask = ? AND classMask = ? ORDER BY skill',
+      [raceMask, classMask]
+    ).then(r => {
+      setSkillRows((r.data || []).map(row => ({
+        skill: Number(row.skill),
+        rank: Number(row.rank) || 0,
+      })));
+    }).catch(() => {
+      setSkillRows([]);
+    });
+  }, [query, raceMask, classMask]);
+
+  useEffect(() => {
+    readCharStartOutfit({ race: raceId, classId }).then(async result => {
+      if (!result?.success) {
+        setStartOutfits([]);
+        setOutfitNames({});
+        return;
+      }
+      const rows = result.data || [];
+      setStartOutfits(rows);
+      const itemIds = [...new Set(rows.flatMap(row => row.items || []).map(item => Number(item.itemId)).filter(id => id > 0))];
+      if (!itemIds.length) {
+        setOutfitNames({});
+        return;
+      }
+
+      try {
+        const placeholders = itemIds.map(() => '?').join(',');
+        const namesRes = await query(`SELECT entry, name FROM item_template WHERE entry IN (${placeholders})`, itemIds);
+        const map = {};
+        (namesRes.data || []).forEach(row => { map[Number(row.entry)] = row.name; });
+        setOutfitNames(map);
+      } catch {
+        setOutfitNames({});
+      }
+    }).catch(() => {
+      setStartOutfits([]);
+      setOutfitNames({});
+    });
+  }, [readCharStartOutfit, query, raceId, classId]);
+
+  useEffect(() => {
+    const spellIds = [...new Set(
+      actions
+        .filter(a => Number(a.type) === 0 && Number(a.action) > 0)
+        .map(a => Number(a.action))
+    )];
+    if (!spellIds.length) {
+      setSkillTree([]);
+      setStartBarSpells([]);
+      setSkillTreeError('');
+      return;
+    }
+
+    readSkillLineTree({ spellIds, raceMask, classMask }).then(result => {
+      if (!result?.success) {
+        setSkillTree([]);
+        setStartBarSpells([]);
+        setSkillTreeError(result?.error || 'Could not read skill line data');
+        return;
+      }
+
+      const grouped = new Map();
+      const startBar = [];
+      for (const action of actions) {
+        if (Number(action.type) !== 0 || Number(action.action) <= 0) continue;
+        const spellId = Number(action.action);
+        const spellName = spellNames[spellId] || `Spell #${spellId}`;
+        const spellData = result.data?.[spellId] || { matches: [], allMatches: [] };
+        const matches = spellData.matches || [];
+        const allMatches = spellData.allMatches || [];
+        const nodes = matches.length ? matches : [
+          { skillLineId: 0, skillLineName: 'Unmapped', categoryName: 'Other', minSkillLineRank: 0 }
+        ];
+        const hasOtherRaceMatch = !matches.length && allMatches.some(row => Number(row.raceMask) && !(Number(row.raceMask) & raceMask));
+
+        startBar.push({
+          button: Number(action.button),
+          spellId,
+          spellName,
+          hasMatch: matches.length > 0,
+          hasOtherRaceMatch,
+          topLabel: matches[0]?.skillLineName || allMatches[0]?.skillLineName || 'No direct combo match',
+        });
+
+        for (const node of nodes) {
+          const groupKey = `${node.categoryName}::${node.skillLineId}`;
+          if (!grouped.has(groupKey)) {
+            grouped.set(groupKey, {
+              categoryName: node.categoryName,
+              skillLineId: node.skillLineId,
+              skillLineName: node.skillLineName,
+              items: [],
+            });
+          }
+          grouped.get(groupKey).items.push({
+            button: Number(action.button),
+            spellId,
+            spellName,
+            minSkillLineRank: Number(node.minSkillLineRank) || 0,
+            suspect: !matches.length,
+            otherRaceOnly: hasOtherRaceMatch,
+          });
+        }
+      }
+
+      const tree = [...grouped.values()]
+        .map(group => ({
+          ...group,
+          items: group.items.sort((a, b) => a.button - b.button || a.spellName.localeCompare(b.spellName)),
+        }))
+        .sort((a, b) => a.categoryName.localeCompare(b.categoryName) || a.skillLineName.localeCompare(b.skillLineName));
+
+      setStartBarSpells(startBar.sort((a, b) => a.button - b.button || a.spellName.localeCompare(b.spellName)));
+      setSkillTree(tree);
+      setSkillTreeError('');
+    });
+  }, [actions, spellNames, readSkillLineTree, raceMask, classMask]);
 
   const lookupSpellName = async (spellId) => {
     if (!spellId || spellNames[spellId]) return;
@@ -163,6 +306,12 @@ function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
           </button>
           <button className={tab === 'actions' ? 'active' : ''} onClick={() => setTab('actions')}>
             Action Bar {actions.length > 0 && <span className="rc-tab-count">{actions.length}</span>}
+          </button>
+          <button className={tab === 'skills' ? 'active' : ''} onClick={() => setTab('skills')}>
+            Skill Tree {(skillTree.length > 0 || skillRows.length > 0) && <span className="rc-tab-count">{skillTree.length + skillRows.length}</span>}
+          </button>
+          <button className={tab === 'outfits' ? 'active' : ''} onClick={() => setTab('outfits')}>
+            Start Outfit {startOutfits.length > 0 && <span className="rc-tab-count">{startOutfits.length}</span>}
           </button>
         </div>
         <button className="rc-wizard-close" onClick={onClose}><X size={14} /></button>
@@ -264,6 +413,121 @@ function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
           </div>
         </div>
       )}
+
+      {tab === 'outfits' && (
+        <div className="rc-detail-body">
+          {startOutfits.length > 0 ? (
+            <div className="rc-outfit-list">
+              {startOutfits.map(outfit => (
+                <div key={`${outfit.id}-${outfit.gender}-${outfit.outfitId}`} className="rc-outfit-card">
+                  <div className="rc-outfit-head">
+                    <span className="rc-outfit-title">{genderLabel(outfit.gender)}</span>
+                    <span className="rc-outfit-meta">Record {outfit.id}</span>
+                    <span className="rc-outfit-meta">Race {outfit.race}</span>
+                    <span className="rc-outfit-meta">Class {outfit.classId}</span>
+                    <span className="rc-outfit-meta">Outfit {outfit.outfitId}</span>
+                    <span className="rc-outfit-meta">{outfit.items.length} items</span>
+                  <div className="rc-outfit-debug">
+                    <span className="rc-outfit-meta">Packed tuple {outfit.race}/{outfit.classId}/{outfit.gender}/{outfit.outfitId}</span>
+                  </div>
+                  </div>
+                  <div className="rc-outfit-items">
+                    {outfit.items.map(item => (
+                      <div key={`${outfit.id}-${item.slotIndex}-${item.itemId}`} className="rc-outfit-item">
+                        <span className="rc-outfit-slot">Inv {item.inventorySlot || item.slotIndex}</span>
+                        <span className="rc-outfit-name">{outfitNames[item.itemId] || `Item #${item.itemId || 0}`}</span>
+                        <span className="rc-outfit-meta">Item {item.itemId > 0 ? item.itemId : '-'}</span>
+                        <span className="rc-outfit-meta">Display {item.displayId > 0 ? item.displayId : '-'}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="rc-skill-empty">No CharStartOutfit rows found for this combo.</div>
+          )}
+        </div>
+      )}
+
+      {tab === 'skills' && (
+        <div className="rc-detail-body">
+          <div className="rc-skill-section">
+            <div className="rc-skill-section-head">
+              <span className="rc-skill-section-title">Start Bar Spells</span>
+              <span className="rc-skill-section-sub">Exact race+class action-bar rows, including inherited references</span>
+            </div>
+            {startBarSpells.length > 0 ? (
+              <div className="rc-startbar-list">
+                {startBarSpells.map(item => (
+                  <div key={`${item.button}-${item.spellId}`} className="rc-startbar-item">
+                    <span className="rc-skill-button">#{item.button}</span>
+                    <span className="rc-skill-spell">{item.spellName}</span>
+                    <span className="rc-skill-meta">Spell {item.spellId}</span>
+                    <span className="rc-skill-meta">{item.topLabel}</span>
+                    {!item.hasMatch && <span className="rc-suspect-badge">No direct combo match</span>}
+                    {item.hasOtherRaceMatch && <span className="rc-suspect-badge warn">Inherited reference</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="rc-skill-empty">No spell actions on the start bar for this combo.</div>
+            )}
+          </div>
+
+          <div className="rc-skill-section">
+            <div className="rc-skill-section-head">
+              <span className="rc-skill-section-title">Combo Skills</span>
+              <span className="rc-skill-section-sub">playercreateinfo_skills rows plus grouped skillline references</span>
+            </div>
+
+            {skillRows.length > 0 && (
+              <div className="rc-skill-ranks">
+                {skillRows.map(row => (
+                  <div key={row.skill} className="rc-skill-rank-pill">
+                    <span className="rc-skill-rank-id">Skill #{row.skill}</span>
+                    <span className="rc-skill-rank-value">{rankLabel(row.rank)}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {skillTreeError && <div className="rc-skill-empty">{skillTreeError}</div>}
+
+            {!skillTreeError && skillTree.length > 0 && (
+              <div className="rc-skill-tree">
+                {skillTree.map(group => (
+                  <div key={`${group.categoryName}-${group.skillLineId}`} className="rc-skill-group">
+                    <div className="rc-skill-group-head">
+                      <span className="rc-skill-category">{group.categoryName}</span>
+                      <span className="rc-skill-line-name">{group.skillLineName}</span>
+                      <span className="rc-skill-count">{group.items.length}</span>
+                    </div>
+                    <div className="rc-skill-items">
+                      {group.items.map(item => (
+                        <div key={`${group.skillLineId}-${item.spellId}-${item.button}`} className="rc-skill-item">
+                          <span className="rc-skill-button">#{item.button}</span>
+                          <span className="rc-skill-spell">{item.spellName}</span>
+                          <span className="rc-skill-meta">Spell {item.spellId}</span>
+                          {item.minSkillLineRank > 0 && <span className="rc-skill-meta">{rankLabel(item.minSkillLineRank)}</span>}
+                          {item.suspect && <span className="rc-suspect-badge">No direct combo match</span>}
+                          {item.otherRaceOnly && <span className="rc-suspect-badge warn">Inherited reference</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!skillTreeError && skillTree.length === 0 && skillRows.length === 0 && (
+              <div className="rc-skill-empty">
+                No grouped combo skills found yet.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -271,7 +535,7 @@ function DetailPanel({ raceId, classId, query, dbcPath, onClose, onMsg }) {
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RaceClassPage() {
-  const { query, dbcPath } = useConnection();
+  const { query, dbcPath, readSkillLineTree, readCharStartOutfit } = useConnection();
   const [dbCombos, setDbCombos]   = useState([]);
   const [dbcCombos, setDbcCombos] = useState([]);
   const [selectedRace, setSelectedRace] = useState(1);
@@ -464,6 +728,8 @@ export default function RaceClassPage() {
             classId={detailCombo.classId}
             query={query}
             dbcPath={dbcPath}
+            readSkillLineTree={readSkillLineTree}
+            readCharStartOutfit={readCharStartOutfit}
             onClose={() => setDetailCombo(null)}
             onMsg={setMsg}
           />

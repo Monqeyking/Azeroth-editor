@@ -175,7 +175,7 @@ export default function NPCWorkflowPage() {
     }
 
     if (trainerEnabled && trainerType === 2) {
-      warnings.push({ tone: 'info', text: 'Profession spell authoring stays in Trainer Spells for now. A future Profession Editor tab can handle recipes and reagent gates separately.' });
+      warnings.push({ tone: 'info', text: 'Profession editing lives in the separate Profession Editor tab. Use it for recipes, reagent gates, and profession-specific variants.' });
     }
 
     if (legacyCount > 0) {
@@ -731,7 +731,7 @@ export default function NPCWorkflowPage() {
                         Linked creature_default_trainer + trainer row. Current class requirement: {classLabel}.
                       </div>
                       <div className="npcwf-note npcwf-plan-note">
-                        Profession trainers stay in Trainer Spells for now. A future Profession Editor tab can manage recipes, reagents, and skill-line gating without mixing them into class trainer setup.
+                        Profession trainers use the separate Profession Editor tab for recipes, reagents, and skill-line gating.
                       </div>
                     </>
                   )}
@@ -784,12 +784,3 @@ export default function NPCWorkflowPage() {
     </>
   );
 }
-
-
-
-
-
-
-
-
-
