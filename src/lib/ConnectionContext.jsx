@@ -32,6 +32,7 @@ export function ConnectionProvider({ children }) {
     spell: 4000000,
     quest: 4000000,
     talent: 4000000,
+    achievement: 4000000,
   });
 
   useEffect(() => {
@@ -82,6 +83,32 @@ export function ConnectionProvider({ children }) {
   }, [soapConfig]);
 
   // DBC-only (no database)
+  const readAchievementsOverview = useCallback(async () => {
+    return window.azeroth.dbc.readAchievementsOverview(dbcPath);
+  }, [dbcPath]);
+
+  const writeAchievement = useCallback(async (achievement) => {
+    return window.azeroth.dbc.writeAchievement(dbcPath, achievement);
+  }, [dbcPath]);
+
+  const createAchievement = useCallback(async (payload) => {
+    const fn = window.azeroth?.dbc?.createAchievement;
+    if (typeof fn !== 'function') return { success: false, error: 'Electron preload is outdated. Restart the app to use createAchievement.' };
+    return fn(dbcPath, payload);
+  }, [dbcPath]);
+
+  const deleteAchievement = useCallback(async (achievementId) => {
+    const fn = window.azeroth?.dbc?.deleteAchievement;
+    if (typeof fn !== 'function') return { success: false, error: 'Electron preload is outdated. Restart the app to use deleteAchievement.' };
+    return fn(dbcPath, achievementId);
+  }, [dbcPath]);
+
+  const writeAchievementCriteria = useCallback(async (achievementId, criteria) => {
+    const fn = window.azeroth?.dbc?.writeAchievementCriteria;
+    if (typeof fn !== 'function') return { success: false, error: 'Electron preload is outdated. Restart the app to use achievement criteria editing.' };
+    return fn(dbcPath, achievementId, criteria);
+  }, [dbcPath]);
+
   const readTalentTabs = useCallback(async () => {
     return window.azeroth.dbc.readTalentTabs(dbcPath);
   }, [dbcPath]);
@@ -96,6 +123,10 @@ export function ConnectionProvider({ children }) {
 
   const readSpellIcons = useCallback(async (iconIds) => {
     return window.azeroth.dbc.readSpellIcons(dbcPath, iconIds);
+  }, [dbcPath]);
+
+  const readItemIcons = useCallback(async (itemIds) => {
+    return window.azeroth.dbc.readItemIcons(dbcPath, itemIds);
   }, [dbcPath]);
 
   const saveTalent = useCallback(async (talent) => {
@@ -138,6 +169,10 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.readSkillLineAbility(dbcPath, spellId);
   }, [dbcPath]);
 
+  const readSkillLineTree = useCallback(async (opts) => {
+    return window.azeroth.dbc.readSkillLineTree(dbcPath, opts);
+  }, [dbcPath]);
+
   const addSkillLineAbility = useCallback(async (entry) => {
     return window.azeroth.dbc.addSkillLineAbility(dbcPath, entry);
   }, [dbcPath]);
@@ -168,6 +203,10 @@ export function ConnectionProvider({ children }) {
 
   const readRanges = useCallback(async () => {
     return window.azeroth.dbc.readRanges(dbcPath);
+  }, [dbcPath]);
+
+  const readCharStartOutfit = useCallback(async (opts) => {
+    return window.azeroth.dbc.readCharStartOutfit(dbcPath, opts);
   }, [dbcPath]);
 
   const readCharSections = useCallback(async () => {
@@ -234,13 +273,14 @@ export function ConnectionProvider({ children }) {
       soapStatus, setSoapStatus,
       connectDb, disconnectDb,
       query, soapCommand,
-      readTalentTabs, readTalents, readSpells, readSpellIcons, saveTalent,
+      readAchievementsOverview, writeAchievement, createAchievement, deleteAchievement, writeAchievementCriteria,
+      readTalentTabs, readTalents, readSpells, readSpellIcons, readItemIcons, saveTalent,
       getIcon, writeTalent, deleteTalent, insertTalent,
       findNextId, findNextTalentId, copyTalentDbc,
       searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
-      readSkillLineAbility, addSkillLineAbility,
+      readSkillLineAbility, readSkillLineTree, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
-      readCharSections, writeCharSections,
+      readCharStartOutfit, readCharSections, writeCharSections,
       readBlpTexture, readBlpTextures,
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,

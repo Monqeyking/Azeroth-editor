@@ -30,6 +30,24 @@ function getMpqReader() {
   return mpqReader;
 }
 
+function getUiOutputRoot() {
+  return path.join(app.getAppPath(), 'output');
+}
+
+function decodeTextBuffer(buf) {
+  if (!Buffer.isBuffer(buf)) return null;
+  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) return buf.toString('utf16le', 2);
+  if (buf.length >= 2 && buf[0] === 0xfe && buf[1] === 0xff) {
+    const swapped = Buffer.allocUnsafe(buf.length - 2);
+    for (let i = 2; i < buf.length; i += 2) {
+      swapped[i - 2] = buf[i + 1];
+      swapped[i - 1] = buf[i];
+    }
+    return swapped.toString('utf16le');
+  }
+  return buf.toString('utf8').replace(/^﻿/, '');
+}
+
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
 
 // Force custom taskbar icon in dev mode (Windows)
@@ -303,6 +321,20 @@ const SPELL_OFFSETS = {
   RangeIndex:               { offset: 184, type: 'uint32' },
   Speed:                    { offset: 188, type: 'float'  },
   CumulativeAura:           { offset: 196, type: 'uint32' },
+  Totem_1:                  { offset: 228, type: 'uint32' },
+  Totem_2:                  { offset: 232, type: 'uint32' },
+  Reagent_1:                { offset: 236, type: 'uint32' },
+  Reagent_2:                { offset: 240, type: 'uint32' },
+  Reagent_3:                { offset: 244, type: 'uint32' },
+  Reagent_4:                { offset: 248, type: 'uint32' },
+  Reagent_5:                { offset: 252, type: 'uint32' },
+  Reagent_6:                { offset: 256, type: 'uint32' },
+  ReagentCount_1:           { offset: 260, type: 'uint32' },
+  ReagentCount_2:           { offset: 264, type: 'uint32' },
+  ReagentCount_3:           { offset: 268, type: 'uint32' },
+  ReagentCount_4:           { offset: 272, type: 'uint32' },
+  ReagentCount_5:           { offset: 276, type: 'uint32' },
+  ReagentCount_6:           { offset: 280, type: 'uint32' },
   Effect_1:                 { offset: 284, type: 'uint32' },
   Effect_2:                 { offset: 288, type: 'uint32' },
   Effect_3:                 { offset: 292, type: 'uint32' },
@@ -318,6 +350,9 @@ const SPELL_OFFSETS = {
   EffectAura_1:             { offset: 380, type: 'uint32' },
   EffectAura_2:             { offset: 384, type: 'uint32' },
   EffectAura_3:             { offset: 388, type: 'uint32' },
+  EffectMiscValue_1:        { offset: 428, type: 'uint32' },
+  EffectMiscValue_2:        { offset: 432, type: 'uint32' },
+  EffectMiscValue_3:        { offset: 436, type: 'uint32' },
   EffectTriggerSpell_1:     { offset: 464, type: 'uint32' },
   EffectTriggerSpell_2:     { offset: 468, type: 'uint32' },
   EffectTriggerSpell_3:     { offset: 472, type: 'uint32' },
@@ -763,6 +798,325 @@ async function loadSpellDbc(dbcPath) {
   return dbc;
 }
 
+function dbcStringAt(dbc, row, fieldIndex) {
+  return getString(dbc.stringBlock, Math.max(0, Number(row[fieldIndex]) || 0));
+}
+
+function summarizeAchievementCriterion(criterion) {
+  const bits = [];
+  if (criterion.quantity) bits.push('x' + criterion.quantity);
+  if (criterion.asset1) bits.push('A1 ' + criterion.asset1);
+  if (criterion.asset2) bits.push('A2 ' + criterion.asset2);
+  if (criterion.asset3) bits.push('A3 ' + criterion.asset3);
+  if (criterion.asset4) bits.push('A4 ' + criterion.asset4);
+
+  switch (criterion.type) {
+    case 5:
+      return 'Reach level ' + (criterion.asset2 || criterion.asset1 || criterion.quantity || 0);
+    default:
+      return bits.length ? ('Type ' + criterion.type + ' - ' + bits.join(' - ')) : ('Type ' + criterion.type);
+  }
+}
+
+ipcMain.handle('dbc:readAchievementsOverview', async (_, dbcPath) => {
+  try {
+    const achievementBuffer = fs.readFileSync(path.join(dbcPath, 'Achievement.dbc'));
+    const criteriaBuffer = fs.readFileSync(path.join(dbcPath, 'Achievement_Criteria.dbc'));
+    const categoryBuffer = fs.readFileSync(path.join(dbcPath, 'Achievement_Category.dbc'));
+
+    const achievementsDbc = parseDbc(achievementBuffer);
+    const criteriaDbc = parseDbc(criteriaBuffer);
+    const categoriesDbc = parseDbc(categoryBuffer);
+
+    const categories = categoriesDbc.records.map((row) => ({
+      id: Number(row[0]) || 0,
+      parentId: Number(row[1]) || -1,
+      name: dbcStringAt(categoriesDbc, row, 2),
+      sortOrder: Number(row[19]) || 0,
+    }));
+
+    const criteriaByAchievement = new Map();
+    for (const row of criteriaDbc.records) {
+      const criterion = {
+        id: Number(row[0]) || 0,
+        achievementId: Number(row[1]) || 0,
+        type: Number(row[2]) || 0,
+        asset1: Number(row[3]) || 0,
+        asset2: Number(row[4]) || 0,
+        asset3: Number(row[5]) || 0,
+        asset4: Number(row[6]) || 0,
+        quantity: Number(row[7]) || 0,
+        startEvent: Number(row[8]) || 0,
+        startAsset: Number(row[9]) || 0,
+        failEvent: Number(row[10]) || 0,
+        failAsset: Number(row[11]) || 0,
+        description: dbcStringAt(criteriaDbc, row, 12),
+        flags: Number(row[29]) || 0,
+        orderIndex: Number(row[30]) || 0,
+      };
+      criterion.summary = summarizeAchievementCriterion(criterion);
+      if (!criteriaByAchievement.has(criterion.achievementId)) criteriaByAchievement.set(criterion.achievementId, []);
+      criteriaByAchievement.get(criterion.achievementId).push(criterion);
+    }
+
+    const achievements = achievementsDbc.records.map((row) => {
+      const id = Number(row[0]) || 0;
+      const criteria = (criteriaByAchievement.get(id) || []).sort((a, b) => a.orderIndex - b.orderIndex || a.id - b.id);
+      return {
+        id,
+        faction: Number(row[1]) || 0,
+        mapId: Number(row[2]) || 0,
+        previousAchievementId: Number(row[3]) || 0,
+        name: dbcStringAt(achievementsDbc, row, 4),
+        description: dbcStringAt(achievementsDbc, row, 21),
+        categoryId: Number(row[38]) || 0,
+        points: Number(row[39]) || 0,
+        orderInCategory: Number(row[40]) || 0,
+        flags: Number(row[41]) || 0,
+        iconId: Number(row[42]) || 0,
+        reward: dbcStringAt(achievementsDbc, row, 43),
+        minimumCriteria: Number(row[60]) || 0,
+        sharesCriteria: Number(row[61]) || 0,
+        criteriaCount: criteria.length,
+        criteria,
+      };
+    });
+
+    return {
+      success: true,
+      data: {
+        achievements,
+        categories,
+        stats: {
+          achievementCount: achievements.length,
+          criteriaCount: criteriaDbc.records.length,
+          categoryCount: categories.length,
+        },
+      },
+    };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+
+function createDbcStringAppender(existingStringBlock) {
+  const parts = [Buffer.from(existingStringBlock || Buffer.alloc(0))];
+  let offset = existingStringBlock?.length || 0;
+  return {
+    append(value) {
+      const normalized = String(value || '');
+      if (!normalized) return 0;
+      const buf = Buffer.from(normalized + '\0', 'utf8');
+      const at = offset;
+      parts.push(buf);
+      offset += buf.length;
+      return at;
+    },
+    build() {
+      return Buffer.concat(parts);
+    },
+  };
+}
+
+function rebuildDbcBuffer(raw, records, stringBlock) {
+  const fieldCount = raw.readUInt32LE(8);
+  const recordSize = raw.readUInt32LE(12);
+  const headerSize = 20;
+  const block = Buffer.isBuffer(stringBlock) ? stringBlock : Buffer.from(stringBlock || Buffer.alloc(0));
+  const out = Buffer.alloc(headerSize + records.length * recordSize + block.length);
+  raw.copy(out, 0, 0, headerSize);
+  out.writeUInt32LE(records.length, 4);
+  out.writeUInt32LE(fieldCount, 8);
+  out.writeUInt32LE(recordSize, 12);
+  out.writeUInt32LE(block.length, 16);
+  for (let i = 0; i < records.length; i++) {
+    const row = records[i];
+    for (let j = 0; j < fieldCount; j++) {
+      out.writeInt32LE(Number(row[j] || 0), headerSize + i * recordSize + j * 4);
+    }
+  }
+  block.copy(out, headerSize + records.length * recordSize);
+  return out;
+}
+
+function sanitizeAchievementInput(achievement) {
+  return {
+    id: Number(achievement?.id) || 0,
+    faction: Number(achievement?.faction) || 0,
+    mapId: Number(achievement?.mapId) || 0,
+    previousAchievementId: Number(achievement?.previousAchievementId) || 0,
+    name: String(achievement?.name || ''),
+    description: String(achievement?.description || ''),
+    categoryId: Number(achievement?.categoryId) || 0,
+    points: Number(achievement?.points) || 0,
+    orderInCategory: Number(achievement?.orderInCategory) || 0,
+    flags: Number(achievement?.flags) || 0,
+    iconId: Number(achievement?.iconId) || 0,
+    reward: String(achievement?.reward || ''),
+    minimumCriteria: Number(achievement?.minimumCriteria) || 0,
+    sharesCriteria: Number(achievement?.sharesCriteria) || 0,
+  };
+}
+
+function sanitizeCriterionInput(criterion, achievementId) {
+  return {
+    id: Number(criterion?.id) || 0,
+    achievementId: Number(achievementId) || 0,
+    type: Number(criterion?.type) || 0,
+    asset1: Number(criterion?.asset1) || 0,
+    asset2: Number(criterion?.asset2) || 0,
+    asset3: Number(criterion?.asset3) || 0,
+    asset4: Number(criterion?.asset4) || 0,
+    quantity: Number(criterion?.quantity) || 0,
+    startEvent: Number(criterion?.startEvent) || 0,
+    startAsset: Number(criterion?.startAsset) || 0,
+    failEvent: Number(criterion?.failEvent) || 0,
+    failAsset: Number(criterion?.failAsset) || 0,
+    description: String(criterion?.description || ''),
+    flags: Number(criterion?.flags) || 0,
+    orderIndex: Number(criterion?.orderIndex) || 0,
+  };
+}
+
+ipcMain.handle('dbc:writeAchievement', async (_, dbcPath, achievementInput) => {
+  try {
+    const filePath = path.join(dbcPath, 'Achievement.dbc');
+    const raw = fs.readFileSync(filePath);
+    const dbc = parseDbc(raw);
+    const achievement = sanitizeAchievementInput(achievementInput);
+    const rowIndex = dbc.records.findIndex((row) => Number(row[0]) === achievement.id);
+    if (rowIndex === -1) return { success: false, error: 'Achievement ' + achievement.id + ' niet gevonden' };
+
+    const rows = dbc.records.map((row) => row.slice());
+    const row = rows[rowIndex];
+    const strings = createDbcStringAppender(dbc.stringBlock);
+
+    row[1] = achievement.faction;
+    row[2] = achievement.mapId;
+    row[3] = achievement.previousAchievementId;
+    row[4] = strings.append(achievement.name);
+    row[21] = strings.append(achievement.description);
+    row[38] = achievement.categoryId;
+    row[39] = achievement.points;
+    row[40] = achievement.orderInCategory;
+    row[41] = achievement.flags;
+    row[42] = achievement.iconId;
+    row[43] = strings.append(achievement.reward);
+    row[60] = achievement.minimumCriteria;
+    row[61] = achievement.sharesCriteria;
+
+    fs.writeFileSync(filePath, rebuildDbcBuffer(raw, rows, strings.build()));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:writeAchievementCriteria', async (_, dbcPath, achievementIdInput, criteriaInput) => {
+  try {
+    const filePath = path.join(dbcPath, 'Achievement_Criteria.dbc');
+    const raw = fs.readFileSync(filePath);
+    const dbc = parseDbc(raw);
+    const achievementId = Number(achievementIdInput) || 0;
+    const criteria = Array.isArray(criteriaInput) ? criteriaInput.map((entry) => sanitizeCriterionInput(entry, achievementId)) : [];
+    const remaining = dbc.records.filter((row) => Number(row[1]) !== achievementId).map((row) => row.slice());
+    const strings = createDbcStringAppender(dbc.stringBlock);
+    const fieldCount = dbc.fieldCount;
+    let nextId = dbc.records.reduce((max, row) => Math.max(max, Number(row[0]) || 0), 0) + 1;
+
+    const existingById = new Map(dbc.records.map((row) => [Number(row[0]) || 0, row]));
+    const newRows = criteria
+      .slice()
+      .sort((a, b) => a.orderIndex - b.orderIndex || a.id - b.id)
+      .map((criterion) => {
+        const row = (existingById.get(criterion.id) || Array(fieldCount).fill(0)).slice();
+        row[0] = criterion.id > 0 ? criterion.id : nextId++;
+        row[1] = achievementId;
+        row[2] = criterion.type;
+        row[3] = criterion.asset1;
+        row[4] = criterion.asset2;
+        row[5] = criterion.asset3;
+        row[6] = criterion.asset4;
+        row[7] = criterion.quantity;
+        row[8] = criterion.startEvent;
+        row[9] = criterion.startAsset;
+        row[10] = criterion.failEvent;
+        row[11] = criterion.failAsset;
+        row[12] = strings.append(criterion.description);
+        row[29] = criterion.flags;
+        row[30] = criterion.orderIndex;
+        return row;
+      });
+
+    const finalRows = remaining.concat(newRows).sort((a, b) => (Number(a[1]) - Number(b[1])) || (Number(a[30]) - Number(b[30])) || (Number(a[0]) - Number(b[0])));
+    fs.writeFileSync(filePath, rebuildDbcBuffer(raw, finalRows, strings.build()));
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:createAchievement', async (_, dbcPath, payload = {}) => {
+  try {
+    const achievementPath = path.join(dbcPath, 'Achievement.dbc');
+    const raw = fs.readFileSync(achievementPath);
+    const dbc = parseDbc(raw);
+    const rows = dbc.records.map((row) => row.slice());
+    const strings = createDbcStringAppender(dbc.stringBlock);
+    const startId = Number(payload.startId) || 4000000;
+    const usedIds = new Set(rows.map((row) => Number(row[0]) || 0));
+    let newId = startId;
+    while (usedIds.has(newId)) newId += 1;
+    const template = Array(dbc.fieldCount).fill(0);
+    const categoryId = Number(payload.categoryId) || 0;
+    const baseName = String(payload.name || ('New Achievement ' + newId));
+    template[0] = newId;
+    template[1] = Number(payload.faction) || -1;
+    template[2] = Number(payload.mapId) || 0;
+    template[3] = Number(payload.previousAchievementId) || 0;
+    template[4] = strings.append(baseName);
+    template[21] = strings.append(String(payload.description || ''));
+    template[38] = categoryId;
+    template[39] = Number(payload.points) || 0;
+    template[40] = Number(payload.orderInCategory) || 0;
+    template[41] = Number(payload.flags) || 0;
+    template[42] = Number(payload.iconId) || 0;
+    template[43] = strings.append(String(payload.reward || ''));
+    template[60] = Number(payload.minimumCriteria) || 0;
+    template[61] = Number(payload.sharesCriteria) || 0;
+    rows.push(template);
+    fs.writeFileSync(achievementPath, rebuildDbcBuffer(raw, rows, strings.build()));
+    return { success: true, id: newId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:deleteAchievement', async (_, dbcPath, achievementIdInput) => {
+  try {
+    const achievementId = Number(achievementIdInput) || 0;
+    const achievementPath = path.join(dbcPath, 'Achievement.dbc');
+    const criteriaPath = path.join(dbcPath, 'Achievement_Criteria.dbc');
+
+    const achievementRaw = fs.readFileSync(achievementPath);
+    const achievementDbc = parseDbc(achievementRaw);
+    const achievementRows = achievementDbc.records.filter((row) => Number(row[0]) !== achievementId).map((row) => row.slice());
+    if (achievementRows.length === achievementDbc.records.length) return { success: false, error: 'Achievement niet gevonden' };
+
+    const criteriaRaw = fs.readFileSync(criteriaPath);
+    const criteriaDbc = parseDbc(criteriaRaw);
+    const deletedCriteria = criteriaDbc.records.filter((row) => Number(row[1]) === achievementId).length;
+    const criteriaRows = criteriaDbc.records.filter((row) => Number(row[1]) !== achievementId).map((row) => row.slice());
+
+    fs.writeFileSync(achievementPath, rebuildDbcBuffer(achievementRaw, achievementRows, achievementDbc.stringBlock));
+    fs.writeFileSync(criteriaPath, rebuildDbcBuffer(criteriaRaw, criteriaRows, criteriaDbc.stringBlock));
+    return { success: true, deletedCriteria };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 // SkillLineAbility.dbc: fields per record (recordSize read from header)
 // Offsets: ID(0), SkillLine(4), Spell(8), RaceMask(12), ClassMask(16),
 //          ExcludeRace(20), ExcludeClass(24), MinSkillLineRank(28),
@@ -790,6 +1144,108 @@ ipcMain.handle('dbc:readSkillLineAbility', async (_, dbcPath, spellId) => {
       }
     }
     return { success: true, data: results };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:readSkillLineTree', async (_, dbcPath, opts = {}) => {
+  try {
+    const abilityDbc = await readDbcFile(path.join(dbcPath, 'SkillLineAbility.dbc'));
+    const skillLineDbc = await readDbcFile(path.join(dbcPath, 'SkillLine.dbc'));
+    const categoryDbc = await readDbcFile(path.join(dbcPath, 'SkillLineCategory.dbc'));
+    if (!abilityDbc || !skillLineDbc || !categoryDbc) {
+      return { success: false, error: 'Kon SkillLine DBC bestanden niet lezen' };
+    }
+
+    const spellIds = new Set((opts.spellIds || []).map(Number).filter(Boolean));
+    const raceMask = Number(opts.raceMask) || 0;
+    const classMask = Number(opts.classMask) || 0;
+
+    const categoriesById = new Map();
+    for (let i = 0; i < categoryDbc.recordCount; i++) {
+      const off = i * categoryDbc.recordSize;
+      const id = categoryDbc.dataBuffer.readUInt32LE(off);
+      const name = getString(categoryDbc.stringBlock, categoryDbc.dataBuffer.readUInt32LE(off + 4)) || `Category ${id}`;
+      categoriesById.set(id, { id, name });
+    }
+
+    const skillLinesById = new Map();
+    for (let i = 0; i < skillLineDbc.recordCount; i++) {
+      const off = i * skillLineDbc.recordSize;
+      const id = skillLineDbc.dataBuffer.readUInt32LE(off);
+      skillLinesById.set(id, {
+        id,
+        categoryId: skillLineDbc.dataBuffer.readUInt32LE(off + 4),
+        name: getString(skillLineDbc.stringBlock, skillLineDbc.dataBuffer.readUInt32LE(off + 12)) || `SkillLine ${id}`,
+        description: getString(skillLineDbc.stringBlock, skillLineDbc.dataBuffer.readUInt32LE(off + 80)) || '',
+        spellIconId: skillLineDbc.dataBuffer.readUInt32LE(off + 152),
+      });
+    }
+
+    const matchesBySpell = new Map();
+    const allRowsBySpell = new Map();
+    for (let i = 0; i < abilityDbc.recordCount; i++) {
+      const off = i * abilityDbc.recordSize;
+      const spellId = abilityDbc.dataBuffer.readUInt32LE(off + 8);
+      if (!spellIds.has(spellId)) continue;
+
+      const rowRaceMask = abilityDbc.dataBuffer.readUInt32LE(off + 12);
+      const rowClassMask = abilityDbc.dataBuffer.readUInt32LE(off + 16);
+      const excludeRace = abilityDbc.dataBuffer.readUInt32LE(off + 20);
+      const excludeClass = abilityDbc.dataBuffer.readUInt32LE(off + 24);
+      const skillLineId = abilityDbc.dataBuffer.readUInt32LE(off + 4);
+      const skillLine = skillLinesById.get(skillLineId);
+      const category = categoriesById.get(skillLine?.categoryId) || null;
+      const row = {
+        id: abilityDbc.dataBuffer.readUInt32LE(off),
+        spellId,
+        skillLineId,
+        skillLineName: skillLine?.name || `SkillLine ${skillLineId}`,
+        skillLineDescription: skillLine?.description || '',
+        skillLineIconId: skillLine?.spellIconId || 0,
+        categoryId: category?.id || 0,
+        categoryName: category?.name || 'Uncategorized',
+        minSkillLineRank: abilityDbc.dataBuffer.readUInt32LE(off + 28),
+        supercededBySpell: abilityDbc.dataBuffer.readUInt32LE(off + 32),
+        acquireMethod: abilityDbc.dataBuffer.readUInt32LE(off + 36),
+        trivialLow: abilityDbc.dataBuffer.readUInt32LE(off + 40),
+        trivialHigh: abilityDbc.dataBuffer.readUInt32LE(off + 44),
+        raceMask: rowRaceMask,
+        classMask: rowClassMask,
+        excludeRace,
+        excludeClass,
+      };
+      if (!allRowsBySpell.has(spellId)) allRowsBySpell.set(spellId, []);
+      allRowsBySpell.get(spellId).push(row);
+
+      if (raceMask && rowRaceMask && !(rowRaceMask & raceMask)) continue;
+      if (classMask && rowClassMask && !(rowClassMask & classMask)) continue;
+      if (raceMask && excludeRace && (excludeRace & raceMask)) continue;
+      if (classMask && excludeClass && (excludeClass & classMask)) continue;
+
+      if (!matchesBySpell.has(spellId)) matchesBySpell.set(spellId, []);
+      matchesBySpell.get(spellId).push(row);
+    }
+
+    for (const rows of allRowsBySpell.values()) {
+      rows.sort((a, b) =>
+        Number(Boolean(b.classMask)) - Number(Boolean(a.classMask)) ||
+        Number(Boolean(b.raceMask)) - Number(Boolean(a.raceMask)) ||
+        a.skillLineName.localeCompare(b.skillLineName) ||
+        a.id - b.id
+      );
+    }
+
+    const payload = {};
+    for (const spellId of spellIds) {
+      payload[spellId] = {
+        matches: matchesBySpell.get(spellId) || [],
+        allMatches: allRowsBySpell.get(spellId) || [],
+      };
+    }
+
+    return { success: true, data: payload };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -1447,24 +1903,63 @@ ipcMain.handle('dbc:readSpellIcons', async (_, dbcPath, iconIds) => {
     const dbc = await readDbcFile(filePath);
     if (!dbc) return { success: true, data: {} };
 
-    console.log(`\n=== readSpellIcons: Looking for ${iconIds.length} icon IDs ===`);
+    console.log(`
+=== readSpellIcons: Looking for ${iconIds.length} icon IDs ===`);
     console.log(`First 10 icon IDs:`, iconIds.slice(0, 10).join(','));
     const icons = {};
     for (let i = 0; i < dbc.recordCount; i++) {
       const offset = i * dbc.recordSize;
       const id = readUInt32LE(dbc.dataBuffer, offset + 0);
       if (iconIds.includes(id)) {
-        // TextureFilename is at offset 4 (field 1)
         const filenameRef = readUInt32LE(dbc.dataBuffer, offset + 4);
         const filename = readStringFromBlock(dbc.dataBuffer, filenameRef, dbc.stringBlock);
         icons[id] = filename;
         console.log(`  SpellIcon ${id}: "${filename}"`);
       }
     }
-    console.log(`readSpellIcons: Found ${Object.keys(icons).length} icon filenames\n`);
+    console.log(`readSpellIcons: Found ${Object.keys(icons).length} icon filenames
+`);
     return { success: true, data: icons };
   } catch (e) {
     console.error('readSpellIcons error:', e);
+    return { success: true, data: {} };
+  }
+});
+
+ipcMain.handle('dbc:readItemIcons', async (_, dbcPath, itemIds) => {
+  try {
+    const itemDbc = await readDbcFile(path.join(dbcPath, 'Item.dbc'));
+    const displayDbc = await readDbcFile(path.join(dbcPath, 'ItemDisplayInfo.dbc'));
+    if (!itemDbc || !displayDbc) return { success: true, data: {} };
+
+    const itemIndex = dbcBuildIndex(itemDbc);
+    const displayIndex = dbcBuildIndex(displayDbc);
+    const displayIds = new Map();
+    for (const itemId of itemIds || []) {
+      const itemOff = itemIndex.get(Number(itemId));
+      if (itemOff === undefined) continue;
+      const displayId = readUInt32LE(itemDbc.dataBuffer, itemOff + 20);
+      if (displayId > 0) displayIds.set(Number(itemId), displayId);
+    }
+
+    const displayIcons = new Map();
+    for (const displayId of [...new Set(displayIds.values())]) {
+      const displayOff = displayIndex.get(displayId);
+      if (displayOff === undefined) continue;
+      const icon0Ref = readUInt32LE(displayDbc.dataBuffer, displayOff + 20);
+      const icon1Ref = readUInt32LE(displayDbc.dataBuffer, displayOff + 24);
+      const iconNameRef = icon0Ref || icon1Ref;
+      const iconName = iconNameRef ? readStringFromBlock(displayDbc.dataBuffer, iconNameRef, displayDbc.stringBlock) : '';
+      if (iconName) displayIcons.set(displayId, iconName);
+    }
+
+    const icons = {};
+    for (const [itemId, displayId] of displayIds.entries()) {
+      const iconName = displayIcons.get(displayId);
+      if (iconName) icons[itemId] = iconName;
+    }
+    return { success: true, data: icons };
+  } catch (e) {
     return { success: true, data: {} };
   }
 });
@@ -1490,7 +1985,7 @@ ipcMain.handle('dbc:readSpells', async (_, dbcPath, spellIds) => {
 
           // Verify offset 524 contains SpellIconID = 122
           const iconId524 = readUInt32LE(dbc.dataBuffer, offset + 524);
-          console.log(`  Offset 524: ${iconId524} (expected 122: ${iconId524 === 122 ? '✓' : '✗'})`);
+          console.log('  Offset 524: ' + iconId524 + ' (expected 122: ' + (iconId524 === 122 ? 'OK' : 'NO') + ')');
 
           // Scan all offsets to find string reference to "Convection"
           console.log(`  Scanning for "Convection"...`);
@@ -1538,7 +2033,7 @@ ipcMain.handle('db:findNextId', async (_, { table, idColumn, startId }) => {
   if (!dbConnection) return { success: false, error: 'Not connected' };
   try {
     const [rows] = await dbConnection.execute(
-      `SELECT \`${idColumn}\` FROM \`${table}\` WHERE \`${idColumn}\` >= ? ORDER BY \`${idColumn}\` ASC LIMIT 5000`,
+      `SELECT \`${idColumn}\` FROM \`${table}\` WHERE \`${idColumn}\` >= - ORDER BY \`${idColumn}\` ASC LIMIT 5000`,
       [Number(startId)]
     );
     const usedIds = new Set(rows.map(r => Number(r[idColumn])));
@@ -1837,7 +2332,7 @@ function decodeBLP1(buffer) {
     if (alphaBits === 8) {
       rgba[i*4+3] = buffer[mipOffset + mipSize + i] ?? 255;
     } else if (alphaBits === 1) {
-      rgba[i*4+3] = (buffer[mipOffset + mipSize + (i >> 3)] >> (i & 7)) & 1 ? 255 : 0;
+      rgba[i*4+3] = ((buffer[mipOffset + mipSize + (i >> 3)] >> (i & 7)) & 1) ? 255 : 0;
     } else if (alphaBits === 4) {
       const byte = buffer[mipOffset + mipSize + (i >> 1)];
       rgba[i*4+3] = (i & 1) ? ((byte >> 4) * 17) : ((byte & 0xF) * 17);
@@ -2098,7 +2593,7 @@ function rgbaToPNG(rgba, w, h) {
     let crc = 0xffffffff;
     for (let i = 4; i < 8 + data.length; i++) {
       crc ^= buf[i];
-      for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+      for (let k = 0; k < 8; k++) crc = (crc >>> 1) ^ ((crc & 1) ? 0xedb88320 : 0);
     }
     buf.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + data.length);
     return buf;
@@ -2193,7 +2688,7 @@ ipcMain.handle('spawns:search', async (_, { query, mapId, limit = 50 }) => {
               'creature' AS type, ct.faction AS faction
        FROM creature c
        JOIN creature_template ct ON c.id1 = ct.entry
-       WHERE c.map = ? AND (ct.name LIKE ? OR c.id1 = ?)
+       WHERE c.map = - AND (ct.name LIKE - OR c.id1 = ?)
        LIMIT ?`,
       [m, like, entryFilter, lm]
     );
@@ -2203,7 +2698,7 @@ ipcMain.handle('spawns:search', async (_, { query, mapId, limit = 50 }) => {
               'gameobject' AS type, NULL AS faction
        FROM gameobject g
        JOIN gameobject_template gt ON g.id = gt.entry
-       WHERE g.map = ? AND (gt.name LIKE ? OR g.id = ?)
+       WHERE g.map = - AND (gt.name LIKE - OR g.id = ?)
        LIMIT ?`,
       [m, like, entryFilter, lh]
     );
@@ -2926,7 +3421,7 @@ ipcMain.handle('adt:diagBLP', async (_, { blpPath }) => {
   const index = await reader.buildBlpIndex(dataPath);
   const key = blpPath.replace(/\//g, '\\').toLowerCase();
   const inIndex = index.has(key);
-  console.log(`[diagBLP] in BLP-index (${index.size} entries): ${inIndex} ${inIndex ? '→ ' + path.basename(index.get(key)) : ''}`);
+  console.log('[diagBLP] in BLP-index (' + index.size + ' entries): ' + inIndex + ' ' + (inIndex ? '-> ' + path.basename(index.get(key)) : ''));
 
   // Volledige lookup
   const buf = await reader.readBlpFromMpqs(dataPath, blpPath);
@@ -3451,7 +3946,7 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
   const candidates = [];
   if (extra?.bakeName) {
     const bake = extra.bakeName.replace(/\.blp$/i, '').replace(/\//g, '\\');
-    candidates.push(bake.includes('\\') ? `${bake}.blp` : `${modelDir}${bake}.blp`);
+    candidates.push(bake.includes('\\') ? (bake + '.blp') : (modelDir + bake + '.blp'));
   }
   if (extra) {
     candidates.push(...charSectionTextureCandidates(charSections, extra.race, extra.sex, extra.skin, extra.face));
@@ -3575,6 +4070,89 @@ const CHAR_M2_PATHS = {
   10: ['Character\\BloodElf\\Male\\BloodElfMale.m2',  'Character\\BloodElf\\Female\\BloodElfFemale.m2'],
   11: ['Character\\Draenei\\Male\\DraeneiMale.m2',    'Character\\Draenei\\Female\\DraeneiFemale.m2'],
 };
+function candidateModelTextures(modelPath, geo) {
+  const dir = modelPath.includes('\\') ? modelPath.slice(0, modelPath.lastIndexOf('\\') + 1) : '';
+  return creatureTextureCandidates(dir, modelPath, [], geo, []);
+}
+
+async function loadM2ByPath(dataPath, modelPath, log) {
+  const reader = getMpqReader();
+  const debugSteps = [];
+  const pushStep = (stage, detail) => {
+    const line = detail ? (stage + ': ' + detail) : stage;
+    debugSteps.push(line);
+    log(line);
+  };
+
+  pushStep('start', modelPath);
+  const geo = await getOrLoadM2Geometry(reader, dataPath, modelPath, log);
+  if (!geo?.skin) {
+    pushStep('abort', 'no skin');
+    return null;
+  }
+  pushStep('geometry', 'positions=' + geo.positions.length + ' textures=' + geo.textures.length + ' submeshes=' + geo.skin.submeshes.length);
+
+  const isLoginBackdrop = /UI_MainMenu_Northrend/i.test(modelPath || '');
+  const visible = isLoginBackdrop
+    ? new Set(geo.skin.submeshes.map((_, idx) => idx))
+    : resolveVisibleGeosets(geo.skin.submeshes, null, null, null, null);
+  const indexList = isLoginBackdrop
+    ? geo.skin.submeshes.flatMap(sm => {
+        const out = [];
+        for (let i = 0; i < sm.indexCount; i++) {
+          const triIdx = geo.skin.indexLookup[sm.indexStart + i];
+          out.push(geo.skin.vertexLookup[triIdx] ?? 0);
+        }
+        return out;
+      })
+    : buildIndicesFromSkin(geo.skin, visible);
+  pushStep('indices', 'visible=' + visible.size + ' final=' + indexList.length + (isLoginBackdrop ? ' (login backdrop: all submeshes)' : ''));
+  if (!indexList.length) {
+    pushStep('abort', 'no indices');
+    return null;
+  }
+
+  const candidates = candidateModelTextures(modelPath, geo);
+  pushStep('textures', 'candidates=' + candidates.length);
+  const tex = await loadFirstCreatureBlp(reader, dataPath, candidates, log);
+  pushStep('texture-load', tex?.blpPath ? ('hit ' + tex.blpPath) : 'miss');
+
+  return {
+    success: true,
+    data: {
+      positions: geo.positions,
+      normals: geo.normals,
+      uvs: geo.uvs,
+      indices: new Uint32Array(indexList),
+      submeshes: geo.skin.submeshes,
+      texturePaths: geo.textures.map(t => t.filename).filter(Boolean),
+      textureRgba: tex?.textureRgba ?? null,
+      textureW: tex?.textureW ?? 0,
+      textureH: tex?.textureH ?? 0,
+      modelPath,
+      texturePath: tex?.blpPath ?? null,
+      debug: {
+        modelPath,
+        textureLoaded: !!tex?.blpPath,
+        textureCandidates: candidates.slice(0, 20),
+        debugSteps,
+      },
+    },
+  };
+}
+
+ipcMain.handle('m2:loadModelByPath', async (_, { modelPath }) => {
+  try {
+    if (!modelPath) return { success: false, error: 'Geen modelPath' };
+    const dataPath = getM2DataPath();
+    if (!dataPath) return { success: false, error: 'Geen MPQ pad ingesteld' };
+    const log = (...a) => console.log(`[m2:path:${modelPath}]`, ...a);
+    return await loadM2ByPath(dataPath, modelPath, log) || { success: false, error: 'Model laden mislukt' };
+  } catch (e) {
+    console.error('[m2:loadModelByPath]', e);
+    return { success: false, error: e.message };
+  }
+});
 
 ipcMain.handle('m2:loadCharModel', async (_, { race, gender, skinBlp }) => {
   const log = (...a) => console.log(`[m2:char:${race}/${gender}]`, ...a);
@@ -3686,6 +4264,44 @@ ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
 
 // ─── CharBaseInfo.dbc ──────────────────────────────────────────────────────────
 // Structure: WDBC header (20 bytes) + N records of 2 bytes (uint8 race, uint8 class) + 1 byte string block
+
+ipcMain.handle('dbc:readCharStartOutfit', async (_, dbcPath, opts = {}) => {
+  try {
+    const dbc = await readDbcFile(path.join(dbcPath, 'CharStartOutfit.dbc'));
+    if (!dbc) return { success: false, error: 'Kon CharStartOutfit.dbc niet lezen' };
+
+    const wantRace = Number(opts.race) || 0;
+    const wantClass = Number(opts.classId) || 0;
+    const rows = [];
+
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const off = i * dbc.recordSize;
+      const id = dbc.dataBuffer.readUInt32LE(off);
+      const packed = dbc.dataBuffer.readUInt32LE(off + 4);
+      const race = packed & 0xFF;
+      const classId = (packed >>> 8) & 0xFF;
+      const gender = (packed >>> 16) & 0xFF;
+      const outfitId = (packed >>> 24) & 0xFF;
+      if (wantRace && race !== wantRace) continue;
+      if (wantClass && classId !== wantClass) continue;
+
+      const items = [];
+      for (let slot = 0; slot < 24; slot++) {
+        const itemId = dbc.dataBuffer.readUInt32LE(off + 8 + slot * 4);
+        const displayId = dbc.dataBuffer.readUInt32LE(off + 104 + slot * 4);
+        const inventorySlot = dbc.dataBuffer.readUInt32LE(off + 200 + slot * 4);
+        if (!itemId && !displayId && !inventorySlot) continue;
+        items.push({ slotIndex: slot, itemId, displayId, inventorySlot });
+      }
+
+      rows.push({ id, race, classId, gender, outfitId, items });
+    }
+
+    return { success: true, data: rows };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
 
 ipcMain.handle('dbc:readCharBaseInfo', async (_, dbcPath) => {
   try {
@@ -4082,6 +4698,37 @@ ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgb
 // ongeacht hoeveel BLPs erin zitten — groot verschil met de single-call handler.
 // Geeft een array terug in dezelfde volgorde als de input; ontbrekende BLPs krijgen
 // { success: false } zodat de caller per item kan beslissen.
+ipcMain.handle('glue:readTextFile', async (_, dataPath, internalPath) => {
+  try {
+    if (!dataPath || !internalPath) return { success: false, error: 'dataPath of internalPath ontbreekt' };
+    let buf = null;
+    const mpqReader = getMpqReader();
+    if (mpqReader.isDataPath(dataPath) && mpqReader.readFileFromMpqs) {
+      buf = await mpqReader.readFileFromMpqs(dataPath, internalPath);
+    }
+    if (!buf) {
+      const direct = path.join(dataPath, internalPath.replace(/\\/g, path.sep));
+      if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
+    }
+    if (!buf) return { success: false, error: 'Bestand niet gevonden', path: internalPath };
+    return { success: true, path: internalPath, text: decodeTextBuffer(buf) };
+  } catch (e) {
+    return { success: false, error: e.message, path: internalPath };
+  }
+});
+
+ipcMain.handle('glue:writeTextFile', async (_, relPath, text) => {
+  try {
+    if (!relPath) return { success: false, error: 'relPath ontbreekt' };
+    const outAbs = path.join(getUiOutputRoot(), relPath.replace(/\\/g, path.sep));
+    fs.mkdirSync(path.dirname(outAbs), { recursive: true });
+    fs.writeFileSync(outAbs, String(text ?? ''), 'utf8');
+    return { success: true, path: relPath, absPath: outAbs };
+  } catch (e) {
+    return { success: false, error: e.message, path: relPath };
+  }
+});
+
 ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
   try {
     if (!dataPath || !Array.isArray(blpPaths)) return [];
@@ -4192,6 +4839,5 @@ ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
     return blpPaths.map(p => ({ success: false, error: e.message, path: p }));
   }
 });
-
 
 

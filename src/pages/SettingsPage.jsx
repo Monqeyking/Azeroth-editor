@@ -10,6 +10,7 @@ const ID_RANGE_EDITORS = [
   { key: 'spell',    label: 'Spell' },
   { key: 'quest',    label: 'Quest' },
   { key: 'talent',   label: 'Talent' },
+  { key: 'achievement', label: 'Achievement' },
 ];
 
 export default function SettingsPage() {

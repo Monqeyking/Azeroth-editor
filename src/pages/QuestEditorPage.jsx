@@ -6,7 +6,7 @@ import './EditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
-// ── Constants ──────────────────────────────────────────────────────────────
+// â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const QUEST_TYPE_OPTIONS = [
   '0:Auto-complete (skips objectives)','1:Disabled','2:Enabled (normal)',
 ];
@@ -68,15 +68,18 @@ const QUEST_FLAGS_BITS = {
   1073741824:'Items Glow When Done',
 };
 
-// ── NameHint component — async lookup for creature/GO/item names ───────────
+// â”€â”€ NameHint component â€” async lookup for creature/GO/item names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function NameHint({ id, type, query }) {
   const [name, setName] = useState(null);
-  const prevId = useRef(null);
+  const lookupToken = useRef(0);
 
   useEffect(() => {
     const n = Number(id);
-    if (!n || n === prevId.current) return;
-    prevId.current = n;
+    const token = ++lookupToken.current;
+    if (!n) {
+      setName(null);
+      return;
+    }
     setName(null);
 
     let sql, params;
@@ -95,12 +98,15 @@ function NameHint({ id, type, query }) {
       sql = 'SELECT LogTitle AS name FROM quest_template WHERE ID = ? LIMIT 1';
       params = [Math.abs(n)];
     } else if (type === 'spell') {
-      sql = null;
+      sql = 'SELECT Name_Lang_enUS AS name FROM spell_dbc WHERE ID = ? LIMIT 1';
+      params = [Math.abs(n)];
     }
 
     if (!sql) return;
     query(sql, params).then(r => {
+      if (token !== lookupToken.current) return;
       if (r.data?.[0]?.name) setName(r.data[0].name);
+      else setName(null);
     });
   }, [id, type, query]);
 
@@ -112,7 +118,64 @@ function NameHint({ id, type, query }) {
   );
 }
 
-// ── QuestGiverList ─────────────────────────────────────────────────────────
+// â”€â”€ QuestGiverList â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+function LookupName({ id, type, query, placeholder = "-" }) {
+  const [name, setName] = useState(null);
+  const lookupToken = useRef(0);
+
+  useEffect(() => {
+    const n = Number(id);
+    const token = ++lookupToken.current;
+    if (!n) {
+      setName(null);
+      return;
+    }
+    setName(null);
+
+    let sql, params;
+    if (type === "item") {
+      sql = "SELECT name FROM item_template WHERE entry = ? LIMIT 1";
+      params = [Math.abs(n)];
+    } else if (type === "npcgo") {
+      if (n > 0) {
+        sql = "SELECT name FROM creature_template WHERE entry = ? LIMIT 1";
+        params = [n];
+      } else {
+        sql = "SELECT name FROM gameobject_template WHERE entry = ? LIMIT 1";
+        params = [-n];
+      }
+    } else if (type === "quest") {
+      sql = "SELECT LogTitle AS name FROM quest_template WHERE ID = ? LIMIT 1";
+      params = [Math.abs(n)];
+    } else if (type === "spell") {
+      sql = "SELECT Name_Lang_enUS AS name FROM spell_dbc WHERE ID = ? LIMIT 1";
+      params = [Math.abs(n)];
+    } else if (type === "faction") {
+      sql = "SELECT * FROM faction_template WHERE ID = ? LIMIT 1";
+      params = [Math.abs(n)];
+    }
+
+    if (!sql) return;
+    query(sql, params).then(r => {
+      if (token !== lookupToken.current) return;
+      const row = r.data?.[0];
+      if (!row) {
+        setName(null);
+        return;
+      }
+      const value = row.name || row.Name || row.name_lang_enUS || row.Name_lang_enUS || row.Name_Lang_enUS || row.LogTitle || row.Title || null;
+      setName(value || null);
+    });
+  }, [id, type, query]);
+
+  return (
+    <span className={`quest-lookup-name ${name ? "" : "is-empty"}`}>
+      {name || placeholder}
+    </span>
+  );
+}
+
 function QuestGiverList({ questId, table, label, query }) {
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
@@ -169,12 +232,12 @@ function QuestGiverList({ questId, table, label, query }) {
         ))}
       </div>
       <div style={{ position: 'relative', maxWidth: '280px' }}>
-        <input type="text" placeholder="Zoek NPC op naam of entry…" value={search} onChange={e => setSearch(e.target.value)} />
+        <input type="text" placeholder="Zoek NPC op naam of entryâ€¦" value={search} onChange={e => setSearch(e.target.value)} />
         {results.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', marginTop: '2px' }}>
             {results.map(c => (
               <div key={c.entry} style={{ padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }} onClick={() => add(c.entry)}>
-                {c.entry} — {c.name}
+                {c.entry} â€” {c.name}
               </div>
             ))}
           </div>
@@ -184,7 +247,7 @@ function QuestGiverList({ questId, table, label, query }) {
   );
 }
 
-// ── QuestChainVisualizer ───────────────────────────────────────────────────
+// â”€â”€ QuestChainVisualizer â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 function QuestChainVisualizer({ form, query, onNavigate }) {
   const [chain, setChain] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -265,7 +328,7 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
     return () => { cancelled = true; };
   }, [form?.ID]);
 
-  if (loading) return <div style={{ marginBottom: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>Loading chain…</div>;
+  if (loading) return <div style={{ marginBottom: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>Loading chainâ€¦</div>;
   if (error) return <div style={{ marginBottom: '16px', color: '#e55', fontSize: '11px' }}>Chain error: {error}</div>;
   if (!chain) return null;
 
@@ -289,7 +352,7 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
     textOverflow: 'ellipsis',
   });
 
-  const arrow = <span style={{ color: 'var(--text-muted)', margin: '0 4px', alignSelf: 'center' }}>→</span>;
+  const arrow = <span style={{ color: 'var(--text-muted)', margin: '0 4px', alignSelf: 'center' }}>â†’</span>;
 
   const node = (q) => {
     const isCurrent = q.ID === chain.currentId;
@@ -323,27 +386,55 @@ const H5 = ({ children }) => (
   <h5 style={{ margin: '12px 0 8px', fontSize: '11px', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{children}</h5>
 );
 
-// ── QuestFormFields ────────────────────────────────────────────────────────
-function QuestFormFields({ form, onChange, query, onNavigate }) {
+// â”€â”€ QuestFormFields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeField, setActiveField, lookupEpoch }) {
   const [expandedFlags, setExpandedFlags] = useState(false);
   const [tab, setTab] = useState('General');
 
+  const isFieldDirty = useCallback((key) => String(form?.[key] ?? '') !== String(baseline?.[key] ?? ''), [form, baseline]);
+  const isFieldActive = useCallback((key) => activeField === key, [activeField]);
+  const fieldInputClass = (key) => 'quest-field-input ' + (isFieldActive(key) ? 'is-active' : '') + ' ' + (isFieldDirty(key) ? 'is-dirty' : '');
+
   const sel = (key, opts) => (
-    <select value={String(form[key] ?? '')} onChange={e => onChange(key, e.target.value)}>
+    <select
+      value={String(form[key] ?? '')}
+      onChange={e => onChange(key, e.target.value)}
+      onFocus={() => setActiveField?.(key)}
+      className={fieldInputClass(key)}
+    >
       {opts.map(o => { const [v, ...r] = o.split(':'); return <option key={v} value={v}>{r.join(':')}</option>; })}
     </select>
   );
 
   const num = (key, style = {}) => (
-    <input type="number" value={form[key] ?? 0} onChange={e => onChange(key, e.target.value)} style={style} />
+    <input
+      type="number"
+      value={form[key] ?? 0}
+      onChange={e => onChange(key, e.target.value)}
+      onFocus={() => setActiveField?.(key)}
+      className={fieldInputClass(key)}
+      style={style}
+    />
   );
 
   const txt = (key) => (
-    <input type="text" value={form[key] ?? ''} onChange={e => onChange(key, e.target.value)} />
+    <input
+      type="text"
+      value={form[key] ?? ''}
+      onChange={e => onChange(key, e.target.value)}
+      onFocus={() => setActiveField?.(key)}
+      className={fieldInputClass(key)}
+    />
   );
 
   const ta = (key, rows = 3) => (
-    <textarea rows={rows} value={form[key] ?? ''} onChange={e => onChange(key, e.target.value)} />
+    <textarea
+      rows={rows}
+      value={form[key] ?? ''}
+      onChange={e => onChange(key, e.target.value)}
+      onFocus={() => setActiveField?.(key)}
+      className={fieldInputClass(key)}
+    />
   );
 
   const bitmask = (key, bits) => {
@@ -367,10 +458,17 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
     const cur = Number(form.Flags) || 0;
     return (
       <div style={{ display: 'flex', gap: '6px', alignItems: 'center', position: 'relative' }}>
-        <input type="number" value={form.Flags ?? 0} style={{ width: '110px' }} onChange={e => onChange('Flags', Number(e.target.value))} />
+        <input
+          type="number"
+          value={form.Flags ?? 0}
+          style={{ width: '110px' }}
+          onChange={e => onChange('Flags', Number(e.target.value))}
+          onFocus={() => setActiveField?.('Flags')}
+          className={fieldInputClass('Flags')}
+        />
         <button type="button" className="btn-ghost" style={{ padding: '2px 8px', fontSize: '11px' }}
           onClick={() => setExpandedFlags(s => !s)}>
-          flags {expandedFlags ? '▲' : '▼'}
+          flags {expandedFlags ? 'â–²' : 'â–¼'}
         </button>
         {expandedFlags && (
           <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px 12px', fontSize: '11px', maxHeight: '240px', overflowY: 'auto', marginTop: '4px', minWidth: '220px' }}>
@@ -389,37 +487,35 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
     );
   };
 
-  const npcgoField = (key, label, countKey) => (
-    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-      <div className="field-group" style={{ margin: 0, flex: '0 0 auto' }}>
+  const objectiveLookupField = (key, label, countKey, type, countLabel = "Count") => (
+    <div className="quest-objective-row">
+      <div className="field-group quest-objective-entry" style={{ margin: 0 }}>
         <label>{label}</label>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {num(key, { width: '100px' })}
-          <NameHint id={form[key]} type="npcgo" query={query} />
-        </div>
+        {num(key, { width: "100%" })}
       </div>
-      <div className="field-group" style={{ margin: 0, flex: '0 0 auto' }}>
-        <label>Count</label>
-        {num(countKey, { width: '60px' })}
+      <div className="field-group quest-objective-count" style={{ margin: 0 }}>
+        <label>{countLabel}</label>
+        {num(countKey, { width: "100%" })}
+      </div>
+      <div className="field-group quest-objective-name" style={{ margin: 0 }}>
+        <label>Name</label>
+        <div className="quest-lookup-display">
+          <LookupName key={`${lookupEpoch}:${type}:${form[key] ?? ''}`} id={form[key]} type={type} query={query} />
+        </div>
       </div>
     </div>
   );
 
-  const itemField = (key, label, countKey) => (
-    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '8px' }}>
-      <div className="field-group" style={{ margin: 0, flex: '0 0 auto' }}>
-        <label>{label}</label>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          {num(key, { width: '100px' })}
-          <NameHint id={form[key]} type="item" query={query} />
-        </div>
+  const npcgoField = (key, label, countKey) => objectiveLookupField(key, label, countKey, "npcgo", "Count");
+  const itemField = (key, label, countKey) => objectiveLookupField(key, label, countKey, "item", "Amount");
+
+  const factionField = (key, label) => (
+    <div className="field-group quest-faction-field" style={{ margin: 0, minWidth: 0 }}>
+      <label>{label}</label>
+      {num(key, { width: "100%" })}
+      <div className="quest-lookup-display">
+        <LookupName key={`${lookupEpoch}:faction:${form[key] ?? ''}`} id={form[key]} type="faction" query={query} placeholder="Faction name" />
       </div>
-      {countKey && (
-        <div className="field-group" style={{ margin: 0, flex: '0 0 auto' }}>
-          <label>Count</label>
-          {num(countKey, { width: '60px' })}
-        </div>
-      )}
     </div>
   );
 
@@ -445,7 +541,7 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
         ))}
       </div>
 
-      {/* ── General ── */}
+      {/* â”€â”€ General â”€â”€ */}
       {tab === 'General' && (
         <div className="form-fields">
           <div>
@@ -465,7 +561,12 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
             <FG label="Zone/Sort ID">{num('QuestSortID')}</FG>
             <FG label="Quest Info ID">{num('QuestInfoID')}</FG>
             <FG label="XP Difficulty">{sel('RewardXPDifficulty', XP_DIFFICULTY_OPTIONS)}</FG>
-            <FG label="Source Spell ID">{num('SourceSpellID')}</FG>
+            <FG label="Source Spell ID">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                {num('SourceSpellID')}
+                <NameHint id={form.SourceSpellID} type="spell" query={query} />
+              </div>
+            </FG>
           </div>
           <div style={{ gridColumn: '1/-1' }}>
             <FG label="Quest Flags">{flagsField()}</FG>
@@ -480,7 +581,7 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
         </div>
       )}
 
-      {/* ── Texts ── */}
+      {/* â”€â”€ Texts â”€â”€ */}
       {tab === 'Texts' && (
         <div style={{ padding: '20px 28px 32px', display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '16px' }}>
           <FG label="Log Description">{ta('LogDescription', 5)}</FG>
@@ -494,7 +595,7 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
         </div>
       )}
 
-      {/* ── Objectives ── */}
+      {/* â”€â”€ Objectives â”€â”€ */}
       {tab === 'Objectives' && (
         <div style={{ padding: '20px 28px 32px' }}>
           <H5>Required NPC / Game Object</H5>
@@ -511,11 +612,11 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
           {[1,2,3,4].map(i => itemField(`ItemDrop${i}`, `Drop ${i}`, `ItemDropQuantity${i}`))}
 
           <H5>Faction Requirements</H5>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px', maxWidth: '500px' }}>
-            <FG label="Faction 1 ID">{num('RequiredFactionId1')}</FG>
-            <FG label="Faction 1 Value">{num('RequiredFactionValue1')}</FG>
-            <FG label="Faction 2 ID">{num('RequiredFactionId2')}</FG>
-            <FG label="Faction 2 Value">{num('RequiredFactionValue2')}</FG>
+          <div className="quest-faction-grid">
+            {factionField("RequiredFactionId1", "Faction 1 ID")}
+            <FG label="Faction 1 Value">{num("RequiredFactionValue1")}</FG>
+            {factionField("RequiredFactionId2", "Faction 2 ID")}
+            <FG label="Faction 2 Value">{num("RequiredFactionValue2")}</FG>
           </div>
 
           <H5>Skill Requirement</H5>
@@ -525,16 +626,16 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
           </div>
 
           <H5>Reputation Requirement</H5>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '8px', maxWidth: '500px' }}>
-            <FG label="Min Rep Faction">{num('RequiredMinRepFaction')}</FG>
-            <FG label="Min Rep Value">{num('RequiredMinRepValue')}</FG>
-            <FG label="Max Rep Faction">{num('RequiredMaxRepFaction')}</FG>
-            <FG label="Max Rep Value">{num('RequiredMaxRepValue')}</FG>
+          <div className="quest-faction-grid">
+            {factionField("RequiredMinRepFaction", "Min Rep Faction")}
+            <FG label="Min Rep Value">{num("RequiredMinRepValue")}</FG>
+            {factionField("RequiredMaxRepFaction", "Max Rep Faction")}
+            <FG label="Max Rep Value">{num("RequiredMaxRepValue")}</FG>
           </div>
         </div>
       )}
 
-      {/* ── Rewards ── */}
+      {/* â”€â”€ Rewards â”€â”€ */}
       {tab === 'Rewards' && (
         <div style={{ padding: '20px 28px 32px' }}>
           <H5>Currency</H5>
@@ -553,8 +654,18 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
             <FG label="Arena Points">{num('RewardArenaPoints')}</FG>
             <FG label="Reward Title">{num('RewardTitle')}</FG>
             <FG label="Reward Talents">{num('RewardTalents')}</FG>
-            <FG label="Reward Spell">{num('RewardSpell')}</FG>
-            <FG label="Reward Display Spell">{num('RewardDisplaySpell')}</FG>
+            <FG label="Reward Spell">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                {num('RewardSpell')}
+                <NameHint id={form.RewardSpell} type="spell" query={query} />
+              </div>
+            </FG>
+            <FG label="Reward Display Spell">
+              <div style={{ display: 'flex', alignItems: 'center' }}>
+                {num('RewardDisplaySpell')}
+                <NameHint id={form.RewardDisplaySpell} type="spell" query={query} />
+              </div>
+            </FG>
           </div>
 
           <H5>Reward Items (guaranteed)</H5>
@@ -565,8 +676,14 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
 
           <H5>Faction Rewards</H5>
           {[1,2,3,4,5].map(i => (
-            <div key={i} style={{ display: 'flex', gap: '12px', marginBottom: '6px', alignItems: 'flex-end' }}>
-              <FG label={`Faction ${i} ID`} style={{ margin: 0 }}>{num(`RewardFactionID${i}`)}</FG>
+            <div key={i} className="quest-faction-reward-row">
+              <div className="field-group quest-faction-field" style={{ margin: 0, minWidth: 0 }}>
+                <label>{`Faction ${i} ID`}</label>
+                {num(`RewardFactionID${i}`, { width: "100%" })}
+                <div className="quest-lookup-display">
+                  <LookupName key={`${lookupEpoch}:reward-faction:${form[`RewardFactionID${i}`] ?? ''}`} id={form[`RewardFactionID${i}`]} type="faction" query={query} placeholder="Faction name" />
+                </div>
+              </div>
               <FG label="Value" style={{ margin: 0 }}>{num(`RewardFactionValue${i}`)}</FG>
               <FG label="Override" style={{ margin: 0 }}>{num(`RewardFactionOverride${i}`)}</FG>
             </div>
@@ -580,7 +697,7 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
         </div>
       )}
 
-      {/* ── Chain ── */}
+      {/* â”€â”€ Chain â”€â”€ */}
       {tab === 'Chain' && (
         <div style={{ padding: '20px 28px 32px' }}>
           <QuestChainVisualizer form={form} query={query} onNavigate={onNavigate} />
@@ -623,8 +740,8 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
           <H5>Map / Waypoint</H5>
           <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
             <FG label="POI Continent">{num('POIContinent')}</FG>
-            <FG label="POI X"><input type="number" step="0.01" value={form.POIx ?? 0} onChange={e => onChange('POIx', e.target.value)} onWheel={e => e.target.blur()} /></FG>
-            <FG label="POI Y"><input type="number" step="0.01" value={form.POIy ?? 0} onChange={e => onChange('POIy', e.target.value)} onWheel={e => e.target.blur()} /></FG>
+            <FG label="POI X"><input type="number" step="0.01" value={form.POIx ?? 0} onChange={e => onChange('POIx', e.target.value)} onFocus={() => setActiveField?.('POIx')} onWheel={e => e.target.blur()} className={fieldInputClass('POIx')} /></FG>
+            <FG label="POI Y"><input type="number" step="0.01" value={form.POIy ?? 0} onChange={e => onChange('POIy', e.target.value)} onFocus={() => setActiveField?.('POIy')} onWheel={e => e.target.blur()} className={fieldInputClass('POIy')} /></FG>
             <FG label="POI Priority">{num('POIPriority')}</FG>
           </div>
         </div>
@@ -633,11 +750,19 @@ function QuestFormFields({ form, onChange, query, onNavigate }) {
   );
 }
 
-// ── QuestFilters ──────────────────────────────────────────────────────────
+// â”€â”€ QuestFilters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const CLASS_OPTIONS = [
   { bit: 1, label: 'Warrior' }, { bit: 2, label: 'Paladin' }, { bit: 4, label: 'Hunter' },
   { bit: 8, label: 'Rogue' }, { bit: 16, label: 'Priest' }, { bit: 64, label: 'Shaman' },
   { bit: 128, label: 'Mage' }, { bit: 256, label: 'Warlock' }, { bit: 1024, label: 'Druid' },
+];
+
+const CONTINENT_OPTIONS = [
+  { value: '', label: 'All starter continents' },
+  { value: '0', label: 'Eastern Kingdoms' },
+  { value: '1', label: 'Kalimdor' },
+  { value: '530', label: 'Outland' },
+  { value: '571', label: 'Northrend' },
 ];
 
 function QuestFilters({ filters, setFilters }) {
@@ -652,7 +777,7 @@ function QuestFilters({ filters, setFilters }) {
 
   const toggleClass = (bit) => setFilters(f => ({ ...f, classes: f.classes ^ bit }));
   const selectedLabels = CLASS_OPTIONS.filter(c => (filters.classes & c.bit) !== 0).map(c => c.label);
-  const hasFilters = filters.type || filters.classes > 0 || filters.faction || filters.levelMin || filters.levelMax;
+  const hasFilters = filters.type || filters.classes > 0 || filters.faction || filters.levelMin || filters.levelMax || filters.continent !== '';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '5px', padding: '0 10px 10px' }}>
@@ -673,6 +798,11 @@ function QuestFilters({ filters, setFilters }) {
         <option value="horde">Horde</option>
       </select>
 
+      <select value={filters.continent} onChange={e => setFilters(f => ({ ...f, continent: e.target.value }))} style={{ fontSize: '11px' }}>
+        {CONTINENT_OPTIONS.map(opt => <option key={opt.value || 'all'} value={opt.value}>{opt.label}</option>)}
+      </select>
+      <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '-2px' }}>via quest starter NPC spawns</div>
+
       {/* Class multi-select */}
       <div style={{ position: 'relative' }} ref={popoverRef}>
         <button
@@ -683,7 +813,7 @@ function QuestFilters({ filters, setFilters }) {
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {selectedLabels.length ? selectedLabels.join(', ') : 'All classes'}
           </span>
-          <span style={{ marginLeft: '4px', opacity: 0.6 }}>▼</span>
+          <span style={{ marginLeft: '4px', opacity: 0.6 }}>â–¼</span>
         </button>
 
         {classOpen && (
@@ -697,7 +827,7 @@ function QuestFilters({ filters, setFilters }) {
             {filters.classes > 0 && (
               <button className="btn-ghost" style={{ fontSize: '10px', padding: '2px 6px', marginTop: '4px' }}
                 onClick={() => setFilters(f => ({ ...f, classes: 0 }))}>
-                ✕ clear
+                âœ• clear
               </button>
             )}
           </div>
@@ -708,7 +838,7 @@ function QuestFilters({ filters, setFilters }) {
         <input type="number" placeholder="Lv min" value={filters.levelMin}
           onChange={e => setFilters(f => ({ ...f, levelMin: e.target.value }))}
           style={{ fontSize: '11px', width: '60px', padding: '3px 6px' }} />
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>–</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>â€“</span>
         <input type="number" placeholder="Lv max" value={filters.levelMax}
           onChange={e => setFilters(f => ({ ...f, levelMax: e.target.value }))}
           style={{ fontSize: '11px', width: '60px', padding: '3px 6px' }} />
@@ -725,24 +855,27 @@ function QuestFilters({ filters, setFilters }) {
 
       {hasFilters && (
         <button className="btn-ghost" style={{ fontSize: '10px', padding: '2px 6px', alignSelf: 'flex-start' }}
-          onClick={() => setFilters({ type: '', classes: 0, classExact: true, faction: '', levelMin: '', levelMax: '' })}>
-          ✕ clear all
+          onClick={() => setFilters({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' })}>
+          âœ• clear all
         </button>
       )}
     </div>
   );
 }
 
-// ── QuestEditorPage ────────────────────────────────────────────────────────
+// â”€â”€ QuestEditorPage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function QuestEditorPage() {
   const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
   const [search, setSearch] = useState('');
-  const [filters, setFilters] = useState({ type: '', classes: 0, classExact: true, faction: '', levelMin: '', levelMax: '' });
+  const [filters, setFilters] = useState({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' });
   const [quests, setQuests] = useState([]);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({});
+  const [editBaseline, setEditBaseline] = useState({});
   const [activeTab, setActiveTab] = useState('edit');
   const [dirty, setDirty] = useState(false);
+  const [activeField, setActiveField] = useState(null);
+  const [lookupEpoch, setLookupEpoch] = useState(0);
   const unsavedGuard = useUnsavedGuard(dirty);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -751,6 +884,7 @@ export default function QuestEditorPage() {
 
   const CREATE_DEFAULTS = { LogTitle: '', QuestType: 0, QuestLevel: 1, MinLevel: 1, AllowableRaces: 0, Flags: 0, RewardXPDifficulty: 2, RewardMoney: 0, RewardMoneyDifficulty: 0 };
   const [createForm, setCreateForm] = useState({ ...CREATE_DEFAULTS });
+  const [createBaseline, setCreateBaseline] = useState({ ...CREATE_DEFAULTS });
   const [createId, setCreateId] = useState(null);
   const [createIdLoading, setCreateIdLoading] = useState(false);
   const [createSaving, setCreateSaving] = useState(false);
@@ -776,6 +910,15 @@ export default function QuestEditorPage() {
     if (f.levelMax !== '') { conditions.push('qt.QuestLevel <= ?'); params.push(Number(f.levelMax)); }
     if (f.faction === 'alliance') { conditions.push(`qt.AllowableRaces & ${ALLIANCE_MASK} != 0`); }
     if (f.faction === 'horde')    { conditions.push(`qt.AllowableRaces & ${HORDE_MASK} != 0`); }
+    if (f.continent !== '') {
+      conditions.push(`EXISTS (
+        SELECT 1
+        FROM creature_queststarter qs
+        JOIN creature c ON c.id1 = qs.id
+        WHERE qs.quest = qt.ID AND c.map = ?
+      )`);
+      params.push(Number(f.continent));
+    }
 
     const needsAddon = f.classes > 0;
     const join = needsAddon ? 'LEFT JOIN quest_template_addon qta ON qt.ID = qta.ID' : '';
@@ -813,7 +956,10 @@ export default function QuestEditorPage() {
       const merged = { ...main.data[0], ...(addon.data?.[0] || {}) };
       setSelected(merged);
       setForm(merged);
+      setEditBaseline(merged);
       setDirty(false);
+      setActiveField(null);
+      setLookupEpoch(v => v + 1);
       setMsg(null);
     }
   };
@@ -825,6 +971,7 @@ export default function QuestEditorPage() {
 
   const openCreateTab = async () => {
     setActiveTab('create');
+    setActiveField(null);
     setCreateMsg(null);
     if (!createId) {
       setCreateIdLoading(true);
@@ -837,8 +984,12 @@ export default function QuestEditorPage() {
   const handleUseAsTemplate = () => {
     if (!selected) return;
     const { ID, ...rest } = selected;
-    setCreateForm({ ...rest, LogTitle: `${selected.LogTitle || ''} (copy)` });
+    const nextCreate = { ...rest, LogTitle: (selected.LogTitle || '') + ' (copy)' };
+    setCreateForm(nextCreate);
+    setCreateBaseline(nextCreate);
     setCreateMsg(null);
+    setActiveField(null);
+    setLookupEpoch(v => v + 1);
   };
 
   const handleCreate = async () => {
@@ -871,11 +1022,13 @@ export default function QuestEditorPage() {
       await refreshList();
       await selectQuest(createId);
       setActiveTab('edit');
-      setMsg({ type: 'success', text: `✓ Quest #${createId} aangemaakt` });
+      setMsg({ type: 'success', text: `âœ“ Quest #${createId} aangemaakt` });
       setCreateId(null);
       setCreateForm({ ...CREATE_DEFAULTS });
+      setCreateBaseline({ ...CREATE_DEFAULTS });
+      setActiveField(null);
     } catch (e) {
-      setCreateMsg({ type: 'error', text: `✗ ${e.message}` });
+      setCreateMsg({ type: 'error', text: `âœ— ${e.message}` });
     }
     setCreateSaving(false);
   };
@@ -902,9 +1055,9 @@ export default function QuestEditorPage() {
       );
       await refreshList();
       await selectQuest(newId);
-      setMsg({ type: 'success', text: `✓ Gekloond naar ID #${newId}` });
+      setMsg({ type: 'success', text: `âœ“ Gekloond naar ID #${newId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `âœ— Klonen mislukt: ${e.message}` });
     }
     setCopying(false);
   };
@@ -930,7 +1083,10 @@ export default function QuestEditorPage() {
       if (!r2.success) throw new Error(r2.error);
 
       setSelected(form);
+      setEditBaseline(form);
       setDirty(false);
+      setActiveField(null);
+      setLookupEpoch(v => v + 1);
       if (soapConfig.user) {
         await soapCommand(`.reload quest_template`);
         setMsg({ type: 'success', text: `Saved & reloaded quest ${form.ID}` });
@@ -1010,7 +1166,7 @@ export default function QuestEditorPage() {
             </button>
           </div>
 
-          {/* ── Edit tab ── */}
+          {/* â”€â”€ Edit tab â”€â”€ */}
           {activeTab === 'edit' && (
             !selected ? (
               <div className="editor-empty">
@@ -1023,12 +1179,12 @@ export default function QuestEditorPage() {
                   <div>
                     <h1 className="page-title">
                       {selected.LogTitle || '(untitled)'}
-                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>●</span>}
+                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>[edited]</span>}
                     </h1>
-                    <p className="page-sub">Entry #{selected.ID} · quest_template</p>
+                    <p className="page-sub">Entry #{selected.ID} - quest_template</p>
                   </div>
                   <div className="header-actions">
-                    {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13} /> Reset</button>}
+                    {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setEditBaseline(selected); setDirty(false); setActiveField(null); }}><RotateCcw size={13} /> Reset</button>}
                     <button className="btn-ghost" onClick={handleCopy} disabled={copying}>
                       <Copy size={13} /> {copying ? 'Klonen...' : 'Copy'}
                     </button>
@@ -1038,12 +1194,12 @@ export default function QuestEditorPage() {
                   </div>
                 </div>
                 {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
-                <QuestFormFields form={form} onChange={handleChange} query={query} onNavigate={selectQuest} />
+                <QuestFormFields form={form} baseline={editBaseline} onChange={handleChange} query={query} onNavigate={selectQuest} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} />
               </>
             )
           )}
 
-          {/* ── Create tab ── */}
+          {/* â”€â”€ Create tab â”€â”€ */}
           {activeTab === 'create' && (
             <>
               <div className="page-header">
@@ -1062,7 +1218,7 @@ export default function QuestEditorPage() {
                       <Copy size={13} /> Use "{selected.LogTitle?.slice(0, 20) || 'selected'}" as template
                     </button>
                   )}
-                  <button className="btn-ghost" onClick={() => { setCreateForm({ ...CREATE_DEFAULTS }); setCreateMsg(null); }}>
+                  <button className="btn-ghost" onClick={() => { setCreateForm({ ...CREATE_DEFAULTS }); setCreateBaseline({ ...CREATE_DEFAULTS }); setActiveField(null); setCreateMsg(null); }}>
                     <RotateCcw size={13} /> Reset
                   </button>
                   <button className="btn-primary" onClick={handleCreate} disabled={createSaving || createIdLoading || !createId}>
@@ -1071,7 +1227,7 @@ export default function QuestEditorPage() {
                 </div>
               </div>
               {createMsg && <div className={`editor-msg ${createMsg.type}`}>{createMsg.text}</div>}
-              <QuestFormFields form={createForm} onChange={(k, v) => setCreateForm(f => ({ ...f, [k]: v }))} query={query} />
+              <QuestFormFields form={createForm} baseline={createBaseline} onChange={(k, v) => setCreateForm(f => ({ ...f, [k]: v }))} query={query} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} />
             </>
           )}
         </div>

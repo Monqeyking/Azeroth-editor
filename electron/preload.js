@@ -14,10 +14,16 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // DBC files
   dbc: {
+    readAchievementsOverview: (dbcPath) => ipcRenderer.invoke('dbc:readAchievementsOverview', dbcPath),
+    writeAchievement: (dbcPath, achievement) => ipcRenderer.invoke('dbc:writeAchievement', dbcPath, achievement),
+    createAchievement: (dbcPath, payload) => ipcRenderer.invoke('dbc:createAchievement', dbcPath, payload),
+    deleteAchievement: (dbcPath, achievementId) => ipcRenderer.invoke('dbc:deleteAchievement', dbcPath, achievementId),
+    writeAchievementCriteria: (dbcPath, achievementId, criteria) => ipcRenderer.invoke('dbc:writeAchievementCriteria', dbcPath, achievementId, criteria),
     readTalentTabs: (dbcPath) => ipcRenderer.invoke('dbc:readTalentTabs', dbcPath),
     readTalents: (dbcPath, tabId) => ipcRenderer.invoke('dbc:readTalents', dbcPath, tabId),
     readSpells: (dbcPath, spellIds) => ipcRenderer.invoke('dbc:readSpells', dbcPath, spellIds),
     readSpellIcons: (dbcPath, iconIds) => ipcRenderer.invoke('dbc:readSpellIcons', dbcPath, iconIds),
+    readItemIcons: (dbcPath, itemIds) => ipcRenderer.invoke('dbc:readItemIcons', dbcPath, itemIds),
     searchSpells: (dbcPath, term, options) => ipcRenderer.invoke('dbc:searchSpells', dbcPath, term, options),
     readSpellFull: (dbcPath, id) => ipcRenderer.invoke('dbc:readSpellFull', dbcPath, id),
     getSpellDbcInfo: (dbcPath) => ipcRenderer.invoke('dbc:getSpellDbcInfo', dbcPath),
@@ -31,6 +37,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     findNextTalentId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextTalentId', dbcPath, startId),
     copyTalent: (dbcPath, sourceId, newId) => ipcRenderer.invoke('dbc:copyTalent', dbcPath, sourceId, newId),
     readSkillLineAbility: (dbcPath, spellId) => ipcRenderer.invoke('dbc:readSkillLineAbility', dbcPath, spellId),
+    readSkillLineTree: (dbcPath, opts) => ipcRenderer.invoke('dbc:readSkillLineTree', dbcPath, opts),
     addSkillLineAbility: (dbcPath, entry) => ipcRenderer.invoke('dbc:addSkillLineAbility', dbcPath, entry),
     readScalingStatDistribution: (dbcPath, id) => ipcRenderer.invoke('dbc:readScalingStatDistribution', dbcPath, id),
     writeScalingStatDistribution: (dbcPath, dist) => ipcRenderer.invoke('dbc:writeScalingStatDistribution', dbcPath, dist),
@@ -38,6 +45,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     findNextScalingStatDistributionId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextScalingStatDistributionId', dbcPath, startId),
     readScalingStatValues: (dbcPath) => ipcRenderer.invoke('dbc:readScalingStatValues', dbcPath),
     readCharBaseInfo: (dbcPath) => ipcRenderer.invoke('dbc:readCharBaseInfo', dbcPath),
+    readCharStartOutfit: (dbcPath, opts) => ipcRenderer.invoke('dbc:readCharStartOutfit', dbcPath, opts),
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
     writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
@@ -52,6 +60,10 @@ contextBridge.exposeInMainWorld('azeroth', {
     searchItemSets: (dbcPath, term) => ipcRenderer.invoke('dbc:searchItemSets', dbcPath, term),
     writeItemSet: (dbcPath, set) => ipcRenderer.invoke('dbc:writeItemSet', dbcPath, set),
     findNextItemSetId: (dbcPath) => ipcRenderer.invoke('dbc:findNextItemSetId', dbcPath),
+  },
+  glue: {
+    readTextFile: (dataPath, internalPath) => ipcRenderer.invoke('glue:readTextFile', dataPath, internalPath),
+    writeTextFile: (relPath, text) => ipcRenderer.invoke('glue:writeTextFile', relPath, text),
   },
   // Icons
   icons: {
@@ -94,6 +106,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   // M2 model loader (3D editor)
   m2: {
     loadModel:     (opts) => ipcRenderer.invoke('m2:loadModel', opts),
+    loadModelByPath: (opts) => ipcRenderer.invoke('m2:loadModelByPath', opts),
     prefetch:      (opts) => ipcRenderer.invoke('m2:prefetch', opts),
     loadCharModel: (opts) => ipcRenderer.invoke('m2:loadCharModel', opts),
   },

@@ -1,0 +1,84 @@
+.glue-m2-viewer {
+  width: 100%;
+  height: 100%;
+  position: relative;
+  overflow: hidden;
+  background: #11131a;
+}
+
+.glue-m2-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: #888;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.glue-m2-overlay-err {
+  color: var(--accent-red, #cc4a4a);
+  text-align: center;
+  padding: 0 16px;
+}
+
+.glue-m2-notex-badge {
+  position: absolute;
+  top: 6px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  background: rgba(204, 74, 74, 0.9);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 3px;
+  white-space: nowrap;
+  cursor: help;
+}
+
+.glue-m2-label {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 3;
+  padding: 4px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.55);
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+.glue-m2-debug {
+  position: absolute;
+  left: 10px;
+  top: 10px;
+  z-index: 4;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(6, 8, 14, 0.82);
+  border: 1px solid rgba(200, 169, 110, 0.18);
+  color: #d9c08b;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+}
+
+.glue-m2-debug-title {
+  color: #f4dc9b;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.glue-m2-debug-line {
+  color: rgba(255, 255, 255, 0.72);
+  word-break: break-word;
+}

@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
+import { useSearchParams } from 'react-router-dom';
 import { BookOpen, Filter, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
 import './TrainerSpellVisualPanel.css';
 
 const CLASSES = [
+  { id: 0, name: 'Profession', color: '#C8A45A' },
   { id: 1, name: 'Warrior', color: '#C79C6E' },
   { id: 2, name: 'Paladin', color: '#F58CBA' },
   { id: 3, name: 'Hunter', color: '#ABD473' },
@@ -43,6 +45,25 @@ const SKILL_LINE_OPTIONS = {
   9:  [{ id: 593, label: 'General' }, { id: 355, label: 'Affliction' }, { id: 354, label: 'Demonology' }, { id: 593, label: 'Destruction' }],
   11: [{ id: 574, label: 'General' }, { id: 134, label: 'Balance' }, { id: 134, label: 'Feral Combat' }, { id: 573, label: 'Restoration' }],
 };
+
+const PROFESSION_SKILL_LINES = [
+  { id: 164, key: 'blacksmithing', label: 'Blacksmithing' },
+  { id: 165, key: 'leatherworking', label: 'Leatherworking' },
+  { id: 197, key: 'tailoring', label: 'Tailoring' },
+  { id: 202, key: 'engineering', label: 'Engineering' },
+  { id: 171, key: 'alchemy', label: 'Alchemy' },
+  { id: 333, key: 'enchanting', label: 'Enchanting' },
+  { id: 755, key: 'jewelcrafting', label: 'Jewelcrafting' },
+  { id: 773, key: 'inscription', label: 'Inscription' },
+  { id: 185, key: 'cooking', label: 'Cooking' },
+  { id: 129, key: 'first-aid', label: 'First Aid' },
+  { id: 356, key: 'fishing', label: 'Fishing' },
+  { id: 186, key: 'mining', label: 'Mining' },
+  { id: 182, key: 'herbalism', label: 'Herbalism' },
+  { id: 393, key: 'skinning', label: 'Skinning' },
+];
+
+const PROFESSION_SKILL_LINE_MAP = new Map(PROFESSION_SKILL_LINES.map(item => [item.id, item]));
 
 const PALADIN_GROUPS = [
   { key: 'paladin-main', label: 'Main paladin trainers', kind: 'trainer_spell', trainerIds: [3], badge: 'TrainerId 3' },
@@ -136,6 +157,12 @@ function buildTrainerTooltip(row, { archived = false, kind = 'trainer_spell' } =
     lines.push(`ProcChance: ${procChance}`);
     lines.push(`ProcCharges: ${procCharges}`);
     lines.push(`Trigger spells: ${triggerSpells.length ? triggerSpells.join(', ') : 'none'}`);
+    if (row.craftedItemId) {
+      lines.push(`Crafted item: #${row.craftedItemId}${row.craftedItemName ? ` - ${row.craftedItemName}` : ''}`);
+    }
+    if ((row.reagents || []).length) {
+      lines.push(`Reagents: ${(row.reagents || []).map(reagent => `${reagent.count}x ${reagent.name || `Item #${reagent.itemId}`}`).join(', ')}`);
+    }
   }
 
   return lines.join('\n');
@@ -166,13 +193,41 @@ function buildAddResultTooltip(row) {
   return lines.join('\n');
 }
 
+function parseCsvNumbers(text) {
+  return String(text || '')
+    .split(',')
+    .map(v => Number(v))
+    .filter(v => Number.isFinite(v) && v > 0);
+}
+
+function getTrainerProfessionKeys(row) {
+  return parseCsvNumbers(row.skillLines)
+    .map(id => PROFESSION_SKILL_LINE_MAP.get(id))
+    .filter(Boolean)
+    .map(item => item.key);
+}
+
+function getTrainerProfessionLabel(row) {
+  return PROFESSION_SKILL_LINE_MAP.get(parseCsvNumbers(row.skillLines)[0] || 0)?.label || '';
+}
+
+function getProfessionTier(row) {
+  const rank = Number(row.reqSkillRank || row.ReqSkillRank || 0);
+  if (rank > 375) return 'northrend';
+  if (rank > 300) return 'outland';
+  return 'classic';
+}
+
 export default function TrainerSpellVisualPanel() {
-  const { query, searchSpellsDbc, readSpellFull, readSkillLineAbility, addSkillLineAbility, readSpellIcons, getIcon } = useConnection();
+  const { query, searchSpellsDbc, readSpellFull, readSkillLineAbility, addSkillLineAbility, readSpellIcons, readItemIcons, getIcon } = useConnection();
+  const [searchParams] = useSearchParams();
+  const trainerIdParam = Number(searchParams.get('trainerId')) || 0;
   const [selectedClassId, setSelectedClassId] = useState(2);
   const [trainerCatalog, setTrainerCatalog] = useState([]);
   const [selectedGroupKey, setSelectedGroupKey] = useState('paladin-main');
   const [spellRows, setSpellRows] = useState([]);
   const [selectedSpellId, setSelectedSpellId] = useState(null);
+  const [expandedSpellId, setExpandedSpellId] = useState(null);
   const [loadingCatalog, setLoadingCatalog] = useState(false);
   const [loadingSpells, setLoadingSpells] = useState(false);
   const [msg, setMsg] = useState(null);
@@ -196,18 +251,33 @@ export default function TrainerSpellVisualPanel() {
   const [adding, setAdding] = useState(false);
   const [viewMinLevel, setViewMinLevel] = useState('60');
   const [viewMaxLevel, setViewMaxLevel] = useState('');
+  const [professionTierFilter, setProfessionTierFilter] = useState('all');
   const [bulkBusy, setBulkBusy] = useState(false);
   const [removeSelection, setRemoveSelection] = useState([]);
   const [viewMode, setViewMode] = useState('live');
+  const [brokenIconIds, setBrokenIconIds] = useState([]);
+  const autoOpenRef = useRef(false);
 
   const learnedSet = useMemo(() => new Set(parseIdList(learnedInput)), [learnedInput]);
   const classBit = useMemo(() => 1 << Math.max(0, selectedClassId - 1), [selectedClassId]);
   const trainerSpellScopeIds = useMemo(() => {
-    const ids = trainerCatalog
+    if (selectedClassId === 0) {
+      if (!selectedGroupKey || selectedGroupKey === 'class-0-all') {
+        return [...new Set(trainerCatalog.filter(t => Number(t.Requirement) === 0).map(t => Number(t.TrainerId)))];
+      }
+      const professionKey = selectedGroupKey.startsWith('profession-') ? selectedGroupKey.slice('profession-'.length) : '';
+      if (professionKey) {
+        return [...new Set(trainerCatalog
+          .filter(t => Number(t.Requirement) === 0 && getTrainerProfessionKeys(t).includes(professionKey))
+          .map(t => Number(t.TrainerId)))];
+      }
+      const selectedTrainer = trainerCatalog.find(t => `trainer-${t.TrainerId}` === selectedGroupKey);
+      return selectedTrainer ? [Number(selectedTrainer.TrainerId)] : [];
+    }
+    return [...new Set(trainerCatalog
       .filter(t => Number(t.Requirement) === selectedClassId)
-      .map(t => Number(t.TrainerId));
-    return [...new Set(ids)];
-  }, [selectedClassId, trainerCatalog]);
+      .map(t => Number(t.TrainerId)))];
+  }, [selectedClassId, selectedGroupKey, trainerCatalog]);
 
   useEffect(() => {
     let alive = true;
@@ -215,6 +285,7 @@ export default function TrainerSpellVisualPanel() {
     query(
       `SELECT t.Id AS TrainerId, t.Type, t.Requirement,
               GROUP_CONCAT(DISTINCT ct.name ORDER BY ct.name SEPARATOR ', ') AS trainerNames,
+              GROUP_CONCAT(DISTINCT ts.ReqSkillLine ORDER BY ts.ReqSkillLine SEPARATOR ',') AS skillLines,
               COUNT(DISTINCT ts.SpellId) AS spellCount
        FROM trainer t
        JOIN creature_default_trainer cdt ON cdt.TrainerId = t.Id
@@ -229,6 +300,7 @@ export default function TrainerSpellVisualPanel() {
         const friendlyName = TRAINER_LABELS[t.TrainerId] || t.trainerNames || className;
         return {
           ...t,
+          skillLines: t.skillLines || '',
           className,
           label: `${friendlyName} (ID ${t.TrainerId})`,
         };
@@ -244,9 +316,34 @@ export default function TrainerSpellVisualPanel() {
   }, [query]);
 
   const groupOptions = useMemo(() => {
-    const trainers = trainerCatalog.filter(t => Number(t.Requirement) === selectedClassId)
+    const trainers = trainerCatalog
+      .filter(t => Number(t.Requirement) === selectedClassId)
       .sort((a, b) => a.TrainerId - b.TrainerId);
     if (selectedClassId === 2) return PALADIN_GROUPS;
+    if (selectedClassId === 0) {
+      const professionGroups = PROFESSION_SKILL_LINES.flatMap(({ key, label }) => {
+        const rows = trainers.filter(t => getTrainerProfessionKeys(t).includes(key));
+        if (!rows.length) return [];
+        const trainerIds = [...new Set(rows.map(t => Number(t.TrainerId)))];
+        return [{
+          key: `profession-${key}`,
+          label,
+          kind: 'trainer_spell',
+          trainerIds,
+          badge: `${trainerIds.length} trainers`,
+        }];
+      });
+      return [
+        ...professionGroups,
+        {
+          key: 'class-0-all',
+          label: 'All professions',
+          kind: 'trainer_spell',
+          trainerIds: [...new Set(trainers.map(t => Number(t.TrainerId)))],
+          badge: `${trainers.length} trainers`,
+        },
+      ];
+    }
     const allIds = trainers.map(t => t.TrainerId);
     const options = [{
       key: `class-${selectedClassId}-all`,
@@ -279,15 +376,56 @@ export default function TrainerSpellVisualPanel() {
 
   const handleClassPresetClick = useCallback((classId) => {
     setSelectedClassId(classId);
-    setSelectedGroupKey(classId === 2 ? 'paladin-main' : `class-${classId}-all`);
+    if (classId === 2) {
+      setSelectedGroupKey('paladin-main');
+      setViewMinLevel('60');
+      setProfessionTierFilter('all');
+      return;
+    }
+    if (classId === 0) {
+      setSelectedGroupKey('profession-blacksmithing');
+      setViewMinLevel('0');
+      setProfessionTierFilter('all');
+      return;
+    }
+    setSelectedGroupKey(`class-${classId}-all`);
+    setViewMinLevel('60');
+    setProfessionTierFilter('all');
   }, []);
 
   const isArchivedView = viewMode === 'archived' && selectedGroup?.kind === 'trainer_spell';
+
+
+  useEffect(() => {
+    if (!trainerIdParam || autoOpenRef.current || trainerCatalog.length === 0) return;
+    const target = trainerCatalog.find(t => Number(t.TrainerId) === trainerIdParam);
+    if (!target) return;
+    const classId = Number(target.Requirement) || 0;
+    setSelectedClassId(classId);
+    if (classId === 2) {
+      const paladinMatch = PALADIN_GROUPS.find(group => (group.trainerIds || []).includes(trainerIdParam));
+      setSelectedGroupKey(paladinMatch?.key || `trainer-${trainerIdParam}`);
+      setViewMinLevel('60');
+      setProfessionTierFilter('all');
+    } else if (classId === 0) {
+      const professionKey = getTrainerProfessionKeys(target)[0];
+      setSelectedGroupKey(professionKey ? `profession-${professionKey}` : 'class-0-all');
+      setViewMinLevel('0');
+      setProfessionTierFilter('all');
+    } else {
+      setSelectedGroupKey(`trainer-${trainerIdParam}`);
+      setViewMinLevel('60');
+      setProfessionTierFilter('all');
+    }
+    autoOpenRef.current = true;
+    setMsg({ type: 'info', text: `Opened trainer #${trainerIdParam}` });
+  }, [trainerIdParam, trainerCatalog]);
 
   const loadSelectedGroup = useCallback(async () => {
     if (!selectedGroup) {
       setSpellRows([]);
       setSelectedSpellId(null);
+      setExpandedSpellId(null);
       return;
     }
     if (viewMode === 'archived' && selectedGroup.kind !== 'trainer_spell') {
@@ -343,6 +481,7 @@ export default function TrainerSpellVisualPanel() {
       const spellIds = [...grouped.keys()];
       const spellMap = {};
       const iconIds = new Set();
+      const itemIds = new Set();
       const slaMap = {};
 
       await Promise.all(spellIds.map(async spellId => {
@@ -355,6 +494,18 @@ export default function TrainerSpellVisualPanel() {
         spellMap[spellId] = spell;
         slaMap[spellId] = sla;
         if (spell?.SpellIconID) iconIds.add(spell.SpellIconID);
+        const effectTypes = [Number(spell?.Effect_1 || 0), Number(spell?.Effect_2 || 0), Number(spell?.Effect_3 || 0)];
+        const effectMiscValues = [Number(spell?.EffectMiscValue_1 || 0), Number(spell?.EffectMiscValue_2 || 0), Number(spell?.EffectMiscValue_3 || 0)];
+        const craftedItemId = effectTypes[0] === 24 ? effectMiscValues[0] : effectTypes[1] === 24 ? effectMiscValues[1] : effectTypes[2] === 24 ? effectMiscValues[2] : 0;
+        if (craftedItemId > 0) itemIds.add(craftedItemId);
+        for (let i = 1; i <= 2; i++) {
+          const totemId = Number(spell?.[`Totem_${i}`] || 0);
+          if (totemId > 0) itemIds.add(totemId);
+        }
+        for (let i = 1; i <= 6; i++) {
+          const reagentId = Number(spell?.[`Reagent_${i}`] || 0);
+          if (reagentId > 0) itemIds.add(reagentId);
+        }
       }));
 
       const iconFiles = {};
@@ -371,35 +522,91 @@ export default function TrainerSpellVisualPanel() {
         if (filename) iconUrls[iconId] = await getIcon(filename);
       }));
 
+      const itemIconFiles = {};
+      if (itemIds.size > 0) {
+        const itemIconsRes = await readItemIcons([...itemIds]);
+        if (itemIconsRes.success) Object.assign(itemIconFiles, itemIconsRes.data || {});
+      }
+
+      const itemIconUrls = {};
+      await Promise.all([...itemIds].map(async itemId => {
+        const filename = itemIconFiles[itemId];
+        if (filename) itemIconUrls[itemId] = await getIcon(filename);
+      }));
+
       const rows = [...grouped.values()].map(item => {
         const spell = spellMap[item.spellId] || null;
         const sla = slaMap[item.spellId] || [];
         const iconId = spell?.SpellIconID || 0;
+        const effectTypes = [Number(spell?.Effect_1 || 0), Number(spell?.Effect_2 || 0), Number(spell?.Effect_3 || 0)];
+        const craftedItemId = effectTypes[0] === 24 ? Number(spell?.EffectMiscValue_1 || 0) : effectTypes[1] === 24 ? Number(spell?.EffectMiscValue_2 || 0) : effectTypes[2] === 24 ? Number(spell?.EffectMiscValue_3 || 0) : 0;
+        const reagents = [];
+        for (let i = 1; i <= 6; i++) {
+          const reagentId = Number(spell?.[`Reagent_${i}`] || 0);
+          const reagentCount = Number(spell?.[`ReagentCount_${i}`] || 0);
+          if (reagentId > 0 && reagentCount > 0) {
+            reagents.push({ slot: i, itemId: reagentId, count: reagentCount });
+          }
+        }
+        const catalysts = [];
+        for (let i = 1; i <= 2; i++) {
+          const totemId = Number(spell?.[`Totem_${i}`] || 0);
+          if (totemId > 0) catalysts.push({ slot: i, itemId: totemId });
+        }
         const source = item.sources[0] || {};
         return {
           ...item,
           spell,
           sla,
           iconId,
-          iconUrl: iconId ? iconUrls[iconId] || null : null,
+          craftedItemId,
+          reagents,
+          catalysts,
+          iconUrl: craftedItemId ? itemIconUrls[craftedItemId] || iconUrls[iconId] || null : (iconId ? iconUrls[iconId] || null : null),
           name: spell?.Name_Lang_enUS || `#${item.spellId}`,
-          subtext: spell?.NameSubtext_Lang_enUS || '',
+          subtext: spell?.NameSubtext_Lang_enUS || ``,
           spellLevel: Number(spell?.SpellLevel || 0),
           minLevel: Number(source.ReqLevel || spell?.SpellLevel || 0),
           moneyCost: Number(source.MoneyCost || 0),
           attributes: Number(spell?.Attributes || 0),
+          reqSkillLine: Number(source.ReqSkillLine || 0),
+          reqSkillRank: Number(source.ReqSkillRank || 0),
         };
       }).sort((a, b) => a.minLevel - b.minLevel || a.name.localeCompare(b.name) || a.spellId - b.spellId);
 
-      setSpellRows(rows);
-      setSelectedSpellId(rows[0]?.spellId ?? null);
+      const itemTemplateIds = [...itemIds];
+      let itemNameMap = {};
+      if (itemTemplateIds.length > 0) {
+        const itemRes = await query(`SELECT entry, name FROM item_template WHERE entry IN (${itemTemplateIds.map(() => '?').join(',')})`, itemTemplateIds);
+        itemNameMap = Object.fromEntries((itemRes.data || []).map(item => [Number(item.entry), item.name]));
+      }
+      const enrichedRows = rows.map(row => ({
+        ...row,
+        craftedItemName: row.craftedItemId ? itemNameMap[row.craftedItemId] || '' : '',
+        reagents: (row.reagents || []).map(reagent => ({
+          ...reagent,
+          name: itemNameMap[reagent.itemId] || `Item #${reagent.itemId}`,
+          iconUrl: itemIconUrls[reagent.itemId] || null,
+        })),
+        catalysts: (row.catalysts || []).map(catalyst => ({
+          ...catalyst,
+          name: itemNameMap[catalyst.itemId] || `Item #${catalyst.itemId}`,
+          iconUrl: itemIconUrls[catalyst.itemId] || null,
+        })),
+      }));
+
+      setBrokenIconIds([]);
+      setSpellRows(enrichedRows);
+      setSelectedSpellId(enrichedRows[0]?.spellId ?? null);
+      setExpandedSpellId(enrichedRows[0]?.spellId ?? null);
     } catch (err) {
       setSpellRows([]);
       setSelectedSpellId(null);
+      setExpandedSpellId(null);
       setMsg({ type: 'error', text: err.message });
     }
     setLoadingSpells(false);
-  }, [getIcon, isArchivedView, query, readSkillLineAbility, readSpellFull, readSpellIcons, selectedGroup, viewMode]);
+  }, [getIcon, isArchivedView, query, readItemIcons, readSkillLineAbility, readSpellFull, readSpellIcons, selectedGroup, viewMode]);
 
   useEffect(() => {
     loadSelectedGroup();
@@ -413,32 +620,44 @@ export default function TrainerSpellVisualPanel() {
       const learned = learnedSet.has(row.spellId);
       const factionBlocked = selectedGroupKey.includes('alliance') ? playerFaction === 'horde' : selectedGroupKey.includes('horde') ? playerFaction === 'alliance' : false;
       const tooLow = playerLevel < row.minLevel;
-      const classOk = !classMask || (classMask & classBit) !== 0;
+      const classOk = selectedClassId === 0 ? true : (!classMask || (classMask & classBit) !== 0);
       const trainableAttr = (attr & 0x10000) !== 0 && (attr & 0x80000) === 0;
-      const slaOk = !!sla && Number(sla.AcquireMethod || 0) === 1 && Number(sla.TrivialSkillLineRankLow || 0) === 0;
+      const slaOk = selectedClassId === 0 ? true : (!!sla && Number(sla.AcquireMethod || 0) === 1 && Number(sla.TrivialSkillLineRankLow || 0) === 0);
       let status = 'trainable';
       if (learned) status = 'learned';
       else if (tooLow) status = 'too-low';
       else if (factionBlocked) status = 'hidden';
-      else if (!sla) status = 'blocked';
+      else if (selectedClassId === 0) {
+        if (!trainableAttr) status = 'hidden';
+      } else if (!sla) status = 'blocked';
       else if (!classOk) status = 'blocked';
       else if (!slaOk) status = 'blocked';
       else if (!trainableAttr) status = 'hidden';
-      return { ...row, learned, tooLow, factionBlocked, classOk, trainableAttr, slaOk, status, sourceCount: row.sources.length };
+      return { ...row, learned, tooLow, factionBlocked, classOk, trainableAttr, slaOk, status, sourceCount: row.sources.length, professionTier: getProfessionTier(row) };
     });
-  }, [classBit, learnedSet, playerLevel, playerFaction, selectedGroupKey, spellRows]);
+  }, [classBit, learnedSet, playerLevel, playerFaction, selectedClassId, selectedGroupKey, spellRows]);
   const filteredRows = useMemo(() => {
     const min = Number(viewMinLevel || 0);
     const max = Number(viewMaxLevel || 0);
     return visibleRows.filter(row => {
+      if (selectedClassId === 0 && professionTierFilter !== 'all' && row.professionTier !== professionTierFilter) return false;
       if (min > 0 && row.minLevel < min) return false;
       if (max > 0 && row.minLevel > max) return false;
       return true;
     });
-  }, [viewMaxLevel, viewMinLevel, visibleRows]);
+  }, [professionTierFilter, selectedClassId, viewMaxLevel, viewMinLevel, visibleRows]);
 
   const activeRow = filteredRows.find(r => r.spellId === selectedSpellId) || filteredRows[0] || null;
+  const expandedRow = filteredRows.find(r => r.spellId === expandedSpellId) || null;
   const selectedRemovalRows = useMemo(() => filteredRows.filter(row => removeSelection.includes(row.spellId)), [filteredRows, removeSelection]);
+  const professionTierCounts = useMemo(() => {
+    if (selectedClassId !== 0) return [];
+    const counts = { all: spellRows.length, classic: 0, outland: 0, northrend: 0 };
+    for (const row of spellRows) {
+      counts[row.professionTier || getProfessionTier(row)] += 1;
+    }
+    return counts;
+  }, [selectedClassId, spellRows]);
   const selectedRemovalCount = selectedRemovalRows.length;
   const addSkillLineOptions = useMemo(() => SKILL_LINE_OPTIONS[selectedClassId] || [], [selectedClassId]);
   const moneyCostCopper = useMemo(() => moneyPartsToCopper(moneyGoldDraft, moneySilverDraft, moneyCopperDraft), [moneyGoldDraft, moneySilverDraft, moneyCopperDraft]);
@@ -503,6 +722,66 @@ export default function TrainerSpellVisualPanel() {
     setAddSelected(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
   };
 
+  const openAddModalForRow = (row) => {
+    if (!row) return;
+    setAddSearch(row.craftedItemName || row.name || '');
+    setAddSelected([]);
+    setShowAdd(true);
+  };
+
+  const deleteCurrentSpell = async (row) => {
+    if (!row || !selectedGroup) return;
+    const kind = selectedGroup.kind || 'trainer_spell';
+    const totalRows = row.sources.length;
+    const preview = `${row.name} (#${row.spellId})`;
+    const target = isArchivedView ? 'archive' : 'live table';
+    const ok = window.confirm(
+      `Permanently delete ${totalRows} source row${totalRows !== 1 ? 's' : ''} for ${preview} from ${selectedGroup.label} (${target})?`
+    );
+    if (!ok) return;
+    setMsg(null);
+    try {
+      for (const src of row.sources) {
+        if (kind === 'trainer_spell') {
+          await deleteTrainerSpellPermanently(row.spellId);
+          break;
+        }
+        await query('DELETE FROM npc_trainer WHERE ID = ? AND SpellID = ?', [src.TrainerId, row.spellId]);
+      }
+      await loadSelectedGroup();
+      setMsg({ type: 'success', text: kind === 'trainer_spell' ? `Deleted Spell #${row.spellId} from shared trainer rows` : `Deleted Spell #${row.spellId}` });
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    }
+  };
+
+  const archiveCurrentSpell = async (row) => {
+    if (!row || !selectedGroup) return;
+    const kind = selectedGroup.kind || 'trainer_spell';
+    const totalRows = row.sources.length;
+    const preview = `${row.name} (#${row.spellId})`;
+    const verb = isArchivedView ? 'Restore' : (kind === 'trainer_spell' ? 'Archive' : 'Remove');
+    const ok = window.confirm(`${verb} ${totalRows} source row${totalRows !== 1 ? 's' : ''} for ${preview} in ${selectedGroup.label}?`);
+    if (!ok) return;
+    setMsg(null);
+    try {
+      for (const src of row.sources) {
+        if (kind === 'trainer_spell') {
+          if (isArchivedView) {
+            await restoreTrainerSpellFromArchive(src.TrainerId, row.spellId);
+          } else {
+            await moveTrainerSpellToArchive(src.TrainerId, row.spellId);
+          }
+        } else {
+          await query('DELETE FROM npc_trainer WHERE ID = ? AND SpellID = ?', [src.TrainerId, row.spellId]);
+        }
+      }
+      await loadSelectedGroup();
+      setMsg({ type: 'success', text: `${verb}d Spell #${row.spellId}` });
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message });
+    }
+  };
   const handleAdd = async () => {
     if (!selectedGroup || addSelected.length === 0) return;
     setAdding(true);
@@ -784,6 +1063,20 @@ export default function TrainerSpellVisualPanel() {
             </button>
           ))}
         </div>
+        {selectedClassId === 0 && (
+          <div className="tsv-tier-rail">
+            {[{ key: 'all', label: 'All tiers', count: professionTierCounts.all }, { key: 'classic', label: 'Classic', count: professionTierCounts.classic }, { key: 'outland', label: 'Outland', count: professionTierCounts.outland }, { key: 'northrend', label: 'Northrend', count: professionTierCounts.northrend }].map(option => (
+              <button
+                key={option.key}
+                className={`tsv-tier-chip ${professionTierFilter === option.key ? 'active' : ''}`}
+                onClick={() => setProfessionTierFilter(option.key)}
+              >
+                <span>{option.label}</span>
+                <strong>{option.count || 0}</strong>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="tsv-filters">
@@ -842,53 +1135,140 @@ export default function TrainerSpellVisualPanel() {
         <div className="tsv-grid-pane">
           {loadingSpells && <div className="tsv-empty">Loading spells...</div>}
           {!loadingSpells && filteredRows.length === 0 && <div className="tsv-empty">{isArchivedView ? 'No archived spells for this trainer.' : 'No spells match the current filters.'}</div>}
-          {!loadingSpells && filteredRows.map(row => (
-            <button
-              key={row.spellId}
-              className={`tsv-card ${selectedSpellId === row.spellId ? 'active' : ''} ${row.status}`}
-              onClick={() => setSelectedSpellId(row.spellId)}
-              title={buildTrainerTooltip(row, { archived: isArchivedView, kind: selectedGroup?.kind || 'trainer_spell' })}
-            >
-              <div className="tsv-card-top">
-                <label className="tsv-remove-check" onClick={e => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
-                    checked={removeSelection.includes(row.spellId)}
-                    onChange={() => setRemoveSelection(prev => prev.includes(row.spellId) ? prev.filter(id => id !== row.spellId) : [...prev, row.spellId])}
-                  />
-                </label>
-                <div className="tsv-icon-wrap">
-                  {row.iconUrl ? <img src={row.iconUrl} alt="" /> : <Sparkles size={18} />}
+          {!loadingSpells && filteredRows.map(row => {
+            const isExpanded = expandedSpellId === row.spellId;
+            return (
+              <div
+                key={row.spellId}
+                className={`tsv-card ${selectedSpellId === row.spellId || isExpanded ? 'active' : ''} ${row.status}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => {
+                  setSelectedSpellId(row.spellId);
+                  setExpandedSpellId(prev => prev === row.spellId ? null : row.spellId);
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedSpellId(row.spellId);
+                    setExpandedSpellId(prev => prev === row.spellId ? null : row.spellId);
+                  }
+                }}
+                title={buildTrainerTooltip(row, { archived: isArchivedView, kind: selectedGroup?.kind || 'trainer_spell' })}
+              >
+                <div className="tsv-card-top">
+                  <label className="tsv-remove-check" onClick={e => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={removeSelection.includes(row.spellId)}
+                      onChange={() => setRemoveSelection(prev => prev.includes(row.spellId) ? prev.filter(id => id !== row.spellId) : [...prev, row.spellId])}
+                    />
+                  </label>
+                  <div className="tsv-icon-wrap">
+                    {row.iconUrl && !brokenIconIds.includes(row.spellId) ? (
+                      <img
+                        src={row.iconUrl}
+                        alt=""
+                        onError={() => setBrokenIconIds(prev => (prev.includes(row.spellId) ? prev : [...prev, row.spellId]))}
+                      />
+                    ) : (
+                      <Sparkles size={18} />
+                    )}
+                  </div>
+                  <div className="tsv-card-text">
+                    <div className="tsv-card-name">{row.craftedItemName || row.name}</div>
+                    <div className="tsv-card-sub">{row.craftedItemName ? `Crafts ${row.name}` : (row.subtext || 'No rank')}</div>
+                  </div>
+                  <span className={`tsv-status tsv-status--${row.status}`}>{badgeForStatus(row.status)}</span>
                 </div>
-                <div className="tsv-card-text">
-                  <div className="tsv-card-name">{row.name}</div>
-                  <div className="tsv-card-sub">{row.subtext || 'No rank'}</div>
+                <div className="tsv-card-meta">
+                  <span>#{row.spellId}</span>
+                  <span>Lvl {row.minLevel}</span>
+                  <span>{moneyToText(row.moneyCost)}</span>
+                  <span>{row.sourceCount} source{row.sourceCount !== 1 ? 's' : ''}</span>
                 </div>
-                <span className={`tsv-status tsv-status--${row.status}`}>{badgeForStatus(row.status)}</span>
+                {isExpanded && (
+                  <div className="tsv-card-expander" onClick={e => e.stopPropagation()}>
+                    <div className="tsv-expand-grid">
+                      <div className="tsv-expand-main">
+                        <div className="tsv-expand-title">{row.craftedItemName || row.name}</div>
+                        <div className="tsv-expand-sub">{row.craftedItemName ? `Crafted item #${row.craftedItemId}` : `Spell #${row.spellId}`}</div>
+                        <div className="tsv-expand-chips">
+                          <span className={`tsv-diag ${row.learned ? 'ok' : ''}`}>{row.learned ? 'Already learned' : 'Not learned'}</span>
+                          <span className={`tsv-diag ${row.tooLow ? 'warn' : 'ok'}`}>{row.tooLow ? 'Player level too low' : 'Player level ok'}</span>
+                          <span className={`tsv-diag ${row.slaOk ? 'ok' : 'warn'}`}>{row.slaOk ? 'Trainer-safe' : 'SkillLineAbility may block'}</span>
+                        </div>
+                        {(row.craftedItemId || (row.reagents || []).length || (row.catalysts || []).length) ? (
+                          <div className="tsv-recipe-panel">
+                            {row.craftedItemId && (
+                              <div className="tsv-recipe-head">
+                                <div>
+                                  <div className="tsv-recipe-label">Crafted item</div>
+                                  <div className="tsv-recipe-value">#{row.craftedItemId}{row.craftedItemName ? ` - ${row.craftedItemName}` : ''}</div>
+                                </div>
+                                {row.iconUrl ? (
+                                  <div className="tsv-recipe-icon">
+                                    <img src={row.iconUrl} alt="" />
+                                  </div>
+                                ) : null}
+                              </div>
+                            )}
+                            {(row.reagents || []).length > 0 && (
+                              <div className="tsv-reagent-grid">
+                                {row.reagents.map(reagent => (
+                                  <div key={`${row.spellId}-${reagent.slot}-${reagent.itemId}`} className="tsv-reagent">
+                                    <div className="tsv-reagent-icon">
+                                      {reagent.iconUrl ? <img src={reagent.iconUrl} alt="" /> : <Sparkles size={12} />}
+                                    </div>
+                                    <div className="tsv-reagent-text">
+                                      <span className="tsv-reagent-count">{reagent.count}x</span>
+                                      <span className="tsv-reagent-name">{reagent.name}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                            {(row.catalysts || []).length > 0 && (
+                              <div className="tsv-catalyst-row">
+                                <span className="tsv-recipe-label">Catalysts</span>
+                                {(row.catalysts || []).map(catalyst => (
+                                  <span key={`${row.spellId}-cat-${catalyst.slot}-${catalyst.itemId}`} className="tsv-source-pill">
+                                    {catalyst.name}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="tsv-empty tsv-empty--compact">No reagent data found in Spell.dbc.</div>
+                        )}
+                      </div>
+                      <div className="tsv-expand-actions">
+                        <button type="button" className="btn-ghost" onClick={(e) => { e.stopPropagation(); openAddModalForRow(row); }}><Plus size={12} /> Add recipe</button>
+                        <button type="button" className="btn-ghost" onClick={(e) => { e.stopPropagation(); archiveCurrentSpell(row); }}><Trash2 size={12} /> {isArchivedView ? 'Restore' : 'Archive'}</button>
+                        <button type="button" className="btn-ghost danger" onClick={(e) => { e.stopPropagation(); deleteCurrentSpell(row); }}><X size={12} /> Delete</button>
+                      </div>
+                    </div>
+                    <div className="tsv-source-row">
+                      {row.sources.map(src => (
+                        <span key={`${src.TrainerId}-${row.spellId}`} className="tsv-source-pill" onClick={e => e.stopPropagation()}>
+                          <span>{selectedGroup?.kind === 'npc_trainer' ? `ID ${src.TrainerId}` : `Trainer ${src.TrainerId}`}</span>
+                          <span className="tsv-source-actions">
+                            <button type="button" onClick={() => handleRemoveSource(row, src)} title={isArchivedView ? 'Restore this row to trainer_spell' : 'Archive this row to trainer_spell_60plus'}>
+                              <Trash2 size={11} />
+                            </button>
+                            <button type="button" className="danger" onClick={() => handleDeleteSource(row, src)} title={selectedGroup?.kind === 'npc_trainer' ? 'Delete npc_trainer row permanently' : 'Delete this spell from all shared trainer_spell rows in this class'}>
+                              <X size={11} />
+                            </button>
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                    {row.craftedItemId ? <div className="tsv-card-footer">Crafted item: #{row.craftedItemId}{row.craftedItemName ? ` - ${row.craftedItemName}` : ''}</div> : null}
+                  </div>
+                )}
               </div>
-              <div className="tsv-card-meta">
-                <span>#{row.spellId}</span>
-                <span>Lvl {row.minLevel}</span>
-                <span>{moneyToText(row.moneyCost)}</span>
-                <span>{row.sourceCount} source{row.sourceCount !== 1 ? 's' : ''}</span>
-              </div>
-              <div className="tsv-source-row">
-                {row.sources.map(src => (
-                  <span key={`${src.TrainerId}-${row.spellId}`} className="tsv-source-pill" onClick={e => e.stopPropagation()}>
-                    <span>{selectedGroup?.kind === 'npc_trainer' ? `ID ${src.TrainerId}` : `Trainer ${src.TrainerId}`}</span>
-                    <span className="tsv-source-actions">
-                      <button type="button" onClick={() => handleRemoveSource(row, src)} title={isArchivedView ? 'Restore this row to trainer_spell' : 'Archive this row to trainer_spell_60plus'}>
-                        <Trash2 size={11} />
-                      </button>
-                      <button type="button" className="danger" onClick={() => handleDeleteSource(row, src)} title={selectedGroup?.kind === 'npc_trainer' ? 'Delete npc_trainer row permanently' : 'Delete this spell from all shared trainer_spell rows in this class'}>
-                        <X size={11} />
-                      </button>
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </button>
-          ))}
+            );})}
         </div>
 
         <div className="tsv-side-pane">

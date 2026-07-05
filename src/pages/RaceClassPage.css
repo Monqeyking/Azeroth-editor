@@ -340,6 +340,142 @@
   gap: 5px;
 }
 
+.rc-skill-ranks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.rc-skill-rank-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-dark);
+  font-size: 11px;
+}
+
+.rc-skill-rank-id {
+  color: var(--text-secondary);
+}
+
+.rc-skill-rank-value,
+.rc-skill-count {
+  color: var(--gold-bright);
+}
+
+.rc-skill-section {
+  display: grid;
+  gap: 10px;
+}
+
+.rc-skill-section + .rc-skill-section {
+  margin-top: 18px;
+}
+
+.rc-skill-section-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.rc-skill-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rc-skill-section-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.rc-startbar-list,
+.rc-skill-tree {
+  display: grid;
+  gap: 10px;
+}
+
+.rc-skill-group {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+
+.rc-skill-group-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: var(--bg-dark);
+}
+
+.rc-skill-category {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.rc-skill-line-name {
+  font-size: 13px;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.rc-skill-count {
+  margin-left: auto;
+  font-size: 11px;
+}
+
+.rc-skill-items {
+  display: grid;
+}
+
+.rc-startbar-item,
+.rc-skill-item {
+  display: grid;
+  grid-template-columns: 56px minmax(160px, 1fr) auto auto auto auto;
+  gap: 10px;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+  align-items: center;
+  font-size: 12px;
+}
+
+.rc-startbar-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02);
+}
+
+.rc-skill-item:first-child {
+  border-top: none;
+}
+
+.rc-skill-button,
+.rc-skill-meta {
+  color: var(--text-muted);
+}
+
+.rc-skill-spell {
+  color: var(--text-primary);
+}
+
+.rc-skill-empty {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
 /* ── Wizard ──────────────────────────────────────────────────── */
 .rc-wizard {
   background: var(--bg-panel);
@@ -468,3 +604,84 @@
   color: #f44336 !important;
 }
 .btn-danger:hover { background: rgba(244,67,54,0.25) !important; }
+
+.rc-suspect-badge {
+  justify-self: start;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,196,0,0.35);
+  background: rgba(255,196,0,0.12);
+  color: #ffd54f;
+  font-size: 10px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.rc-suspect-badge.warn {
+  border-color: rgba(244,67,54,0.35);
+  background: rgba(244,67,54,0.12);
+  color: #ff8a80;
+}
+
+.rc-outfit-list {
+  display: grid;
+  gap: 12px;
+}
+
+.rc-outfit-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255,255,255,0.02);
+  overflow: hidden;
+}
+
+.rc-outfit-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--bg-dark);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.rc-outfit-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.rc-outfit-items {
+  display: grid;
+}
+
+.rc-outfit-item {
+  display: grid;
+  grid-template-columns: 90px minmax(0, 1fr) auto auto;
+  gap: 10px;
+  align-items: center;
+  padding: 8px 12px;
+  border-top: 1px solid rgba(255,255,255,0.04);
+}
+
+.rc-outfit-item:first-child {
+  border-top: none;
+}
+
+.rc-outfit-slot,
+.rc-outfit-meta {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.rc-outfit-name {
+  color: var(--text-primary);
+  font-size: 12px;
+}
+
+.rc-outfit-debug {
+  padding: 8px 12px 0;
+}
+
+.rc-outfit-debug .rc-outfit-meta {
+  font-size: 11px;
+}

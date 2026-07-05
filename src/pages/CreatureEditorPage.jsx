@@ -9,6 +9,7 @@ import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { prefetchM2Models } from '../components/editor3d/m2Loader';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
+import './EnemiesPage.css';
 
 const NPC_FLAG = { TRAINER: 16, CLASS_TRAINER: 32, PROFESSION_TRAINER: 64, VENDOR: 128 };
 
@@ -30,13 +31,60 @@ const MODEL_COLUMNS = ['Idx', 'CreatureDisplayID', 'DisplayScale', 'Probability'
 
 const SUB_TABS = [
   { id: 'general', label: 'General Fields' },
-  { id: 'models', label: 'Template Model' },
-  { id: 'addon', label: 'Addon' },
+  { id: 'enemies', label: 'Enemies' },
   { id: 'trainer', label: 'Trainer Settings', role: 'trainer' },
   { id: 'vendor', label: 'Vendor Items', role: 'vendor' },
   { id: 'spawns', label: 'World Spawns', role: 'spawn' },
 ];
 
+const VISIBILITY_OPTIONS = [
+  { value: 'visible', label: 'Visible' },
+  { value: 'hidden', label: 'Hidden' },
+  { value: 'legacy', label: 'Legacy' },
+  { value: 'classic+', label: 'Classic+' },
+  { value: 'custom', label: 'Custom' },
+];
+
+const ENEMY_PRESETS = [
+  { id: 'vanilla', label: 'Vanilla', sub: 'Baseline Classic tuning', desc: 'Leave content visible and keep the original creature feel intact.', visibilityStatus: 'visible', phaseTag: 'vanilla', progressionTag: 'base', hpMultiplier: 1.00, damageMultiplier: 1.00, armorMultiplier: 1.00, color: '#c8a96e' },
+  { id: 'classic-light', label: 'Classic+ Light', sub: 'Small bump', desc: 'A modest enemy bump for new Classic+ content without over-scaling.', visibilityStatus: 'classic+', phaseTag: 'classic+', progressionTag: 'light', hpMultiplier: 1.15, damageMultiplier: 1.08, armorMultiplier: 1.05, color: '#7abeee' },
+  { id: 'classic-standard', label: 'Classic+ Standard', sub: 'Default Classic+ pass', desc: 'A balanced default for most modern Classic+ enemy tuning.', visibilityStatus: 'classic+', phaseTag: 'classic+', progressionTag: 'standard', hpMultiplier: 1.30, damageMultiplier: 1.18, armorMultiplier: 1.12, color: '#8a5acc' },
+  { id: 'classic-hard', label: 'Classic+ Hard', sub: 'Tough encounter tuning', desc: 'Use for elite camps, dangerous zones, and boss-like outdoor enemies.', visibilityStatus: 'classic+', phaseTag: 'classic+', progressionTag: 'hard', hpMultiplier: 1.50, damageMultiplier: 1.35, armorMultiplier: 1.22, color: '#dc7a4f' },
+];
+
+const DEFAULT_ENEMY_META = {
+  visibility_status: 'visible',
+  phase_tag: '',
+  progression_tag: '',
+  notes: '',
+};
+
+const CREATURE_TYPE_OPTIONS = [
+  { value: 'all', label: 'All types' },
+  { value: '0', label: 'None' },
+  { value: '1', label: 'Beast' },
+  { value: '2', label: 'Dragonkin' },
+  { value: '3', label: 'Demon' },
+  { value: '4', label: 'Elemental' },
+  { value: '5', label: 'Giant' },
+  { value: '6', label: 'Undead' },
+  { value: '7', label: 'Humanoid' },
+  { value: '8', label: 'Critter' },
+  { value: '9', label: 'Mechanical' },
+  { value: '10', label: 'Not Specified' },
+  { value: '11', label: 'Totem' },
+  { value: '12', label: 'Non-Combat Pet' },
+  { value: '13', label: 'Gas Cloud' },
+];
+
+const RANK_FILTER_OPTIONS = [
+  { value: 'all', label: 'All ranks' },
+  { value: '0', label: 'Normal' },
+  { value: '1', label: 'Elite' },
+  { value: '2', label: 'Rare Elite' },
+  { value: '3', label: 'Boss' },
+  { value: '4', label: 'Rare' },
+];
 const ADDON_FIELDS = [
   { key: 'path_id', label: 'Path ID', type: 'number' },
   { key: 'mount', label: 'Mount', type: 'number' },
@@ -157,10 +205,82 @@ function applyTrainerFlags(npcflag, meta) {
   return f;
 }
 
+function num(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function text(value) {
+  return value == null ? '' : String(value);
+}
+
+function normalizePresetKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function approx(a, b) {
+  return Math.abs(num(a, 1) - num(b, 1)) < 0.0001;
+}
+
+function getPresetIdFromRow(row, meta) {
+  for (const preset of ENEMY_PRESETS) {
+    if (
+      normalizePresetKey(meta.visibility_status) === preset.visibilityStatus &&
+      normalizePresetKey(meta.phase_tag) === normalizePresetKey(preset.phaseTag) &&
+      normalizePresetKey(meta.progression_tag) === normalizePresetKey(preset.progressionTag) &&
+      approx(row.hp_multiplier, preset.hpMultiplier) &&
+      approx(row.damage_multiplier, preset.damageMultiplier) &&
+      approx(row.armor_multiplier, preset.armorMultiplier)
+    ) return preset.id;
+  }
+  return 'custom';
+}
+
+function getPresetLabel(id) {
+  return ENEMY_PRESETS.find(p => p.id === id)?.label || 'Custom';
+}
+
+function buildPresetDraft(preset) {
+  return {
+    visibility_status: preset.visibilityStatus,
+    phase_tag: preset.phaseTag,
+    progression_tag: preset.progressionTag,
+    hp_multiplier: preset.hpMultiplier.toFixed(2),
+    damage_multiplier: preset.damageMultiplier.toFixed(2),
+    armor_multiplier: preset.armorMultiplier.toFixed(2),
+  };
+}
+
+function formatLevel(row) {
+  const min = num(row.minlevel, 0);
+  const max = num(row.maxlevel, 0);
+  if (!min && !max) return 'Lv ?';
+  if (min && max && min !== max) return 'Lv ' + min + '-' + max;
+  return 'Lv ' + (min || max);
+}
+
+function getCreatureTypeLabel(value) {
+  return CREATURE_TYPE_OPTIONS.find(opt => opt.value === String(value))?.label || 'Type ' + value;
+}
+
+function toEnemyMeta(row) {
+  return {
+    visibility_status: text(row?.visibility_status || 'visible'),
+    phase_tag: text(row?.phase_tag),
+    progression_tag: text(row?.progression_tag),
+    notes: text(row?.notes),
+  };
+}
+
 export default function CreatureEditorPage() {
   const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  const [creatureTypeFilter, setCreatureTypeFilter] = useState('all');
+  const [minLevelFilter, setMinLevelFilter] = useState('');
+  const [maxLevelFilter, setMaxLevelFilter] = useState('');
+  const [rankFilter, setRankFilter] = useState('all');
+  const [factionFilter, setFactionFilter] = useState('');
   const [creatures, setCreatures] = useState([]);
   const [selected, setSelected] = useState(null);
   const [form, setForm] = useState({});
@@ -199,6 +319,8 @@ export default function CreatureEditorPage() {
   const [refModelRows, setRefModelRows] = useState([EMPTY_MODEL_ROW(0)]);
   const [refSelectedModelIdx, setRefSelectedModelIdx] = useState(0);
   const [refRoles, setRefRoles] = useState({ trainer: false, vendor: false, spawn: false });
+  const [enemyMeta, setEnemyMeta] = useState(DEFAULT_ENEMY_META);
+  const [refEnemyMeta, setRefEnemyMeta] = useState(DEFAULT_ENEMY_META);
   const [dirty, setDirty] = useState(false);
   const unsavedGuard = useUnsavedGuard(dirty);
   const [saving, setSaving] = useState(false);
@@ -220,22 +342,61 @@ export default function CreatureEditorPage() {
 
   const searchCreatures = useCallback(async (term) => {
     setLoading(true);
-    const isNum = /^\d+$/.test(term);
-    let sql, params;
-    if (!term) {
-      sql = 'SELECT entry, `name`, minlevel, maxlevel, `rank`, `type` FROM creature_template ORDER BY entry DESC LIMIT 50';
-      params = [];
-    } else if (isNum) {
-      sql = 'SELECT entry, `name`, minlevel, maxlevel, `rank`, `type` FROM creature_template WHERE entry = ? LIMIT 50';
-      params = [term];
-    } else {
-      sql = 'SELECT entry, `name`, minlevel, maxlevel, `rank`, `type` FROM creature_template WHERE `name` LIKE ? LIMIT 50';
-      params = [`%${term}%`];
+    await ensureEnemyMetaTable();
+    const trimmed = term.trim();
+    const isNum = /^\d+$/.test(trimmed);
+    const params = [];
+    let sql = `
+      SELECT
+        ct.entry,
+        ct.name,
+        ct.minlevel,
+        ct.maxlevel,
+        ct.rank,
+        ct.type,
+        ct.faction,
+        COALESCE(em.visibility_status, 'visible') AS visibility_status,
+        COALESCE(em.phase_tag, '') AS phase_tag,
+        COALESCE(em.progression_tag, '') AS progression_tag,
+        COALESCE(em.notes, '') AS notes
+      FROM creature_template ct
+      LEFT JOIN enemy_editor_meta em ON em.entry = ct.entry
+      WHERE 1=1
+    `;
+    if (trimmed) {
+      if (isNum) {
+        sql += ' AND ct.entry = ?';
+        params.push(Number(trimmed));
+      } else {
+        sql += ' AND ct.name LIKE ?';
+        params.push('%' + trimmed + '%');
+      }
     }
+    if (creatureTypeFilter !== 'all') {
+      sql += ' AND ct.type = ?';
+      params.push(Number(creatureTypeFilter));
+    }
+    if (rankFilter !== 'all') {
+      sql += ' AND ct.rank = ?';
+      params.push(Number(rankFilter));
+    }
+    if (factionFilter.trim() !== '') {
+      sql += ' AND ct.faction = ?';
+      params.push(Number(factionFilter));
+    }
+    if (minLevelFilter !== '') {
+      sql += ' AND ct.maxlevel >= ?';
+      params.push(Number(minLevelFilter));
+    }
+    if (maxLevelFilter !== '') {
+      sql += ' AND ct.minlevel <= ?';
+      params.push(Number(maxLevelFilter));
+    }
+    sql += ' ORDER BY CASE WHEN ct.rank = 3 THEN 0 WHEN ct.rank = 2 THEN 1 WHEN ct.rank = 1 THEN 2 ELSE 3 END ASC, ct.entry DESC LIMIT 200';
     const result = await query(sql, params);
     setCreatures(result.data || []);
     setLoading(false);
-  }, [query]);
+  }, [query, creatureTypeFilter, rankFilter, factionFilter, minLevelFilter, maxLevelFilter]);
 
   const loadRelatedData = useCallback(async (entry) => {
     const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes, trainerDefRes] = await Promise.all([
@@ -263,7 +424,53 @@ export default function CreatureEditorPage() {
     };
   }, [query]);
 
-  useEffect(() => { searchCreatures(''); }, []);
+  const ensureEnemyMetaTable = useCallback(async () => {
+    await query(`
+      CREATE TABLE IF NOT EXISTS enemy_editor_meta (
+        entry INT NOT NULL PRIMARY KEY,
+        visibility_status VARCHAR(20) NOT NULL DEFAULT 'visible',
+        phase_tag VARCHAR(64) NOT NULL DEFAULT '',
+        progression_tag VARCHAR(64) NOT NULL DEFAULT '',
+        notes TEXT NULL,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+      )
+    `);
+  }, [query]);
+
+  const loadEnemyMetaRow = useCallback(async (entry) => {
+    await ensureEnemyMetaTable();
+    const res = await query('SELECT visibility_status, phase_tag, progression_tag, notes FROM enemy_editor_meta WHERE entry = ? LIMIT 1', [entry]);
+    return res.data?.[0] || null;
+  }, [query]);
+
+  const upsertEnemyMetaRow = useCallback(async (entry, patch, preserveNotes = true) => {
+    await ensureEnemyMetaTable();
+    const current = await loadEnemyMetaRow(entry);
+    const next = {
+      visibility_status: patch.visibility_status ?? current?.visibility_status ?? 'visible',
+      phase_tag: patch.phase_tag ?? current?.phase_tag ?? '',
+      progression_tag: patch.progression_tag ?? current?.progression_tag ?? '',
+      notes: preserveNotes ? (patch.notes ?? current?.notes ?? '') : (patch.notes ?? ''),
+    };
+    const hasMeta = next.visibility_status !== 'visible' || next.phase_tag.trim() !== '' || next.progression_tag.trim() !== '' || next.notes.trim() !== '';
+    if (!hasMeta) {
+      if (current) await query('DELETE FROM enemy_editor_meta WHERE entry = ?', [entry]);
+      return;
+    }
+    if (current) {
+      await query(
+        'UPDATE enemy_editor_meta SET visibility_status = ?, phase_tag = ?, progression_tag = ?, notes = ? WHERE entry = ?',
+        [next.visibility_status, next.phase_tag, next.progression_tag, next.notes, entry]
+      );
+    } else {
+      await query(
+        'INSERT INTO enemy_editor_meta (entry, visibility_status, phase_tag, progression_tag, notes) VALUES (?,?,?,?,?)',
+        [entry, next.visibility_status, next.phase_tag, next.progression_tag, next.notes]
+      );
+    }
+  }, [loadEnemyMetaRow, query]);
+
+  useEffect(() => { searchCreatures(search); }, [searchCreatures, search, creatureTypeFilter, rankFilter, factionFilter, minLevelFilter, maxLevelFilter]);
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   useEffect(() => {
@@ -276,6 +483,7 @@ export default function CreatureEditorPage() {
     if (!result.data?.[0]) return;
     const row = result.data[0];
     const related = await loadRelatedData(entry);
+    const enemyRow = await loadEnemyMetaRow(entry);
     const roleFlags = deriveRoles(row.npcflag);
     setSelected(row);
     setForm(row);
@@ -288,6 +496,7 @@ export default function CreatureEditorPage() {
     setVendorItems(related.vendorItems.length ? related.vendorItems : [EMPTY_VENDOR_ROW()]);
     setSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
     setAddonData(related.addon ? { ...related.addon } : EMPTY_ADDON());
+    setEnemyMeta(toEnemyMeta(enemyRow));
     const models = normalizeModelRows(related.models);
     setModelRows(models);
     setSelectedModelIdx(0);
@@ -332,6 +541,7 @@ export default function CreatureEditorPage() {
     if (!result.data?.[0]) return;
     const row = result.data[0];
     const related = await loadRelatedData(entry);
+    const enemyRow = await loadEnemyMetaRow(entry);
     setRefEntry(entry);
     setRefForm(row);
     setRefTrainerMeta(deriveTrainerMeta(row.npcflag));
@@ -340,6 +550,7 @@ export default function CreatureEditorPage() {
     setRefVendorItems(related.vendorItems);
     setRefSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
     setRefAddonData(related.addon ? { ...related.addon } : EMPTY_ADDON());
+    setRefEnemyMeta(toEnemyMeta(enemyRow));
     const refModels = normalizeModelRows(related.models);
     setRefModelRows(refModels);
     setRefSelectedModelIdx(0);
@@ -507,6 +718,7 @@ export default function CreatureEditorPage() {
       if (roles.spawn) await saveSpawnData(form.entry);
       await saveAddonData(form.entry);
       await saveModelData(form.entry);
+      await upsertEnemyMetaRow(form.entry, enemyMeta);
 
       setSelected(form);
       setDirty(false);
@@ -515,16 +727,16 @@ export default function CreatureEditorPage() {
         await soapCommand(`.reload creature_template`);
         if (roles.spawn) await soapCommand(`.reload creature`);
         await soapCommand(`.reload creature entry ${form.entry}`);
-        setMsg({ type: 'success', text: `âœ“ Saved & reloaded entry ${form.entry}` });
+        setMsg({ type: 'success', text: `Ã¢Å“â€œ Saved & reloaded entry ${form.entry}` });
       } else {
-        setMsg({ type: 'success', text: `âœ“ Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
+        setMsg({ type: 'success', text: `Ã¢Å“â€œ Saved entry ${form.entry}. Configure SOAP in Settings for live reload.` });
       }
       searchCreatures(search);
     } catch (e) {
-      setMsg({ type: 'error', text: `âœ— Error: ${e.message}` });
+      setMsg({ type: 'error', text: `Ã¢Å“â€” Error: ${e.message}` });
     }
     setSaving(false);
-  }, [form, roles, trainerSpells, vendorItems, spawnData, addonData, modelRows, query, soapConfig, soapCommand, search, searchCreatures, findNextId]);
+  }, [form, roles, trainerSpells, vendorItems, spawnData, addonData, modelRows, enemyMeta, query, soapConfig, soapCommand, search, searchCreatures, findNextId, upsertEnemyMetaRow]);
 
   useEffect(() => {
     const ids = [...new Set(trainerSpells.filter(r => Number(r.SpellID) < 0).map(r => Math.abs(Number(r.SpellID))))];
@@ -581,11 +793,12 @@ export default function CreatureEditorPage() {
       const vals = fields.map(k => k === 'entry' ? newId : selected[k]);
       const result = await query(`INSERT INTO creature_template (${cols}) VALUES (${fields.map(() => '?').join(', ')})`, vals);
       if (!result.success) throw new Error(result.error);
+      await upsertEnemyMetaRow(newId, enemyMeta, true);
       await searchCreatures(search);
       await selectCreature(newId);
-      setMsg({ type: 'success', text: `âœ“ Gekloond naar entry #${newId}` });
+      setMsg({ type: 'success', text: `Ã¢Å“â€œ Gekloond naar entry #${newId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `âœ— Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `Ã¢Å“â€” Klonen mislukt: ${e.message}` });
     }
     setCopying(false);
   };
@@ -604,6 +817,17 @@ export default function CreatureEditorPage() {
     } else if (sectionId === 'spawns') {
       setSpawnData({ ...refSpawnData, guid: null });
       setRoles(r => ({ ...r, spawn: true }));
+    } else if (sectionId === 'enemies') {
+      setForm(f => ({
+        ...f,
+        minlevel: refForm.minlevel,
+        maxlevel: refForm.maxlevel,
+        rank: refForm.rank,
+        HealthModifier: refForm.HealthModifier,
+        DamageModifier: refForm.DamageModifier,
+        ArmorModifier: refForm.ArmorModifier,
+      }));
+      setEnemyMeta({ ...refEnemyMeta });
     } else if (sectionId === 'addon') {
       setAddonData({ ...refAddonData });
     } else if (sectionId === 'models') {
@@ -726,7 +950,7 @@ export default function CreatureEditorPage() {
           <>
             <h5 className="field-subsection-title">
               Trainer Definition
-              {tDef._isNew && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>NEW â€” wordt aangemaakt bij Save</span>}
+              {tDef._isNew && <span style={{ marginLeft: 8, fontSize: 10, color: 'var(--accent)', fontWeight: 600 }}>NEW Ã¢â‚¬â€ wordt aangemaakt bij Save</span>}
             </h5>
             <div className="creature-meta-row">
               <div className="field-group">
@@ -747,7 +971,7 @@ export default function CreatureEditorPage() {
                   <label>Required Class</label>
                   <select value={tDef.Requirement ?? 0} disabled={readOnly}
                     onChange={e => { setTDef?.({ ...tDef, Requirement: Number(e.target.value) }); markDirty(); }}>
-                    <option value={0}>â€”</option>
+                    <option value={0}>Ã¢â‚¬â€</option>
                     {TRAINER_CLASSES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
                   </select>
                 </div>
@@ -816,10 +1040,10 @@ export default function CreatureEditorPage() {
         <h5 className="field-subsection-title">Spell Templates</h5>
         <p className="field-hint">
           npc_trainer template refs (negatief SpellID). Veelgebruikte templates:
-          <strong> 200003</strong> â€” level 1â€“6 basis spells &nbsp;|&nbsp;
-          <strong> 200004</strong> â€” gedeelde class spells level 8â€“80 &nbsp;|&nbsp;
-          <strong> 200020</strong> â€” Alliance exclusief (mount + Seal of Vengeance) &nbsp;|&nbsp;
-          <strong> 200021</strong> â€” Horde exclusief (mount + Seal of Corruption)
+          <strong> 200003</strong> Ã¢â‚¬â€ level 1Ã¢â‚¬â€œ6 basis spells &nbsp;|&nbsp;
+          <strong> 200004</strong> Ã¢â‚¬â€ gedeelde class spells level 8Ã¢â‚¬â€œ80 &nbsp;|&nbsp;
+          <strong> 200020</strong> Ã¢â‚¬â€ Alliance exclusief (mount + Seal of Vengeance) &nbsp;|&nbsp;
+          <strong> 200021</strong> Ã¢â‚¬â€ Horde exclusief (mount + Seal of Corruption)
         </p>
         <table className="creature-data-table">
           <thead>
@@ -833,7 +1057,7 @@ export default function CreatureEditorPage() {
               const gi = templateGlobalIdx(row);
               const tid = Math.abs(Number(row.SpellID));
               const tm = tmplMeta[tid];
-              const desc = tm ? `${tm.cnt} spell${tm.cnt !== 1 ? 's' : ''} Â· Lvl ${tm.minLvl}â€“${tm.maxLvl}` : null;
+              const desc = tm ? `${tm.cnt} spell${tm.cnt !== 1 ? 's' : ''} Ã‚Â· Lvl ${tm.minLvl}Ã¢â‚¬â€œ${tm.maxLvl}` : null;
               return (
                 <tr key={i}>
                   <td>
@@ -848,7 +1072,7 @@ export default function CreatureEditorPage() {
                     />
                   </td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '11px', whiteSpace: 'nowrap' }}>
-                    {desc ?? 'â€”'}
+                    {desc ?? 'Ã¢â‚¬â€'}
                   </td>
                   {!readOnly && (
                     <td>
@@ -876,13 +1100,13 @@ export default function CreatureEditorPage() {
               <div className="field-hint" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                 <span>
                   <strong>{spellSummary.cnt}</strong> spells in trainer_spell voor TrainerId {tDef.TrainerId}
-                  {spellSummary.minLvl != null && ` Â· Lvl ${spellSummary.minLvl}â€“${spellSummary.maxLvl}`}
+                  {spellSummary.minLvl != null && ` Ã‚Â· Lvl ${spellSummary.minLvl}Ã¢â‚¬â€œ${spellSummary.maxLvl}`}
                 </span>
-                <span style={{ color: 'var(--text-muted)' }}>â†’ Beheer via Trainer Spell Editor</span>
+                <span style={{ color: 'var(--text-muted)' }}>Ã¢â€ â€™ Beheer via Trainer Spell Editor</span>
               </div>
             ) : (
               <p className="field-hint" style={{ color: 'var(--accent)' }}>
-                Geen trainer_spell entries gevonden voor TrainerId {tDef.TrainerId} â€” voeg spells toe via de Trainer Spell Editor.
+                Geen trainer_spell entries gevonden voor TrainerId {tDef.TrainerId} Ã¢â‚¬â€ voeg spells toe via de Trainer Spell Editor.
               </p>
             )}
           </div>
@@ -890,7 +1114,7 @@ export default function CreatureEditorPage() {
         {directSpells.length > 0 && (
           <div style={{ marginTop: '1rem' }}>
             <h5 className="field-subsection-title">Direct Spells <span style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 400 }}>(npc_trainer legacy)</span></h5>
-            <p className="field-hint">Positieve SpellID entries in npc_trainer â€” legacy, niet meer in gebruik in het nieuwe systeem.</p>
+            <p className="field-hint">Positieve SpellID entries in npc_trainer Ã¢â‚¬â€ legacy, niet meer in gebruik in het nieuwe systeem.</p>
             <table className="creature-data-table">
               <thead>
                 <tr><th>SpellID</th><th>Cost</th><th>Req Skill</th><th>Skill Rank</th><th>Req Lvl</th><th>Req Spell</th>{!readOnly && <th></th>}</tr>
@@ -1082,11 +1306,11 @@ export default function CreatureEditorPage() {
                           <button
                             tabIndex={-1}
                             onMouseDown={e => { e.preventDefault(); updateRow(i, col, String(Number(row[col] || 0) + 1)); }}
-                          >â–²</button>
+                          >Ã¢â€“Â²</button>
                           <button
                             tabIndex={-1}
                             onMouseDown={e => { e.preventDefault(); updateRow(i, col, String(Math.max(0, Number(row[col] || 0) - 1))); }}
-                          >â–¼</button>
+                          >Ã¢â€“Â¼</button>
                         </>}
                       </div>
                     )}
@@ -1174,6 +1398,104 @@ export default function CreatureEditorPage() {
     </div>
   );
 
+  const renderEnemiesPanel = (data, meta, onFieldChange, onMetaChange, readOnly, onCopySection) => {
+    const currentPresetId = getPresetIdFromRow(
+      {
+        hp_multiplier: data.HealthModifier ?? 1,
+        damage_multiplier: data.DamageModifier ?? 1,
+        armor_multiplier: data.ArmorModifier ?? 1,
+      },
+      meta
+    );
+    const applyPreset = (preset) => {
+      if (readOnly) return;
+      onFieldChange('HealthModifier', preset.hpMultiplier);
+      onFieldChange('DamageModifier', preset.damageMultiplier);
+      onFieldChange('ArmorModifier', preset.armorMultiplier);
+      onMetaChange({
+        visibility_status: preset.visibilityStatus,
+        phase_tag: preset.phaseTag,
+        progression_tag: preset.progressionTag,
+      });
+    };
+    const quickVisibility = (value) => {
+      if (readOnly) return;
+      onMetaChange({ visibility_status: value });
+    };
+
+    return (
+      <div className="creature-section-block">
+        <div className="creature-section-head">
+          <h4 className="field-section-title">Enemies</h4>
+          {readOnly && onCopySection && (
+            <button type="button" className="btn-ghost creature-copy-section" onClick={() => onCopySection('enemies')} title="Copy enemy tuning to draft">
+              <ClipboardCopy size={12} />
+            </button>
+          )}
+        </div>
+        <p className="field-hint">Editor-only balancing and visibility layer. Hidden content stays recoverable in metadata.</p>
+
+        <div className="enemy-preset-grid">
+          {ENEMY_PRESETS.map(preset => {
+            const active = currentPresetId === preset.id;
+            return (
+              <button key={preset.id} type="button" className={"enemy-preset-card" + (active ? ' active' : '')} style={{ '--preset-color': preset.color }} onClick={() => applyPreset(preset)} disabled={readOnly}>
+                <div className="enemy-preset-top"><span className="enemy-preset-label">{preset.label}</span>{active && <span style={{ fontSize: 10 }}>Current</span>}</div>
+                <span className="enemy-preset-sub">{preset.sub}</span>
+                <p className="enemy-preset-desc">{preset.desc}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="creature-meta-row">
+          <div className="field-group"><label>Min level</label><input type="number" min="1" value={data.minlevel ?? ''} readOnly={readOnly} onChange={e => onFieldChange('minlevel', e.target.value)} /></div>
+          <div className="field-group"><label>Max level</label><input type="number" min="1" value={data.maxlevel ?? ''} readOnly={readOnly} onChange={e => onFieldChange('maxlevel', e.target.value)} /></div>
+          <div className="field-group"><label>Rank</label><select value={data.rank ?? 0} disabled={readOnly} onChange={e => onFieldChange('rank', e.target.value)}>{['0:Normal','1:Elite','2:Rare Elite','3:Boss','4:Rare'].map(opt => { const parts = opt.split(':'); return <option key={parts[0]} value={parts[0]}>{parts[1]}</option>; })}</select></div>
+          <div className="field-group"><label>HP multiplier</label><input type="number" step="0.01" value={data.HealthModifier ?? ''} readOnly={readOnly} onChange={e => onFieldChange('HealthModifier', e.target.value)} onWheel={e => e.target.blur()} /></div>
+          <div className="field-group"><label>Damage multiplier</label><input type="number" step="0.01" value={data.DamageModifier ?? ''} readOnly={readOnly} onChange={e => onFieldChange('DamageModifier', e.target.value)} onWheel={e => e.target.blur()} /></div>
+          <div className="field-group"><label>Armor multiplier</label><input type="number" step="0.01" value={data.ArmorModifier ?? ''} readOnly={readOnly} onChange={e => onFieldChange('ArmorModifier', e.target.value)} onWheel={e => e.target.blur()} /></div>
+          <div className="field-group"><label>Visibility status</label><select value={meta.visibility_status ?? 'visible'} disabled={readOnly} onChange={e => onMetaChange({ visibility_status: e.target.value })}>{VISIBILITY_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}</select></div>
+          <div className="field-group"><label>Phase tag</label><input type="text" value={meta.phase_tag ?? ''} readOnly={readOnly} onChange={e => onMetaChange({ phase_tag: e.target.value })} placeholder="classic+ / vanilla / custom" /></div>
+          <div className="field-group"><label>Progression tag</label><input type="text" value={meta.progression_tag ?? ''} readOnly={readOnly} onChange={e => onMetaChange({ progression_tag: e.target.value })} placeholder="light / standard / hard" /></div>
+        </div>
+
+        {!readOnly && (
+          <div className="enemy-visibility-quick">
+            <span className="field-hint">Quick visibility</span>
+            <div className="enemies-inline-actions">
+              <button type="button" className="btn-ghost" onClick={() => quickVisibility('visible')}>Visible</button>
+              <button type="button" className="btn-ghost" onClick={() => quickVisibility('hidden')}>Hidden</button>
+            </div>
+          </div>
+        )}
+
+        <div className="field-group enemy-notes">
+          <label>Notes</label>
+          <textarea rows="4" value={meta.notes ?? ''} readOnly={readOnly} onChange={e => onMetaChange({ notes: e.target.value })} placeholder="Why this enemy is scaled or hidden..." />
+        </div>
+
+        <div className="enemy-info-grid">
+          <div className="enemy-info-card">
+            <div className="enemy-info-label">Current preset</div>
+            <strong>{getPresetLabel(currentPresetId)}</strong>
+            <span>Preset matching is based on visibility, tags, and the three multipliers.</span>
+          </div>
+          <div className="enemy-info-card">
+            <div className="enemy-info-label">Level view</div>
+            <strong>{formatLevel(data)}</strong>
+            <span>{data.minlevel !== data.maxlevel ? 'Stored as a range in creature_template' : 'Single level entry'}</span>
+          </div>
+          <div className="enemy-info-card">
+            <div className="enemy-info-label">Visibility</div>
+            <strong>{meta.visibility_status || 'visible'}</strong>
+            <span>Visibility is editor metadata only. Hidden creatures stay recoverable.</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const renderSubTabPanels = (readOnly, copyHandler, tabId, tabRoles) => {
     const show = (id, roleKey) => tabId === id && (!roleKey || tabRoles[roleKey]);
 
@@ -1202,6 +1524,19 @@ export default function CreatureEditorPage() {
             readOnly ? setRefWeaponNames : setWeaponNames,
             readOnly ? refWeaponDisplayIds : weaponDisplayIds,
             readOnly ? setRefWeaponDisplayIds : setWeaponDisplayIds,
+          )}
+        </div>
+        <div className="creature-subtab-panel" hidden={!show('enemies')}>
+          {renderEnemiesPanel(
+            readOnly ? refForm : form,
+            readOnly ? refEnemyMeta : enemyMeta,
+            readOnly ? () => {} : handleChange,
+            readOnly ? () => {} : (patch) => {
+              setEnemyMeta(prev => ({ ...prev, ...patch }));
+              markDirty();
+            },
+            readOnly,
+            readOnly ? copyHandler : null
           )}
         </div>
         <div className="creature-subtab-panel" hidden={!show('addon')}>
@@ -1303,12 +1638,37 @@ export default function CreatureEditorPage() {
                 ref={searchRef}
                 placeholder="Search name or entry..."
                 value={search}
-                onChange={e => { setSearch(e.target.value); searchCreatures(e.target.value); }}
+                onChange={e => setSearch(e.target.value)}
               />
             </div>
             <button className="btn-primary icon-btn" onClick={handleCreate} title="New Creature">
               <Plus size={14} />
             </button>
+          </div>
+          <div className="creature-filter-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', margin: '12px 0' }}>
+            <div className="field-group">
+              <label>Type</label>
+              <select value={creatureTypeFilter} onChange={e => setCreatureTypeFilter(e.target.value)}>
+                {CREATURE_TYPE_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div className="field-group">
+              <label>Rank</label>
+              <select value={rankFilter} onChange={e => setRankFilter(e.target.value)}>
+                {RANK_FILTER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div className="field-group">
+              <label>Faction ID</label>
+              <input type="number" min="1" value={factionFilter} onChange={e => setFactionFilter(e.target.value)} placeholder="Any" />
+            </div>
+            <div className="field-group">
+              <label>Level range</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+                <input type="number" min="1" value={minLevelFilter} onChange={e => setMinLevelFilter(e.target.value)} placeholder="Min" />
+                <input type="number" min="1" value={maxLevelFilter} onChange={e => setMaxLevelFilter(e.target.value)} placeholder="Max" />
+              </div>
+            </div>
           </div>
           <div className="list-items">
             {loading && <div className="loading-text">Searching...</div>}
@@ -1320,8 +1680,10 @@ export default function CreatureEditorPage() {
                 </div>
                 <div className="list-item-meta">
                   <span className="mono">#{c.entry}</span>
-                  <span>Lv {c.minlevel === c.maxlevel ? c.minlevel : `${c.minlevel}-${c.maxlevel}`}</span>
+                  <span>Lv {c.minlevel === c.maxlevel ? c.minlevel : c.minlevel + '-' + c.maxlevel}</span>
                   <RankTag rank={c.rank} />
+                  {c.faction && <span>Faction #{c.faction}</span>}
+                  {c.visibility_status && c.visibility_status !== 'visible' && <span>{c.visibility_status}</span>}
                 </div>
               </div>
             ))}
@@ -1342,9 +1704,9 @@ export default function CreatureEditorPage() {
                   <div>
                     <h1 className="page-title">
                       {selected.name}
-                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>â—</span>}
+                      {dirty && <span style={{ color: 'var(--gold)', marginLeft: '8px' }}>Ã¢â€”Â</span>}
                     </h1>
-                    <p className="page-sub">Entry #{selected.entry} Â· creature_template</p>
+                    <p className="page-sub">Entry #{selected.entry} Ã‚Â· creature_template</p>
                   </div>
                   <div className="header-actions">
                     <button type="button" className={`btn-ghost ${splitRef ? 'active' : ''}`} onClick={() => setSplitRef(s => !s)} title="Toggle reference split">
@@ -1375,7 +1737,7 @@ export default function CreatureEditorPage() {
                 <div className="creature-ref-pane">
                   <div className="creature-ref-header">
                     <h3>Reference</h3>
-                    <p className="page-sub">Read-only Â· copy sections into draft</p>
+                    <p className="page-sub">Read-only Ã‚Â· copy sections into draft</p>
                   </div>
                   <div className="creature-ref-search">
                     <div className="search-box">
@@ -1422,4 +1784,7 @@ function RankTag({ rank }) {
   const cls = rank === 3 ? 'tag-gold' : rank >= 1 ? 'tag-blue' : 'tag-green';
   return <span className={`tag ${cls}`}>{labels[rank] || 'Normal'}</span>;
 }
+
+
+
 

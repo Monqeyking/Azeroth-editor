@@ -34,7 +34,7 @@ Why this matters:
 
 ### 2. Profession Editor tab
 
-Add a dedicated tab for profession logic later.
+A first guided version now exists at `/professions`.
 
 Use it for:
 
@@ -112,7 +112,7 @@ Make repeated editing faster:
 
 ### Phase 2
 
-- Profession Editor tab
+- Profession Editor tab (guided first version)
 - compare mode
 - bulk operations
 
@@ -128,4 +128,4 @@ Make repeated editing faster:
 The biggest improvement is not adding more fields.
 The biggest improvement is making relationships visible and repeatable.
 
-That is what will keep implementation speed high as the content set grows.
+That is what will keep implementation speed high as the content set grows.`r`n

@@ -217,6 +217,75 @@
 	color: var(--text-secondary);
 }
 
+.quest-objective-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) 84px minmax(0, 1.15fr);
+	gap: 8px;
+	align-items: end;
+	margin-bottom: 8px;
+}
+
+.quest-objective-row .field-group,
+.quest-faction-field {
+	min-width: 0;
+}
+
+.quest-lookup-display {
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	background: var(--bg-dark);
+	color: var(--text-secondary);
+	padding: 7px 10px;
+	min-height: 34px;
+	display: flex;
+	align-items: center;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 12px;
+}
+
+.quest-lookup-name.is-empty {
+	color: var(--text-muted);
+	font-style: italic;
+	opacity: 0.8;
+}
+
+.quest-faction-grid {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 8px;
+	max-width: 700px;
+}
+
+.quest-faction-reward-row {
+	display: grid;
+	grid-template-columns: minmax(0, 1.2fr) 90px 90px;
+	gap: 12px;
+	align-items: end;
+	margin-bottom: 6px;
+}
+
+.quest-field-input.is-active {
+	border-color: var(--gold-dim) !important;
+	box-shadow: 0 0 0 1px rgba(200, 169, 110, 0.22);
+	background: rgba(33, 39, 52, 0.96);
+}
+
+.quest-field-input.is-dirty {
+	border-color: rgba(200, 169, 110, 0.58);
+	background: rgba(200, 169, 110, 0.08);
+}
+
+.quest-field-input.is-dirty.is-active {
+	background: rgba(200, 169, 110, 0.12);
+}
+
+.quest-field-group.is-active > label,
+.quest-field-group.is-dirty > label {
+	color: var(--gold-bright);
+}
+
 /* Field sections */
 .field-section {
 	grid-column: 1 / -1;
