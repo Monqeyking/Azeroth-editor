@@ -45,7 +45,7 @@ function decodeTextBuffer(buf) {
     }
     return swapped.toString('utf16le');
   }
-  return buf.toString('utf8').replace(/^﻿/, '');
+  return buf.toString('utf8').replace(/^Ã¯Â»Â¿/, '');
 }
 
 const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
@@ -55,12 +55,14 @@ app.setAppUserModelId('com.azeroth.editor');
 
 let mainWindow;
 let dbConnection = null;
+let activeAtomicWrite = null;
+let nextAtomicWriteId = 1;
 let iconsZip = null;
 let iconCache = {};
 let spellDbcCache = null;
 let soapRequestId = 0;
 
-// ─── Server process management ──────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Server process management Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 let authProc = null;
 let worldProc = null;
 
@@ -95,7 +97,7 @@ ipcMain.handle('server:start', async (_, { type, exePath }) => {
     };
 
     if (nodePty) {
-      // PTY mode: process thinks it's writing to a real console — no buffering, full output
+      // PTY mode: process thinks it's writing to a real console Ã¢â‚¬â€ no buffering, full output
       const spawnPty = () => nodePty.spawn(exePath, [], {
         name: 'xterm',
         cols: 220,
@@ -193,7 +195,7 @@ ipcMain.handle('dialog:openFolder', async (_, { title }) => {
   return result.canceled ? null : result.filePaths[0];
 });
 
-// ─── DBC SQL ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ DBC SQL Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('dbcSql:listFiles', async (_, { folder }) => {
   try {
     if (!fs.existsSync(folder)) return { success: true, files: [] };
@@ -296,7 +298,7 @@ ipcMain.handle('fs:copyFiles', async (_, { files, srcDir, destDir }) => {
 });
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
-// Offset = MySQL column index × 4 (each DBC field is 4 bytes)
+// Offset = MySQL column index Ãƒâ€” 4 (each DBC field is 4 bytes)
 const SPELL_OFFSETS = {
   ID:                       { offset: 0,   type: 'uint32' },
   Category:                 { offset: 4,   type: 'uint32' },
@@ -371,7 +373,14 @@ const SPELL_OFFSETS = {
   AuraDescription_Lang_enUS:{ offset: 748, type: 'string' },
 };
 
-// ─── Config persistence ──────────────────────────────────────────────────────
+const SPELL_ALL_STRING_OFFSETS = [
+  544, 548, 552, 556, 560, 564, 568, 572,
+  612, 616, 620, 624, 628, 632, 636, 640,
+  680, 684, 688, 692, 696, 700, 704, 708,
+  748, 752, 756, 760, 764, 768, 772, 776,
+];
+
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Config persistence Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function getConfigPath() {
   return path.join(app.getPath('userData'), 'azeroth-editor-config.json');
 }
@@ -419,7 +428,7 @@ ipcMain.handle('config:save', (_, config) => {
   }
 });
 
-// ─── Window ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Window Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1600,
@@ -464,7 +473,7 @@ app.whenReady().then(createWindow);
 app.on('window-all-closed', () => { if (process.platform !== 'darwin') app.quit(); });
 app.on('activate', () => { if (BrowserWindow.getAllWindows().length === 0) createWindow(); });
 
-// ─── Database ───────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Database Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('db:connect', async (_, config) => {
   try {
     dbConnection = await mysql.createConnection({
@@ -491,6 +500,50 @@ ipcMain.handle('db:query', async (_, sql, params = []) => {
   }
 });
 
+ipcMain.handle('atomic:begin', async (_, { dbcPath, files = [] } = {}) => {
+  if (!dbConnection) return { success: false, error: 'Not connected' };
+  if (activeAtomicWrite) return { success: false, error: 'Another atomic write is already in progress' };
+  try {
+    const safeFiles = [...new Set(files)].filter(name => typeof name === 'string' && name && path.basename(name) === name);
+    if (safeFiles.length !== files.length) throw new Error('Invalid DBC backup filename');
+    const snapshots = safeFiles.map(name => {
+      const filePath = path.join(dbcPath, name);
+      return { filePath, existed: fs.existsSync(filePath), data: fs.existsSync(filePath) ? fs.readFileSync(filePath) : null };
+    });
+    await dbConnection.beginTransaction();
+    const id = nextAtomicWriteId++;
+    activeAtomicWrite = { id, snapshots };
+    return { success: true, id };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('atomic:commit', async (_, id) => {
+  if (!activeAtomicWrite || activeAtomicWrite.id !== id) return { success: false, error: 'Atomic write session not found' };
+  try {
+    await dbConnection.commit();
+    activeAtomicWrite = null;
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('atomic:rollback', async (_, id) => {
+  if (!activeAtomicWrite || activeAtomicWrite.id !== id) return { success: false, error: 'Atomic write session not found' };
+  const session = activeAtomicWrite;
+  activeAtomicWrite = null;
+  const errors = [];
+  try { await dbConnection.rollback(); } catch (err) { errors.push(`Database rollback failed: ${err.message}`); }
+  for (const snapshot of session.snapshots) {
+    try {
+      if (snapshot.existed) fs.writeFileSync(snapshot.filePath, snapshot.data);
+      else if (fs.existsSync(snapshot.filePath)) fs.unlinkSync(snapshot.filePath);
+    } catch (err) { errors.push(`Could not restore ${path.basename(snapshot.filePath)}: ${err.message}`); }
+  }
+  return errors.length ? { success: false, error: errors.join(' | ') } : { success: true };
+});
 ipcMain.handle('db:disconnect', async () => {
   if (dbConnection) {
     await dbConnection.end();
@@ -499,7 +552,7 @@ ipcMain.handle('db:disconnect', async () => {
   return { success: true };
 });
 
-// ─── SOAP ───────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ SOAP Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('soap:command', async (_, { host, port, user, password, command }) => {
   return new Promise((resolve) => {
     const requestId = ++soapRequestId;
@@ -586,7 +639,7 @@ ipcMain.handle('soap:command', async (_, { host, port, user, password, command }
   });
 });
 
-// ─── Icons handling (from unzipped files) ──────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Icons handling (from unzipped files) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function getIconsDir() {
   const possiblePaths = [
     path.join(__dirname, '../src/static'),
@@ -630,24 +683,24 @@ ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
         const mimeType = ext === '.png' ? 'image/png' : 'image/x-tga';
         const dataUrl = `data:${mimeType};base64,${base64}`;
         iconCache[iconName] = dataUrl;
-        console.log(`icons:get - ✓ Loaded icon: ${iconName}${ext} (${data.length} bytes)`);
+        console.log(`icons:get - Ã¢Å“â€œ Loaded icon: ${iconName}${ext} (${data.length} bytes)`);
         return dataUrl;
       }
     }
 
-    console.log(`icons:get - ✗ Icon not found: ${iconName} (looked in ${iconsDir})`);
+    console.log(`icons:get - Ã¢Å“â€” Icon not found: ${iconName} (looked in ${iconsDir})`);
     return null;
   } catch (e) {    return null;
   }
 });
 
-// ─── Worldmap Tiles Loader ─────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Worldmap Tiles Loader Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('worldmap:listZones', async (_, dataPath) => {
   try {
     if (dataPath && getMpqReader().isDataPath(dataPath)) {
       return await getMpqReader().listWorldmapZones(dataPath);
     }
-    // Fallback: geëxtraheerde WORLDMAP-map
+    // Fallback: geÃƒÂ«xtraheerde WORLDMAP-map
     const base = resolveWorldmapDir(dataPath);
     if (!base) return [];
     return fs.readdirSync(base).filter(item => fs.statSync(path.join(base, item)).isDirectory());
@@ -665,13 +718,13 @@ ipcMain.handle('worldmap:validatePath', async (_, dataPath) => {
     if (getMpqReader().isDataPath(dataPath)) {
       return await getMpqReader().validateDataPath(dataPath);
     }
-    // Geëxtraheerde map: check op zone-submappen
+    // GeÃƒÂ«xtraheerde map: check op zone-submappen
     const items = fs.readdirSync(dataPath);
     const zoneCount = items.filter(item => {
       try { return fs.statSync(path.join(dataPath, item)).isDirectory(); } catch { return false; }
     }).length;
     if (zoneCount > 0) {
-      return { success: true, type: 'directory', message: `${zoneCount} zone(s) gevonden (geëxtraheerde map)`, count: zoneCount };
+      return { success: true, type: 'directory', message: `${zoneCount} zone(s) gevonden (geÃƒÂ«xtraheerde map)`, count: zoneCount };
     }
     return { success: false, error: 'Geen MPQ bestanden of zone-mappen gevonden' };
   } catch (e) {
@@ -679,7 +732,7 @@ ipcMain.handle('worldmap:validatePath', async (_, dataPath) => {
   }
 });
 
-// ─── Talent Background Loader ──────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Talent Background Loader Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('talents:getBackground', async (_, backgroundFile) => {
   try {
     if (!backgroundFile) {
@@ -746,7 +799,7 @@ ipcMain.handle('talents:getBackground', async (_, backgroundFile) => {
       result[t] = `data:image/png;base64,${data.toString('base64')}`;
     }
 
-    console.log(`talents:getBackground - ✓ Loaded 4 background tiles for: ${backgroundFile}`);
+    console.log(`talents:getBackground - Ã¢Å“â€œ Loaded 4 background tiles for: ${backgroundFile}`);
     return result;
   } catch (e) {
     console.error('talents:getBackground error:', e);
@@ -754,7 +807,7 @@ ipcMain.handle('talents:getBackground', async (_, backgroundFile) => {
   }
 });
 
-// ─── DBC Reader ────────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ DBC Reader Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function readStringFromBlock(buffer, stringOffset, stringBlock) {
   if (stringOffset === 0) return '';
   let end = stringOffset;
@@ -1713,6 +1766,12 @@ ipcMain.handle('dbc:copySpellCrossFile', async (_, sourceDbcPath, sourceId, dest
     const newRecord = Buffer.from(srcRecordBytes);
     newRecord.writeUInt32LE(newId, 0);
 
+    // Clear all locale string refs before remapping the strings this app manages.
+    // Source and destination Spell.dbc files have independent string tables.
+    for (const offset of SPELL_ALL_STRING_OFFSETS) {
+      if (offset + 4 <= newRecord.length) newRecord.writeUInt32LE(0, offset);
+    }
+
     let extraOffset = destStringBlockSize;
     const extraParts = [];
     for (const [key, f] of Object.entries(SPELL_OFFSETS)) {
@@ -1840,7 +1899,7 @@ ipcMain.handle('dbc:readTalents', async (_, dbcPath, tabId) => {
   }
 });
 
-// SpellCastTimes.dbc: ID(0), CastTime(4), CastTimePerLevel(8), MinCastTime(12) — 4 fields × 4 bytes
+// SpellCastTimes.dbc: ID(0), CastTime(4), CastTimePerLevel(8), MinCastTime(12) Ã¢â‚¬â€ 4 fields Ãƒâ€” 4 bytes
 ipcMain.handle('dbc:readCastTimes', async (_, dbcPath) => {
   try {
     const dbc = await readDbcFile(path.join(dbcPath, 'SpellCastTimes.dbc'));
@@ -1856,7 +1915,7 @@ ipcMain.handle('dbc:readCastTimes', async (_, dbcPath) => {
   } catch (e) { return { success: false, error: e.message }; }
 });
 
-// SpellDuration.dbc: ID(0), Duration(4), DurationPerLevel(8), MaxDuration(12) — 4 fields × 4 bytes
+// SpellDuration.dbc: ID(0), Duration(4), DurationPerLevel(8), MaxDuration(12) Ã¢â‚¬â€ 4 fields Ãƒâ€” 4 bytes
 ipcMain.handle('dbc:readDurations', async (_, dbcPath) => {
   try {
     const dbc = await readDbcFile(path.join(dbcPath, 'SpellDuration.dbc'));
@@ -1994,7 +2053,7 @@ ipcMain.handle('dbc:readSpells', async (_, dbcPath, spellIds) => {
             if (val > 0 && val < dbc.stringBlock.length) {
               const str = readStringFromBlock(dbc.dataBuffer, val, dbc.stringBlock);
               if (str === 'Convection') {
-                console.log(`  ✓ FOUND: Offset ${fieldOffset} contains string ref to "Convection"`);
+                console.log(`  Ã¢Å“â€œ FOUND: Offset ${fieldOffset} contains string ref to "Convection"`);
                 console.log(`    This is the Name_Lang_enUS offset!`);
               }
             }
@@ -2028,12 +2087,12 @@ ipcMain.handle('dbc:readSpells', async (_, dbcPath, spellIds) => {
   }
 });
 
-// ─── Find next free ID ────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Find next free ID Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('db:findNextId', async (_, { table, idColumn, startId }) => {
   if (!dbConnection) return { success: false, error: 'Not connected' };
   try {
     const [rows] = await dbConnection.execute(
-      `SELECT \`${idColumn}\` FROM \`${table}\` WHERE \`${idColumn}\` >= - ORDER BY \`${idColumn}\` ASC LIMIT 5000`,
+      `SELECT \`${idColumn}\` FROM \`${table}\` WHERE \`${idColumn}\` >= ? ORDER BY \`${idColumn}\` ASC LIMIT 5000`,
       [Number(startId)]
     );
     const usedIds = new Set(rows.map(r => Number(r[idColumn])));
@@ -2203,7 +2262,7 @@ ipcMain.handle('minimap:getTile', async (_, minimapPath, mapId, col, row) => {
   }
 });
 
-// ── BLP2 decoder (DXT1 / DXT3 / DXT5 / paletted) ────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ BLP2 decoder (DXT1 / DXT3 / DXT5 / paletted) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function rgb565(c) {
   return [(c >> 11 & 31) * 255 / 31 | 0, (c >> 5 & 63) * 255 / 63 | 0, (c & 31) * 255 / 31 | 0];
 }
@@ -2292,7 +2351,7 @@ function decodeBLP1(buffer) {
   // BLP1 header layout:
   // 0x00 magic "BLP1", 0x04 compression (1=palette,0=JPEG), 0x08 alphaBits,
   // 0x0C width, 0x10 height, 0x14 pictureType, 0x18 pictureSubType,
-  // 0x1C mipOffsets[16], 0x5C mipSizes[16], 0x9C palette[256×BGRA]
+  // 0x1C mipOffsets[16], 0x5C mipSizes[16], 0x9C palette[256Ãƒâ€”BGRA]
   const compression = buffer.readUInt32LE(4);
   const alphaBits   = buffer.readUInt32LE(8);
   const w           = buffer.readUInt32LE(12);
@@ -2313,7 +2372,7 @@ function decodeBLP1(buffer) {
     const bitmap = img.getBitmap(); // BGRA, 32-bit
     const rgba   = Buffer.alloc(size.width * size.height * 4, 255);
     for (let i = 0; i < size.width * size.height; i++) {
-      rgba[i*4]   = bitmap[i*4 + 2]; // R (BGRA→RGBA)
+      rgba[i*4]   = bitmap[i*4 + 2]; // R (BGRAÃ¢â€ â€™RGBA)
       rgba[i*4+1] = bitmap[i*4 + 1]; // G
       rgba[i*4+2] = bitmap[i*4];     // B
       rgba[i*4+3] = 255;
@@ -2362,7 +2421,7 @@ function decodeBLP(buffer) {
     else if (alphaEncoding === 1) decodeDXT3(src, rgba, w, h);
     else decodeDXT1(src, rgba, w, h);
   } else {
-    // Paletted (encoding === 1): palette at offset 148 (256 × uint32 BGRA)
+    // Paletted (encoding === 1): palette at offset 148 (256 Ãƒâ€” uint32 BGRA)
     for (let i = 0; i < Math.min(w * h, src.length); i++) {
       const p = 148 + src[i] * 4;
       rgba[i*4]   = buffer[p+2];
@@ -2374,11 +2433,11 @@ function decodeBLP(buffer) {
   return { rgba, w, h };
 }
 
-// ── BLP2 selective-block encoder (DXT1 / DXT3 / DXT5) ──────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬ BLP2 selective-block encoder (DXT1 / DXT3 / DXT5) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Doel: een bewerkt gebied (masker) terugschrijven zonder de rest van de
-// texture opnieuw te comprimeren. DXT1 werkt in onafhankelijke 4×4 blokken,
+// texture opnieuw te comprimeren. DXT1 werkt in onafhankelijke 4Ãƒâ€”4 blokken,
 // dus blokken die het masker niet overlappen worden 1-op-1 gekopieerd uit de
-// bron-BLP — geen kwaliteitsverlies buiten het bewerkte gebied.
+// bron-BLP Ã¢â‚¬â€ geen kwaliteitsverlies buiten het bewerkte gebied.
 function rgbToRgb565(r, g, b) {
   const r5 = Math.round(Math.max(0, Math.min(255, r)) * 31 / 255);
   const g6 = Math.round(Math.max(0, Math.min(255, g)) * 63 / 255);
@@ -2626,8 +2685,8 @@ function rgbaToPNG(rgba, w, h) {
   ]);
 }
 
-// Compositeer 12 BLP-tiles (4 kolommen × 3 rijen) naar één PNG
-// ── Hulpfunctie: zoek geëxtraheerde WORLDMAP-map ─────────────────────────────
+// Compositeer 12 BLP-tiles (4 kolommen Ãƒâ€” 3 rijen) naar ÃƒÂ©ÃƒÂ©n PNG
+// Ã¢â€â‚¬Ã¢â€â‚¬ Hulpfunctie: zoek geÃƒÂ«xtraheerde WORLDMAP-map Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 function resolveWorldmapDir(configuredPath) {
   if (configuredPath && fs.existsSync(configuredPath) && !getMpqReader().isDataPath(configuredPath)) {
     return configuredPath;
@@ -2640,7 +2699,7 @@ function resolveWorldmapDir(configuredPath) {
   return fallbacks.find(p => fs.existsSync(p)) || null;
 }
 
-// ─── Spawn loader ─────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ Spawn loader Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 ipcMain.handle('spawns:load', async (_, { mapId, limit = 1000 }) => {
   if (!dbConnection) return { success: false, error: 'Niet verbonden' };
   try {
@@ -2723,7 +2782,7 @@ ipcMain.handle('spawns:update', async (_, { guid, type, x, y, z, orientation }) 
   }
 });
 
-// ─── ADT terrain parser ───────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ ADT terrain parser Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const UNIT_SIZE = 33.33333 / 8; // = 4.16666 yards per outer vertex step
 
 function parseAdt(buf) {
@@ -2759,7 +2818,7 @@ function parseAdt(buf) {
     if (!offsMCVT || mcnkOff + offsMCVT + 8 + 580 > buf.length) { chunks.push(null); continue; }
 
     // Valideer MCVT magic ('TVCM' = reversed 'MCVT')
-    // ofsHeight is relatief aan mcnkOff (chunk start incl. 8-byte header), niet ds — zelfde conventie als ofsLayer/ofsAlpha.
+    // ofsHeight is relatief aan mcnkOff (chunk start incl. 8-byte header), niet ds Ã¢â‚¬â€ zelfde conventie als ofsLayer/ofsAlpha.
     const mcvtMagic = buf.slice(mcnkOff + offsMCVT, mcnkOff + offsMCVT + 4).toString('ascii');
     if (mcvtMagic !== 'TVCM') { chunks.push(null); continue; }
 
@@ -2883,7 +2942,7 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
   }
 });
 
-// WDL: low-res heightmap van de hele map. MAOF = 64×64 offsets, MARE = 17×17 outer heights.
+// WDL: low-res heightmap van de hele map. MAOF = 64Ãƒâ€”64 offsets, MARE = 17Ãƒâ€”17 outer heights.
 function parseWdl(buf) {
   let offset = 0;
   let maofData = -1;
@@ -2911,7 +2970,7 @@ function parseWdl(buf) {
         if (v > maxH) maxH = v;
       }
       if (minH < -2000 || maxH > 3000 || (maxH - minH) > 1500) continue;
-      // Zelfde index-swap als ADT bestandsnamen: file (x,y) → renderer (tileX=y, tileY=x)
+      // Zelfde index-swap als ADT bestandsnamen: file (x,y) Ã¢â€ â€™ renderer (tileX=y, tileY=x)
       tiles.push({ tileX: y, tileY: x, heights });
     }
   }
@@ -2935,7 +2994,7 @@ ipcMain.handle('adt:getWdl', async (_, { mapName }) => {
   }
 });
 
-const minimapTexCache = new Map(); // `${dataPath}|${mapName}|${tileX}|${tileY}` → dataURL
+const minimapTexCache = new Map(); // `${dataPath}|${mapName}|${tileX}|${tileY}` Ã¢â€ â€™ dataURL
 
 ipcMain.handle('adt:getTileTextures', async (_, { mapName, tiles }) => {
   try {
@@ -2971,13 +3030,13 @@ ipcMain.handle('adt:getTileTextures', async (_, { mapName, tiles }) => {
   }
 });
 
-// ─── ADT composite texture builder ───────────────────────────────────────────
-// ── Terrain compositing (in main process, geen IPC round-trip voor ruwe BLPs) ──
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ ADT composite texture builder Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+// Ã¢â€â‚¬Ã¢â€â‚¬ Terrain compositing (in main process, geen IPC round-trip voor ruwe BLPs) Ã¢â€â‚¬Ã¢â€â‚¬
 // Zelfde logica als de oude terrainCompositor.worker.js, maar draait hier zodat
-// alleen de finale RGBA (512×512) via IPC gaat in plaats van meerdere ruwe BLPs.
+// alleen de finale RGBA (512Ãƒâ€”512) via IPC gaat in plaats van meerdere ruwe BLPs.
 
-// Bilineaire resize van een RGBA buffer naar vaste afmetingen — terrain-textures in WoW zijn
-// meestal 256x256, maar sommige sets wijken af. We normaliseren naar één gemeenschappelijke
+// Bilineaire resize van een RGBA buffer naar vaste afmetingen Ã¢â‚¬â€ terrain-textures in WoW zijn
+// meestal 256x256, maar sommige sets wijken af. We normaliseren naar ÃƒÂ©ÃƒÂ©n gemeenschappelijke
 // afmeting zodat alle textures van een tile in dezelfde DataArrayTexture-laag passen.
 function resizeRgbaTo(data, sw, sh, dw, dh) {
   if (sw === dw && sh === dh) return data;
@@ -3005,8 +3064,8 @@ function resizeRgbaTo(data, sw, sh, dw, dh) {
   return out;
 }
 
-// GPU shader-based terrain blending (vervangt CPU pre-compositing — zie Editor3DScene.jsx
-// TerrainTile voor de shader die dit consumeert). In plaats van één geflatte lage-resolutie
+// GPU shader-based terrain blending (vervangt CPU pre-compositing Ã¢â‚¬â€ zie Editor3DScene.jsx
+// TerrainTile voor de shader die dit consumeert). In plaats van ÃƒÂ©ÃƒÂ©n geflatte lage-resolutie
 // texture per tile te bakken (resolutie-gelimiteerd bij 8x tiling, zie git-history), sturen we
 // per-tile een gededuped texture-palette + per-chunk layer-indices + per-chunk alpha-maps. De
 // shader doet de blend (Noggit's formule: t0*(1-(a0+a1+a2)) + t1*a0 + t2*a1 + t3*a2) live, op
@@ -3036,7 +3095,7 @@ function buildTilePalette(blpRgba, chunks) {
   for (let i = 0; i < 256; i++) {
     const chunk = chunks[i];
     if (!chunk || !chunk.layers.length) continue;
-    // Doel-index = chunk.iy*16+chunk.ix (expliciet, niet de MCIN-loopvolgorde i) — zelfde
+    // Doel-index = chunk.iy*16+chunk.ix (expliciet, niet de MCIN-loopvolgorde i) Ã¢â‚¬â€ zelfde
     // conventie als parseAdt's v9/v8-vulling. MCIN-volgorde == iy*16+ix klopt meestal, maar
     // niet aannemen: zelfde axis-bug-klasse die dit project al eerder had bij tile-indexing.
     const ci = chunk.iy * 16 + chunk.ix;
@@ -3079,7 +3138,7 @@ function decompressAlpha(buf, offset, maxOffset) {
 
 function unpackAlpha4bit(buf, offset, doNotFixAlpha = false) {
   // 2048 bytes: per byte twee nibbles (laag = eerste texel, hoog = tweede texel)
-  // Output: 64×64 = 4096 bytes, 8 bit per texel
+  // Output: 64Ãƒâ€”64 = 4096 bytes, 8 bit per texel
   const out = new Uint8Array(4096);
   let inIdx = 0;
   for (let x = 0; x < 64; x++) {
@@ -3090,7 +3149,7 @@ function unpackAlpha4bit(buf, offset, doNotFixAlpha = false) {
       out[x * 64 + y + 1] = hi | (hi << 4);
     }
   }
-  // Garbage in laatste rij/kolom (4-bit formaat quirk) — alleen fixen als de chunk niet al
+  // Garbage in laatste rij/kolom (4-bit formaat quirk) Ã¢â‚¬â€ alleen fixen als de chunk niet al
   // gefixt is opgeslagen (do_not_fix_alpha_map), anders overschrijf je geldige data.
   if (!doNotFixAlpha) {
     for (let e = 0; e < 64; e++) {
@@ -3102,9 +3161,9 @@ function unpackAlpha4bit(buf, offset, doNotFixAlpha = false) {
   return out;
 }
 
-// WDT MPHD.flags is de autoritatieve bron voor bigAlpha (niet ADT's eigen MHDR.flags — zie wowdev.wiki).
+// WDT MPHD.flags is de autoritatieve bron voor bigAlpha (niet ADT's eigen MHDR.flags Ã¢â‚¬â€ zie wowdev.wiki).
 // 0x4 = adt_has_big_alpha, 0x80 = adt_has_height_texturing (beide impliceren 4096-byte flat alphamaps).
-const wdtFlagsCache = new Map(); // mapName → bool | null (null = onbekend, gebruik heuristiek)
+const wdtFlagsCache = new Map(); // mapName Ã¢â€ â€™ bool | null (null = onbekend, gebruik heuristiek)
 
 function parseWdtBigAlpha(buf) {
   if (!buf) return null;
@@ -3138,8 +3197,8 @@ async function getWdtBigAlpha(dataPath, mapName) {
 function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
   let off = 0, mtexData = -1, mtexSize = 0, mcinData = -1;
 
-  // bigAlpha: true/false als WDT MPHD.flags bekend is (autoritatief), anders null → gap-heuristiek per layer.
-  // ADT's eigen MHDR.flags is GEEN geldige bron voor dit veld (zie wowdev.wiki) — alleen voor logging.
+  // bigAlpha: true/false als WDT MPHD.flags bekend is (autoritatief), anders null Ã¢â€ â€™ gap-heuristiek per layer.
+  // ADT's eigen MHDR.flags is GEEN geldige bron voor dit veld (zie wowdev.wiki) Ã¢â‚¬â€ alleen voor logging.
   const bigAlpha = wdtBigAlpha;
   let mhdrFlagsLog = null;
   if (buf.length > 24 && buf.slice(12, 16).toString('ascii') === 'RDHM') {
@@ -3193,7 +3252,7 @@ function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
 
     // MCLY: max 4 records van 16 bytes
     // ofsLayer/ofsAlpha zijn relatief aan mcnkOff (chunk-start incl. 8-byte FourCC+size header),
-    // NIET aan ds (=mcnkOff+8, chunk-data start) — zie Noggit MapChunk.cpp: ofsLayer = lCurrentPosition - lMCNK_Position.
+    // NIET aan ds (=mcnkOff+8, chunk-data start) Ã¢â‚¬â€ zie Noggit MapChunk.cpp: ofsLayer = lCurrentPosition - lMCNK_Position.
     const mclyPos = mcnkOff + ofsLayer;
     if (mclyPos + 8 > buf.length) { chunks.push({ ix, iy, layers: [] }); continue; }
     let mclyDataOff, mclyDataSize;
@@ -3238,7 +3297,7 @@ function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
         }
         for (let l = 1; l < layers.length; l++) {
           const layer = layers[l];
-          // use_alpha (0x100) niet gezet → geen geldige MCAL-data voor deze layer, offsetInMcal
+          // use_alpha (0x100) niet gezet Ã¢â€ â€™ geen geldige MCAL-data voor deze layer, offsetInMcal
           // kan garbage zijn. Niet lezen, anders krijg je willekeurige ruis-blotches (precies het
           // "sand random door durotar" symptoom).
           if (!(layer.flags & 0x100)) continue;
@@ -3248,7 +3307,7 @@ function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
           // gehonoreerd als use_big_alphamaps true is. Bij bigAlpha=false leest Noggit altijd
           // het legacy 4-bit packed formaat, ook als een MCLY-entry toevallig 0x200 heeft staan
           // (stale/irrelevant bit in dat formaat). Dit ongeconditioneerd checken gaf precies het
-          // "sand random door durotar" symptoom — een toevallige 0x200-bit op een paar chunks
+          // "sand random door durotar" symptoom Ã¢â‚¬â€ een toevallige 0x200-bit op een paar chunks
           // werd dan fout als RLE gedecodeerd i.p.v. als 4-bit packed.
           if (bigAlpha === true && (layer.flags & 0x200)) {
             // Compressed RLE alpha
@@ -3288,15 +3347,15 @@ function parseAdtTextureLayers(buf, wdtBigAlpha = null) {
 }
 
 // WoW 3.3.5a: terrain BLPs staan primair in deze MPQs (volgorde = prioriteit)
-//   common.MPQ      → Azeroth + Kalimdor  (TILESET\Terrain\Ashenvale, Barrens, ...)
-//   expansion.MPQ   → Outland             (TILESET\Terrain\Outland, ...)
-//   lichking.MPQ    → Northrend           (TILESET\Terrain\Northrend, ...)
-//   patch*.MPQ      → kunnen base-textures overschrijven
+//   common.MPQ      Ã¢â€ â€™ Azeroth + Kalimdor  (TILESET\Terrain\Ashenvale, Barrens, ...)
+//   expansion.MPQ   Ã¢â€ â€™ Outland             (TILESET\Terrain\Outland, ...)
+//   lichking.MPQ    Ã¢â€ â€™ Northrend           (TILESET\Terrain\Northrend, ...)
+//   patch*.MPQ      Ã¢â€ â€™ kunnen base-textures overschrijven
 // ADT-bestanden (World\Maps\<map>\...) staan in dezelfde base-MPQs.
 // De BLP-index in mpq-reader.js scant alle MPQs eenmalig en cached het resultaat.
 
-// terrainBlpCache: path.toLowerCase() → { data: Uint8Array, w, h } | null
-// Alleen I/O + BLP decode hier — de pixel-blending draait in de renderer Web Worker.
+// terrainBlpCache: path.toLowerCase() Ã¢â€ â€™ { data: Uint8Array, w, h } | null
+// Alleen I/O + BLP decode hier Ã¢â‚¬â€ de pixel-blending draait in de renderer Web Worker.
 const terrainBlpCache = new Map();
 
 ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
@@ -3328,7 +3387,7 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
         if (chunk) for (const l of chunk.layers) usedIdx.add(l.textureIdx);
       }
 
-      // Laad BLPs parallel → ruwe RGBA (geen PNG encode, dat doet de worker)
+      // Laad BLPs parallel Ã¢â€ â€™ ruwe RGBA (geen PNG encode, dat doet de worker)
       const blpRgba = {};
       await Promise.all([...usedIdx].map(async idx => {
         if (idx >= parsed.texturePaths.length) return;
@@ -3381,7 +3440,7 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
       console.log(`[terrain] ${tileX}_${tileY}: ${Object.keys(blpRgba).length}/${usedIdx.size} BLPs geladen${missing.length ? ` | ontbreekt: ${missing.slice(0,3).join(', ')}` : ''}`);
       if (!Object.keys(blpRgba).length) continue;
 
-      // Bouw per-tile texture-palette + per-chunk layer/alpha-data — geen CPU-compositing meer,
+      // Bouw per-tile texture-palette + per-chunk layer/alpha-data Ã¢â‚¬â€ geen CPU-compositing meer,
       // de renderer blend dit real-time in een shader (zie Editor3DScene.jsx TerrainTile).
       const chunks = parsed.chunks.map(c => {
         if (!c) return null;
@@ -3396,7 +3455,7 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
 
       result.push({ tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha });
     }
-    console.log(`[getTextureLayers] ${tiles.length} tiles → ${result.length} klaar in ${Date.now()-t0}ms total`);
+    console.log(`[getTextureLayers] ${tiles.length} tiles Ã¢â€ â€™ ${result.length} klaar in ${Date.now()-t0}ms total`);
     return { success: true, data: result };
   } catch (e) {
     console.error('adt:getTextureLayers error:', e);
@@ -3489,7 +3548,7 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
   }
 });
 
-// ─── M2 model loader ──────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ M2 model loader Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const m2DiskCache = require('./m2-disk-cache');
 const { runM2Load } = require('./m2-load-queue');
 const {
@@ -3594,13 +3653,13 @@ function dbcBuildIndex(dbc) {
 // Module-level caches
 let m2DbcCachePromise = null;
 let m2DbcCachePath    = null;
-const m2ModelCache     = new Map(); // displayId → result|null
-const m2VariantCache   = new Map(); // modelPath|texVars → result
-const m2GeometryCache  = new Map(); // modelPath → { positions, normals, uvs, textures, skin }
-const m2SkinCache      = new Map(); // modelPath → parsed .skin
-const blpTextureCache  = new Map(); // blpPath (lower) → { textureRgba, textureW, textureH }
-const m2VariantInflight  = new Map(); // variantKey → Promise<result|null>
-const m2DisplayInflight  = new Map(); // displayId → Promise<result|null>
+const m2ModelCache     = new Map(); // displayId Ã¢â€ â€™ result|null
+const m2VariantCache   = new Map(); // modelPath|texVars Ã¢â€ â€™ result
+const m2GeometryCache  = new Map(); // modelPath Ã¢â€ â€™ { positions, normals, uvs, textures, skin }
+const m2SkinCache      = new Map(); // modelPath Ã¢â€ â€™ parsed .skin
+const blpTextureCache  = new Map(); // blpPath (lower) Ã¢â€ â€™ { textureRgba, textureW, textureH }
+const m2VariantInflight  = new Map(); // variantKey Ã¢â€ â€™ Promise<result|null>
+const m2DisplayInflight  = new Map(); // displayId Ã¢â€ â€™ Promise<result|null>
 
 function getM2DbcData(dataPath) {
   if (m2DbcCachePath === dataPath && m2DbcCachePromise) return m2DbcCachePromise;
@@ -3688,7 +3747,7 @@ function parseM2(buf) {
     const px = buf.readFloatLE(v),      py = buf.readFloatLE(v + 4),  pz = buf.readFloatLE(v + 8);
     const nx = buf.readFloatLE(v + 20), ny = buf.readFloatLE(v + 24), nz = buf.readFloatLE(v + 28);
     const u  = buf.readFloatLE(v + 32), vv = buf.readFloatLE(v + 36);
-    // M2 → Three.js: [-y, z, x]
+    // M2 Ã¢â€ â€™ Three.js: [-y, z, x]
     positions.push(-py, pz, px);
     normals.push(-ny, nz, nx);
     uvs.push(u, vv);
@@ -3878,7 +3937,7 @@ async function loadFirstCreatureBlp(reader, dataPath, candidates, log) {
         blpPath: p,
       };
       blpTextureCache.set(key, entry);
-      log(`textuur gecached: ${p} (${decoded.w}×${decoded.h})`);
+      log(`textuur gecached: ${p} (${decoded.w}Ãƒâ€”${decoded.h})`);
       return entry;
     } catch (e) {
       log('BLP decode fout:', p, e.message);
@@ -3967,7 +4026,7 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
     textureCandidates: candidates.slice(0, 20),
   };
   log('geoset:', JSON.stringify(debugInfo));
-  if (!tex?.blpPath) log('texture MISS — first candidates:', candidates.slice(0, 8));
+  if (!tex?.blpPath) log('texture MISS Ã¢â‚¬â€ first candidates:', candidates.slice(0, 8));
 
   const result = {
     positions: geo.positions,
@@ -4167,7 +4226,7 @@ ipcMain.handle('m2:loadCharModel', async (_, { race, gender, skinBlp }) => {
     const geo = await getOrLoadM2Geometry(reader, dataPath, m2Path, log);
     if (!geo?.skin) return { success: false, error: `Model niet gevonden: ${m2Path}` };
 
-    // Character geoset filtering — toon standaard naakt body
+    // Character geoset filtering Ã¢â‚¬â€ toon standaard naakt body
     const dbcData = await getM2DbcData(dataPath);
     const extra = { race, sex: gender, skin: 0, face: 0, hairStyle: 0, hairColor: 0, facialHair: 0 };
     const visible = resolveVisibleGeosets(geo.skin.submeshes, null, extra, dbcData.charHair, dbcData.facialHair);
@@ -4262,7 +4321,7 @@ ipcMain.handle('worldmap:readWorldMapAreas', async (_, dbcPath) => {
   }
 });
 
-// ─── CharBaseInfo.dbc ──────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ CharBaseInfo.dbc Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 // Structure: WDBC header (20 bytes) + N records of 2 bytes (uint8 race, uint8 class) + 1 byte string block
 
 ipcMain.handle('dbc:readCharStartOutfit', async (_, dbcPath, opts = {}) => {
@@ -4319,6 +4378,39 @@ ipcMain.handle('dbc:readCharBaseInfo', async (_, dbcPath) => {
   }
 });
 
+ipcMain.handle('dbc:appendCharStartOutfit', async (_, dbcPath, rows) => {
+  try {
+    const filePath = path.join(dbcPath, 'CharStartOutfit.dbc');
+    const buf = fs.readFileSync(filePath);
+    if (buf.toString('ascii', 0, 4) !== 'WDBC') throw new Error('Invalid CharStartOutfit.dbc');
+    const count = buf.readUInt32LE(4);
+    const recordSize = buf.readUInt32LE(12);
+    if (recordSize < 296) throw new Error(`Unexpected CharStartOutfit record size: ${recordSize}`);
+    const recordsEnd = 20 + count * recordSize;
+    const records = Buffer.alloc(rows.length * recordSize);
+    let maxId = 0;
+    for (let i = 0; i < count; i++) maxId = Math.max(maxId, buf.readUInt32LE(20 + i * recordSize));
+    rows.forEach((row, index) => {
+      const off = index * recordSize;
+      records.writeUInt32LE(++maxId, off);
+      records.writeUInt32LE((row.race & 0xFF) | ((row.classId & 0xFF) << 8) | ((row.gender & 0xFF) << 16) | ((row.outfitId & 0xFF) << 24), off + 4);
+      for (const item of row.items || []) {
+        const slot = Number(item.slotIndex);
+        if (slot < 0 || slot >= 24) continue;
+        records.writeUInt32LE(Number(item.itemId) || 0, off + 8 + slot * 4);
+        records.writeUInt32LE(Number(item.displayId) || 0, off + 104 + slot * 4);
+        records.writeUInt32LE(Number(item.inventorySlot) || 0, off + 200 + slot * 4);
+      }
+    });
+    const out = Buffer.concat([buf.subarray(0, recordsEnd), records, buf.subarray(recordsEnd)]);
+    out.writeUInt32LE(count + rows.length, 4);
+    fs.writeFileSync(filePath, out);
+    return { success: true, count: rows.length };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
 ipcMain.handle('dbc:writeCharBaseInfo', async (_, dbcPath, combos) => {
   try {
     const filePath = path.join(dbcPath, 'CharBaseInfo.dbc');
@@ -4340,7 +4432,7 @@ ipcMain.handle('dbc:writeCharBaseInfo', async (_, dbcPath, combos) => {
   }
 });
 
-// ─── ItemSet.dbc ──────────────────────────────────────────────────────────────
+// Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬ ItemSet.dbc Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
 const ITEMSET_LAYOUTS = {
   180: {
     nameFields: 9,
@@ -4505,7 +4597,7 @@ ipcMain.handle('dbc:findNextItemSetId', async (_, dbcPath) => {
   }
 });
 
-// CharSections.dbc: 10 fields × 4 bytes = 40 bytes/record
+// CharSections.dbc: 10 fields Ãƒâ€” 4 bytes = 40 bytes/record
 // ID(0) Race(4) Sex(8) BaseSection(12) Tex1(16) Tex2(20) Tex3(24) Flags(28) VariationIndex(32) ColorIndex(36)
 ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {
   try {
@@ -4603,7 +4695,7 @@ ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records) => {
 
 // Decode een BLP-texture uit de WoW Data folder (MPQ) of losse file en geef terug als PNG buffer.
 // dataPath mag een WoW Data root zijn (met MPQs) of een gewone map met uitgepakte BLPs.
-// Cached zowel RGBA als PNG base64 — herhaalde lookups hoeven niet opnieuw te encoden.
+// Cached zowel RGBA als PNG base64 Ã¢â‚¬â€ herhaalde lookups hoeven niet opnieuw te encoden.
 ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
   try {
     if (!dataPath || !blpPath) return { success: false, error: 'dataPath of blpPath ontbreekt' };
@@ -4645,7 +4737,7 @@ ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
 
 // Schrijft een bewerkt deel van een BLP terug als nieuwe loose-file BLP.
 // editedRgbaBase64: volledige RGBA buffer (w*h*4) van de texture NA recolor.
-// maskBase64: grayscale buffer (w*h, 1 byte/pixel) — >0 = bewerkt (zachte brush-randen tellen ook mee).
+// maskBase64: grayscale buffer (w*h, 1 byte/pixel) Ã¢â‚¬â€ >0 = bewerkt (zachte brush-randen tellen ook mee).
 // outRelPath: relatief pad (t.o.v. dataPath) waar de nieuwe BLP komt, bv.
 // "Character\\Human\\Female\\HumanFemaleSkin00_00_custom1.blp".
 ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath) => {
@@ -4694,8 +4786,8 @@ ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgb
   }
 });
 
-// Batch-variant: laad meerdere BLP-textures in één IPC. Opent elke MPQ maximaal 1×
-// ongeacht hoeveel BLPs erin zitten — groot verschil met de single-call handler.
+// Batch-variant: laad meerdere BLP-textures in ÃƒÂ©ÃƒÂ©n IPC. Opent elke MPQ maximaal 1Ãƒâ€”
+// ongeacht hoeveel BLPs erin zitten Ã¢â‚¬â€ groot verschil met de single-call handler.
 // Geeft een array terug in dezelfde volgorde als de input; ontbrekende BLPs krijgen
 // { success: false } zodat de caller per item kan beslissen.
 ipcMain.handle('glue:readTextFile', async (_, dataPath, internalPath) => {
@@ -4735,9 +4827,9 @@ ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
     const mpqReader = getMpqReader();
     const useMpq = mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs;
 
-    // Groepeer BLPs per MPQ archive (om elke MPQ maar 1× te openen).
+    // Groepeer BLPs per MPQ archive (om elke MPQ maar 1Ãƒâ€” te openen).
     const directFiles = [];
-    const byMpq = new Map();   // mpqAbsPath → [blpPath, ...]
+    const byMpq = new Map();   // mpqAbsPath Ã¢â€ â€™ [blpPath, ...]
     const results = new Array(blpPaths.length);
 
     if (useMpq) {
@@ -4764,7 +4856,7 @@ ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
       }
     }
 
-    // Open elke MPQ 1× en lees alle BLPs eruit.
+    // Open elke MPQ 1Ãƒâ€” en lees alle BLPs eruit.
     if (byMpq.size) {
       await Promise.all([...byMpq.entries()].map(async ([mpqAbsPath, items]) => {
         let archive = null;
@@ -4816,7 +4908,7 @@ ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
         if (fs.existsSync(direct)) {
           buf = fs.readFileSync(direct);
         } else if (useMpq) {
-          // Niet in listfile-index en niet als losse file — full MPQ scan als fallback
+          // Niet in listfile-index en niet als losse file Ã¢â‚¬â€ full MPQ scan als fallback
           buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
         }
         if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {

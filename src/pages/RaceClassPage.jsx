@@ -11,10 +11,12 @@ const RACES = [
   { id: 7,  name: 'Gnome',     faction: 'alliance', icon: 'race_gnome_male' },
   { id: 11, name: 'Draenei',   faction: 'alliance', icon: 'race_draenei_female' },
   { id: 2,  name: 'Orc',       faction: 'horde',    icon: 'race_orc_male' },
+  { id: 12, name: 'Worgen',    faction: 'alliance', icon: 'race_worgen_male' },
   { id: 5,  name: 'Undead',    faction: 'horde',    icon: 'race_scourge_male' },
   { id: 6,  name: 'Tauren',    faction: 'horde',    icon: 'race_tauren_male' },
   { id: 8,  name: 'Troll',     faction: 'horde',    icon: 'race_troll_male' },
   { id: 10, name: 'Blood Elf', faction: 'horde',    icon: 'race_bloodelf_female' },
+  { id: 9,  name: 'Goblin',    faction: 'horde',    icon: 'race_goblin_male' },
 ];
 
 const CLASSES = [
@@ -40,7 +42,29 @@ const PCI_FIELDS = [
 ];
 
 const ACTION_TYPES = { 0: 'Spell', 1: 'Item', 64: 'Macro', 128: 'CMacro' };
+const PRIMARY_STAT_FIELDS = [
+  { key: 'str', label: 'Strength' },
+  { key: 'agi', label: 'Agility' },
+  { key: 'sta', label: 'Stamina' },
+  { key: 'inte', label: 'Intellect' },
+  { key: 'spi', label: 'Spirit' },
+];
+const CLASS_STAT_FIELDS = [
+  { key: 'basehp', label: 'Base HP' },
+  { key: 'basemana', label: 'Base Mana' },
+];
+const TOTEM_TYPES = [
+  { id: 1, label: 'Fire Totem' },
+  { id: 2, label: 'Earth Totem' },
+  { id: 3, label: 'Water Totem' },
+  { id: 4, label: 'Air Totem' },
+];
 const ICON_BASE = 'https://wow.zamimg.com/images/wow/icons/medium/';
+
+const OUTFIT_SLOTS = ['Head', 'Neck', 'Shoulder', 'Shirt', 'Chest', 'Waist', 'Legs', 'Feet', 'Wrist', 'Hands', 'Ring 1', 'Ring 2', 'Trinket 1', 'Trinket 2', 'Back', 'Main hand', 'Off hand', 'Ranged', 'Tabard', 'Slot 20', 'Slot 21', 'Slot 22', 'Slot 23', 'Slot 24'];
+const sourceKey = (race, classId) => `${race}:${classId}`;
+const OUTFIT_BUILDER_SLOTS = [4, 9, 5, 6, 7, 15, 16].map(slotIndex => ({ slotIndex, name: OUTFIT_SLOTS[slotIndex] }));
+const sourceLabel = (race, classId) => `${RACES.find(r => r.id === race)?.name || `Race ${race}`} ${CLASSES.find(c => c.id === classId)?.name || `Class ${classId}`}`;
 
 function getMaskFromId(id) {
   return 1 << (Number(id) - 1);
@@ -66,11 +90,19 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
   const [spellNames, setSpellNames] = useState({});
   const [actionsDirty, setActionsDirty] = useState(false);
   const [actionsSaving, setActionsSaving] = useState(false);
+  const [statRows, setStatRows] = useState([]);
+  const [classStatRows, setClassStatRows] = useState([]);
+  const [statsDirty, setStatsDirty] = useState(false);
+  const [statsSaving, setStatsSaving] = useState(false);
+  const [statsError, setStatsError] = useState('');
   const [skillRows, setSkillRows] = useState([]);
   const [skillTree, setSkillTree] = useState([]);
   const [startBarSpells, setStartBarSpells] = useState([]);
   const [startOutfits, setStartOutfits] = useState([]);
   const [outfitNames, setOutfitNames] = useState({});
+  const [totemRows, setTotemRows] = useState([]);
+  const [totemsDirty, setTotemsDirty] = useState(false);
+  const [totemsSaving, setTotemsSaving] = useState(false);
   const [skillTreeError, setSkillTreeError] = useState('');
 
   const raceName  = RACES.find(r => r.id === raceId)?.name  ?? raceId;
@@ -78,6 +110,7 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
   const classColor = CLASSES.find(c => c.id === classId)?.color;
   const raceMask = getMaskFromId(raceId);
   const classMask = getMaskFromId(classId);
+  const isShaman = Number(classId) === 7;
 
   // Load position
   useEffect(() => {
@@ -131,6 +164,85 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
       setSkillRows([]);
     });
   }, [query, raceMask, classMask]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    Promise.all([
+      query('SELECT Race, Strength, Agility, Stamina, Intellect, Spirit FROM player_race_stats WHERE Race = ?', [raceId]),
+      query('SELECT Class, Level, BaseHP, BaseMana, Strength, Agility, Stamina, Intellect, Spirit FROM player_class_stats WHERE Class = ? ORDER BY Level', [classId]),
+    ]).then(([raceStats, classStats]) => {
+      if (cancelled) return;
+      const mappedRaceStats = (raceStats.data || []).map(row => ({
+        race: Number(row.Race),
+        str: Number(row.Strength) || 0,
+        agi: Number(row.Agility) || 0,
+        sta: Number(row.Stamina) || 0,
+        inte: Number(row.Intellect) || 0,
+        spi: Number(row.Spirit) || 0,
+      }));
+      const mappedClassStats = (classStats.data || []).map(row => ({
+        classId: Number(row.Class),
+        level: Number(row.Level),
+        basehp: Number(row.BaseHP) || 0,
+        basemana: Number(row.BaseMana) || 0,
+        str: Number(row.Strength) || 0,
+        agi: Number(row.Agility) || 0,
+        sta: Number(row.Stamina) || 0,
+        inte: Number(row.Intellect) || 0,
+        spi: Number(row.Spirit) || 0,
+      }));
+
+      if (!raceStats.success) {
+        setStatsError(raceStats.error || 'Could not load player_race_stats');
+        setStatRows([]);
+        setClassStatRows(mappedClassStats);
+        setStatsDirty(false);
+        return;
+      }
+
+      if (!classStats.success) {
+        setStatsError(classStats.error || 'Could not load player_class_stats');
+        setStatRows(mappedRaceStats);
+        setClassStatRows([]);
+        setStatsDirty(false);
+        return;
+      }
+
+      setStatsError('');
+      setStatRows(mappedRaceStats);
+      setClassStatRows(mappedClassStats);
+      setStatsDirty(false);
+    }).catch(err => {
+      if (cancelled) return;
+      setStatsError(err?.message || 'Could not load starting stats');
+      setStatRows([]);
+      setClassStatRows([]);
+      setStatsDirty(false);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [query, raceId, classId]);
+
+  useEffect(() => {
+    if (!isShaman) {
+      setTotemRows([]);
+      setTotemsDirty(false);
+      return;
+    }
+    query('SELECT TotemID, RaceID, ModelID FROM player_totem_model WHERE RaceID = ? ORDER BY TotemID', [raceId])
+      .then(r => {
+        const byId = new Map((r.data || []).map(row => [Number(row.TotemID), { totemId: Number(row.TotemID), raceId: Number(row.RaceID), modelId: Number(row.ModelID) || 0 }]));
+        setTotemRows(TOTEM_TYPES.map(t => byId.get(t.id) || { totemId: t.id, raceId, modelId: 0 }));
+        setTotemsDirty(false);
+      })
+      .catch(() => {
+        setTotemRows(TOTEM_TYPES.map(t => ({ totemId: t.id, raceId, modelId: 0 })));
+        setTotemsDirty(false);
+      });
+  }, [isShaman, query, raceId]);
 
   useEffect(() => {
     readCharStartOutfit({ race: raceId, classId }).then(async result => {
@@ -293,6 +405,63 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
       lookupSpellName(Number(value));
     }
   };
+  const updatePrimaryStat = (field, value) => {
+    setStatRows(rows => rows.map(row => ({ ...row, [field]: Number(value) || 0 })));
+    setStatsDirty(true);
+  };
+
+  const updateClassStat = (field, value) => {
+    setClassStatRows(rows => rows.map(row => row.level === 1 ? { ...row, [field]: Number(value) || 0 } : row));
+    setStatsDirty(true);
+  };
+
+  const saveStats = async () => {
+    const raceStats = statRows[0];
+    const classLevelOne = classStatRows.find(row => row.level === 1);
+    if (!raceStats) {
+      onMsg({ type: 'error', text: `No player_race_stats row found for ${raceName}` });
+      return;
+    }
+    if (!classLevelOne) {
+      onMsg({ type: 'error', text: `No level 1 player_class_stats row found for ${className}` });
+      return;
+    }
+
+    setStatsSaving(true);
+    const raceResult = await query(
+      'UPDATE player_race_stats SET Strength = ?, Agility = ?, Stamina = ?, Intellect = ?, Spirit = ? WHERE Race = ?',
+      [raceStats.str, raceStats.agi, raceStats.sta, raceStats.inte, raceStats.spi, raceId]
+    );
+    if (!raceResult.success) {
+      setStatsSaving(false);
+      onMsg({ type: 'error', text: `Could not save player_race_stats: ${raceResult.error}` });
+      return;
+    }
+
+    const classResult = await query(
+      'UPDATE player_class_stats SET BaseHP = ?, BaseMana = ?, Strength = ?, Agility = ?, Stamina = ?, Intellect = ?, Spirit = ? WHERE Class = ? AND Level = 1',
+      [classLevelOne.basehp, classLevelOne.basemana, classLevelOne.str, classLevelOne.agi, classLevelOne.sta, classLevelOne.inte, classLevelOne.spi, classId]
+    );
+    if (!classResult.success) {
+      setStatsSaving(false);
+      onMsg({ type: 'error', text: `player_race_stats saved, but player_class_stats failed: ${classResult.error}` });
+      return;
+    }
+
+    setStatsDirty(false);
+    setStatsSaving(false);
+    onMsg({ type: 'success', text: `Starting stats saved for ${raceName} ${className}` });
+  };
+
+  const saveTotems = async () => {
+    setTotemsSaving(true);
+    for (const row of totemRows) {
+      await query('INSERT INTO player_totem_model (TotemID, RaceID, ModelID) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE ModelID = VALUES(ModelID)', [row.totemId, raceId, row.modelId]);
+    }
+    setTotemsDirty(false);
+    setTotemsSaving(false);
+    onMsg({ type: 'success', text: `? Totem models saved for ${raceName}` });
+  };
 
   return (
     <div className="rc-detail">
@@ -310,9 +479,17 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
           <button className={tab === 'skills' ? 'active' : ''} onClick={() => setTab('skills')}>
             Skill Tree {(skillTree.length > 0 || skillRows.length > 0) && <span className="rc-tab-count">{skillTree.length + skillRows.length}</span>}
           </button>
+          <button className={tab === 'stats' ? 'active' : ''} onClick={() => setTab('stats')}>
+            Starting Stats {(statRows.length > 0 || classStatRows.length > 0) && <span className="rc-tab-count">L1</span>}
+          </button>
           <button className={tab === 'outfits' ? 'active' : ''} onClick={() => setTab('outfits')}>
             Start Outfit {startOutfits.length > 0 && <span className="rc-tab-count">{startOutfits.length}</span>}
           </button>
+          {isShaman && (
+            <button className={tab === 'totems' ? 'active' : ''} onClick={() => setTab('totems')}>
+              Totems <span className="rc-tab-count">4</span>
+            </button>
+          )}
         </div>
         <button className="rc-wizard-close" onClick={onClose}><X size={14} /></button>
       </div>
@@ -413,6 +590,115 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
           </div>
         </div>
       )}
+      {tab === 'stats' && (
+        <div className="rc-detail-body">
+          {statsError ? (
+            <div className="rc-skill-empty">{statsError}</div>
+          ) : (
+            <>
+              <div className="rc-stats-grid">
+                <div className="rc-stats-card">
+                  <div className="rc-skill-section-head">
+                    <span className="rc-skill-section-title">Level 1 Primary Stats</span>
+                    <span className="rc-skill-section-sub">From player_race_stats for this race only</span>
+                  </div>
+                  {statRows[0] ? (
+                    <div className="rc-stats-fields">
+                      {PRIMARY_STAT_FIELDS.map(field => (
+                        <label key={field.key} className="rc-wizard-field">
+                          <span>{field.label}</span>
+                          <input
+                            type="number"
+                            step="1"
+                            value={statRows[0]?.[field.key] ?? 0}
+                            onChange={e => updatePrimaryStat(field.key, e.target.value)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rc-skill-empty">No player_race_stats row found for this race.</div>
+                  )}
+                </div>
+
+                <div className="rc-stats-card">
+                  <div className="rc-skill-section-head">
+                    <span className="rc-skill-section-title">Level 1 Class Baseline</span>
+                    <span className="rc-skill-section-sub">From player_class_stats level 1 for this class</span>
+                  </div>
+                  <div className="rc-stats-note">
+                    These values are class-wide at level 1. The final character result is class baseline plus race stats.
+                  </div>
+                  {classStatRows.find(row => row.level === 1) ? (
+                    <div className="rc-stats-fields two-col">
+                      {CLASS_STAT_FIELDS.map(field => (
+                        <label key={field.key} className="rc-wizard-field">
+                          <span>{field.label}</span>
+                          <input
+                            type="number"
+                            step="1"
+                            value={classStatRows.find(row => row.level === 1)?.[field.key] ?? 0}
+                            onChange={e => updateClassStat(field.key, e.target.value)}
+                          />
+                        </label>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="rc-skill-empty">No level 1 player_class_stats row found for this class.</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="rc-stats-preview">
+                <div className="rc-skill-section-head">
+                  <span className="rc-skill-section-title">Level Preview</span>
+                  <span className="rc-skill-section-sub">Quick read-only sanity check for the first few levels</span>
+                </div>
+                <div className="rc-action-table-wrap">
+                  <table className="rc-action-table">
+                    <thead>
+                      <tr>
+                        <th>Level</th>
+                        <th>Str</th>
+                        <th>Agi</th>
+                        <th>Sta</th>
+                        <th>Int</th>
+                        <th>Spi</th>
+                        <th>Base HP</th>
+                        <th>Base Mana</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {classStatRows.slice(0, 5).map(row => {
+                        const raceRow = statRows[0] || { str: 0, agi: 0, sta: 0, inte: 0, spi: 0 };
+                        return (
+                          <tr key={row.level}>
+                            <td>{row.level}</td>
+                            <td>{row.str + raceRow.str}</td>
+                            <td>{row.agi + raceRow.agi}</td>
+                            <td>{row.sta + raceRow.sta}</td>
+                            <td>{row.inte + raceRow.inte}</td>
+                            <td>{row.spi + raceRow.spi}</td>
+                            <td>{row.basehp ?? '-'}</td>
+                            <td>{row.basemana ?? '-'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div className="rc-detail-footer">
+                <button className="btn-save" onClick={saveStats} disabled={!statsDirty || statsSaving}>
+                  <Save size={13} />
+                  {statsSaving ? 'Saving...' : 'Save Starting Stats'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       {tab === 'outfits' && (
         <div className="rc-detail-body">
@@ -427,9 +713,9 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
                     <span className="rc-outfit-meta">Class {outfit.classId}</span>
                     <span className="rc-outfit-meta">Outfit {outfit.outfitId}</span>
                     <span className="rc-outfit-meta">{outfit.items.length} items</span>
-                  <div className="rc-outfit-debug">
-                    <span className="rc-outfit-meta">Packed tuple {outfit.race}/{outfit.classId}/{outfit.gender}/{outfit.outfitId}</span>
-                  </div>
+                    <div className="rc-outfit-debug">
+                      <span className="rc-outfit-meta">Packed tuple {outfit.race}/{outfit.classId}/{outfit.gender}/{outfit.outfitId}</span>
+                    </div>
                   </div>
                   <div className="rc-outfit-items">
                     {outfit.items.map(item => (
@@ -447,6 +733,34 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
           ) : (
             <div className="rc-skill-empty">No CharStartOutfit rows found for this combo.</div>
           )}
+        </div>
+      )}
+      {tab === 'totems' && isShaman && (
+        <div className="rc-detail-body">
+          <div className="rc-totem-list">
+            {TOTEM_TYPES.map(type => {
+              const row = totemRows.find(entry => entry.totemId === type.id) || { modelId: 0 };
+              return (
+                <label key={type.id} className="rc-totem-row">
+                  <span className="rc-totem-label">{type.label}</span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="rc-action-input md"
+                    value={row.modelId ?? 0}
+                    onChange={e => updateTotemModel(type.id, e.target.value)}
+                  />
+                  <span className="rc-totem-meta">ModelID</span>
+                </label>
+              );
+            })}
+          </div>
+          <div className="rc-detail-footer">
+            <button className="btn-save" onClick={saveTotems} disabled={!totemsDirty || totemsSaving}>
+              <Save size={13} />
+              {totemsSaving ? 'Saving?' : 'Save Totems'}
+            </button>
+          </div>
         </div>
       )}
 
@@ -535,7 +849,7 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function RaceClassPage() {
-  const { query, dbcPath, readSkillLineTree, readCharStartOutfit } = useConnection();
+  const { query, dbcPath, readSkillLineTree, readCharStartOutfit, appendCharStartOutfit } = useConnection();
   const [dbCombos, setDbCombos]   = useState([]);
   const [dbcCombos, setDbcCombos] = useState([]);
   const [selectedRace, setSelectedRace] = useState(1);
@@ -574,7 +888,15 @@ export default function RaceClassPage() {
         templateSource = `${RACES.find(r => r.id === tmpl.race)?.name} ${CLASSES.find(c => c.id === tmpl.class)?.name}`;
       }
     }
-    setWizard({ raceId, classId, form, templateSource });
+    const outfitResult = await readCharStartOutfit({});
+    const outfits = outfitResult.success ? outfitResult.data : [];
+    const sources = [...new Map(outfits.map(row => [sourceKey(row.race, row.classId), { key: sourceKey(row.race, row.classId), race: row.race, classId: row.classId }])).values()];
+    const outfitSource = sources.find(source => source.race === raceId)?.key
+      ?? sources.find(source => source.classId === classId && RACES.find(r => r.id === source.race)?.faction === RACES.find(r => r.id === raceId)?.faction)?.key
+      ?? sources[0]?.key
+      ?? '';
+    const totemSource = dbCombos.find(combo => combo.class === 7 && RACES.find(r => r.id === combo.race)?.faction === RACES.find(r => r.id === raceId)?.faction)?.race ?? '';
+    setWizard({ raceId, classId, form, templateSource, outfits, sources, outfitSource, slotSources: {}, totemSource });
   };
 
   const handleToggle = (raceId, classId, checked) => {
@@ -609,7 +931,7 @@ export default function RaceClassPage() {
     setMsg(null);
     try {
       const r = await query(
-        'INSERT INTO playercreateinfo (race, `class`, map, zone, position_x, position_y, position_z, orientation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        'INSERT IGNORE INTO playercreateinfo (race, `class`, map, zone, position_x, position_y, position_z, orientation) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
         [raceId, classId, form.map, form.zone, form.position_x, form.position_y, form.position_z, form.orientation]
       );
       if (!r.success) throw new Error(r.error);
@@ -623,6 +945,33 @@ export default function RaceClassPage() {
             await query('INSERT IGNORE INTO playercreateinfo_action (race, `class`, button, action, type) VALUES (?, ?, ?, ?, ?)', [raceId, classId, a.button, a.action, a.type]);
           }
           copiedActions = actions.data.length;
+        }
+      }
+
+      if (classId === 7) {
+      if (wizard.outfitSource) {
+        const outfitRows = [0, 1].map(gender => ({
+          race: raceId,
+          classId,
+          gender,
+          outfitId: 0,
+          items: OUTFIT_SLOTS.map((_, slotIndex) => {
+            const [sourceRace, sourceClass] = String(wizard.slotSources[slotIndex] || wizard.outfitSource).split(':').map(Number);
+            const source = wizard.outfits.find(row => row.race === sourceRace && row.classId === sourceClass && row.gender === gender);
+            return source?.items.find(item => item.slotIndex === slotIndex) || { slotIndex, itemId: 0, displayId: 0, inventorySlot: 0 };
+          }).filter(item => item.itemId || item.displayId || item.inventorySlot),
+        }));
+        const outfitResult = await appendCharStartOutfit(outfitRows);
+        if (!outfitResult.success) throw new Error(`Start outfit failed: ${outfitResult.error}`);
+      }
+
+        const donor = dbCombos.find(c => c.race === Number(wizard.totemSource)) ?? dbCombos.find(c => c.class === 7 && RACES.find(r => r.id === c.race)?.faction === RACES.find(r => r.id === raceId)?.faction)
+          ?? dbCombos.find(c => c.class === 7);
+        if (donor) {
+          const donorTotems = await query('SELECT TotemID, ModelID FROM player_totem_model WHERE RaceID = ? ORDER BY TotemID', [donor.race]);
+          for (const row of donorTotems.data || []) {
+            await query('INSERT INTO player_totem_model (TotemID, RaceID, ModelID) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE ModelID = VALUES(ModelID)', [row.TotemID, raceId, row.ModelID]);
+          }
         }
       }
 
@@ -641,7 +990,17 @@ export default function RaceClassPage() {
     setWizardSaving(false);
   };
 
-  const selectedRaceData = RACES.find(r => r.id === selectedRace);
+  const activeRaces = RACES.filter(r =>
+    CLASSES.some(cls => hasCombo(r.id, cls.id))
+  );
+  const selectedRaceData = activeRaces.find(r => r.id === selectedRace);
+
+  useEffect(() => {
+    if (activeRaces.length && !selectedRaceData) {
+      setSelectedRace(activeRaces[0].id);
+      setDetailCombo(null);
+    }
+  }, [activeRaces, selectedRaceData]);
 
   return (
     <div className="rc-page">
@@ -667,8 +1026,8 @@ export default function RaceClassPage() {
             <span className={`rc-faction-label ${faction}`}>
               {faction === 'alliance' ? 'Alliance' : 'Horde'}
             </span>
-            {RACES.filter(r => r.faction === faction).map(r => {
-              const count = dbCombos.filter(c => c.race === r.id).length;
+            {activeRaces.filter(r => r.faction === faction).map(r => {
+              const count = CLASSES.filter(cls => hasCombo(r.id, cls.id)).length;
               return (
                 <button
                   key={r.id}
@@ -762,6 +1121,31 @@ export default function RaceClassPage() {
               ))}
             </div>
             <div className="rc-wizard-footer">
+            <div className="rc-outfit-builder">
+              <label className="rc-wizard-field">
+                <span>Start outfit base</span>
+                <select value={wizard.outfitSource} onChange={e => setWizard(w => ({ ...w, outfitSource: e.target.value, slotSources: {} }))}>
+                  {wizard.sources.map(source => <option key={source.key} value={source.key}>{sourceLabel(source.race, source.classId)}</option>)}
+                </select>
+              </label>
+              <div className="rc-outfit-slots">
+                {OUTFIT_BUILDER_SLOTS.map(({ name, slotIndex }) => (
+                  <label key={name} className="rc-wizard-field">
+                    <span>{name}</span>
+                    <select value={wizard.slotSources[slotIndex] || wizard.outfitSource} onChange={e => setWizard(w => ({ ...w, slotSources: { ...w.slotSources, [slotIndex]: e.target.value } }))}>
+                      {wizard.sources.map(source => <option key={source.key} value={source.key}>{sourceLabel(source.race, source.classId)}</option>)}
+                    </select>
+                  </label>
+                ))}
+              </div>
+              {wizard.classId === 7 && <label className="rc-wizard-field">
+                <span>Totem model set</span>
+                <select value={wizard.totemSource} onChange={e => setWizard(w => ({ ...w, totemSource: e.target.value }))}>
+                  {RACES.filter(r => dbCombos.some(c => c.race === r.id && c.class === 7)).map(r => <option key={r.id} value={r.id}>{r.name} Shaman</option>)}
+                </select>
+              </label>}
+            </div>
+
               <span className="rc-wizard-note">Action bar copied from same class. DBC updated automatically.</span>
               <button className="btn-save" onClick={handleWizardSave} disabled={wizardSaving}>
                 {wizardSaving ? 'Saving…' : 'Create'}
@@ -794,3 +1178,8 @@ export default function RaceClassPage() {
     </div>
   );
 }
+
+
+
+
+

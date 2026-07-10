@@ -8,6 +8,11 @@ contextBridge.exposeInMainWorld('azeroth', {
     disconnect: () => ipcRenderer.invoke('db:disconnect'),
     findNextId: (opts) => ipcRenderer.invoke('db:findNextId', opts),
   },
+  atomic: {
+    begin: (dbcPath, files) => ipcRenderer.invoke('atomic:begin', { dbcPath, files }),
+    commit: (id) => ipcRenderer.invoke('atomic:commit', id),
+    rollback: (id) => ipcRenderer.invoke('atomic:rollback', id),
+  },
   // SOAP / Live server
   soap: {
     command: (opts) => ipcRenderer.invoke('soap:command', opts),
@@ -47,6 +52,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     readCharBaseInfo: (dbcPath) => ipcRenderer.invoke('dbc:readCharBaseInfo', dbcPath),
     readCharStartOutfit: (dbcPath, opts) => ipcRenderer.invoke('dbc:readCharStartOutfit', dbcPath, opts),
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
+    appendCharStartOutfit: (dbcPath, rows) => ipcRenderer.invoke('dbc:appendCharStartOutfit', dbcPath, rows),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
     writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
     readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),

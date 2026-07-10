@@ -78,6 +78,20 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.db.query(sql, params);
   }, []);
 
+  const runAtomicWrite = useCallback(async (files, operation) => {
+    const begin = await window.azeroth.atomic.begin(dbcPath, files);
+    if (!begin.success) throw new Error(begin.error || 'Could not start atomic write');
+    try {
+      const result = await operation();
+      const commit = await window.azeroth.atomic.commit(begin.id);
+      if (!commit.success) throw new Error(commit.error || 'Could not commit atomic write');
+      return result;
+    } catch (error) {
+      const rollback = await window.azeroth.atomic.rollback(begin.id);
+      if (!rollback.success) throw new Error(`${error.message} Rollback also failed: ${rollback.error}`);
+      throw error;
+    }
+  }, [dbcPath]);
   const soapCommand = useCallback(async (command) => {
     return window.azeroth.soap.command({ ...soapConfig, command });
   }, [soapConfig]);
@@ -209,6 +223,10 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.readCharStartOutfit(dbcPath, opts);
   }, [dbcPath]);
 
+  const appendCharStartOutfit = useCallback(async (rows) => {
+    return window.azeroth.dbc.appendCharStartOutfit(dbcPath, rows);
+  }, [dbcPath]);
+
   const readCharSections = useCallback(async () => {
     return window.azeroth.dbc.readCharSections(dbcPath);
   }, [dbcPath]);
@@ -272,7 +290,7 @@ export function ConnectionProvider({ children }) {
       dbStatus, dbError,
       soapStatus, setSoapStatus,
       connectDb, disconnectDb,
-      query, soapCommand,
+      query, soapCommand, runAtomicWrite,
       readAchievementsOverview, writeAchievement, createAchievement, deleteAchievement, writeAchievementCriteria,
       readTalentTabs, readTalents, readSpells, readSpellIcons, readItemIcons, saveTalent,
       getIcon, writeTalent, deleteTalent, insertTalent,
@@ -280,7 +298,7 @@ export function ConnectionProvider({ children }) {
       searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc,
       readSkillLineAbility, readSkillLineTree, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
-      readCharStartOutfit, readCharSections, writeCharSections,
+      readCharStartOutfit, appendCharStartOutfit, readCharSections, writeCharSections,
       readBlpTexture, readBlpTextures,
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,

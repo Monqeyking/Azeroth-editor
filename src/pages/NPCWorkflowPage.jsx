@@ -49,6 +49,9 @@ const FLAG_BITS = [
   { bit: 67108864, label: 'Mailbox' },
 ];
 
+const ALLIANCE_FACTION_IDS = [12, 55, 80, 875, 1638];
+const HORDE_FACTION_IDS = [29, 68, 104, 126, 1604];
+
 const ROLE_PRESETS = [
   { id: 'generic', label: 'Generic NPC', npcflag: 0, trainerEnabled: false },
   { id: 'class-trainer', label: 'Class Trainer', npcflag: 51, trainerEnabled: true, trainerType: 0, requirement: 2, greeting: 'Hello, ready for training?' },
@@ -131,6 +134,10 @@ export default function NPCWorkflowPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const [search, setSearch] = useState('');
+  const [filterRole, setFilterRole] = useState('');
+  const [filterClass, setFilterClass] = useState('');
+  const [filterFaction, setFilterFaction] = useState('');
+
   const [createRole, setCreateRole] = useState('class-trainer');
   const [createName, setCreateName] = useState('New NPC');
   const [creating, setCreating] = useState(false);
@@ -196,17 +203,35 @@ export default function NPCWorkflowPage() {
   const searchCreatures = useCallback(async (term) => {
     setLoading(true);
     const isNum = /^\d+$/.test(term);
-    const sql = !term
-      ? 'SELECT entry, `name`, subname, npcflag, faction FROM creature_template ORDER BY entry DESC LIMIT 50'
-      : isNum
-        ? 'SELECT entry, `name`, subname, npcflag, faction FROM creature_template WHERE entry = ? LIMIT 50'
-        : 'SELECT entry, `name`, subname, npcflag, faction FROM creature_template WHERE `name` LIKE ? ORDER BY entry DESC LIMIT 50';
-    const params = !term ? [] : [isNum ? Number(term) : `%${term}%`];
+    const filters = [];
+    const params = [];
+    if (term) {
+      filters.push(isNum ? 'ct.entry = ?' : 'ct.`name` LIKE ?');
+      params.push(isNum ? Number(term) : `%${term}%`);
+    }
+    if (filterRole === 'class-trainer') filters.push('(t.Type IN (0, 1) OR (ct.npcflag & 32) <> 0)');
+    if (filterRole === 'profession-trainer') filters.push('(t.Type = 2 OR (ct.npcflag & 64) <> 0)');
+    if (filterRole === 'vendor') filters.push('(ct.npcflag & 128) <> 0');
+    if (filterClass) {
+      filters.push('t.Requirement = ?');
+      params.push(Number(filterClass));
+    }
+    if (filterFaction) {
+      const factionIds = filterFaction === 'alliance' ? ALLIANCE_FACTION_IDS : HORDE_FACTION_IDS;
+      filters.push(`ct.faction IN (${factionIds.map(() => '?').join(', ')})`);
+      params.push(...factionIds);
+    }    const sql = `SELECT ct.entry, ct.name, ct.subname, ct.npcflag, ct.faction,
+                        cdt.TrainerId, t.Type AS TrainerType, t.Requirement AS TrainerRequirement,
+                        (SELECT COUNT(*) FROM trainer_spell ts WHERE ts.TrainerId = cdt.TrainerId) AS TrainerSpellCount
+                 FROM creature_template ct
+                 LEFT JOIN creature_default_trainer cdt ON cdt.CreatureId = ct.entry
+                 LEFT JOIN trainer t ON t.Id = cdt.TrainerId
+                 ${filters.length ? `WHERE ${filters.join(' AND ')}` : ''}
+                 ORDER BY ct.entry DESC LIMIT 50`;
     const res = await query(sql, params);
     setCreatures(res.data || []);
     setLoading(false);
-  }, [query]);
-
+  }, [filterClass, filterFaction, filterRole, query]);
   const loadCreature = useCallback(async (entry) => {
     const [tplRes, linkRes, spellCountRes, legacyRes, modelRes] = await Promise.all([
       query('SELECT * FROM creature_template WHERE entry = ?', [entry]),
@@ -252,7 +277,7 @@ export default function NPCWorkflowPage() {
     setErrors({});
   }, [query]);
 
-  useEffect(() => { searchCreatures(''); }, [searchCreatures]);
+  useEffect(() => { searchCreatures(search); }, [searchCreatures]);
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   useEffect(() => {
@@ -385,7 +410,7 @@ export default function NPCWorkflowPage() {
       const faction = createRole === 'generic' ? 35 : 12;
       const trainerId = preset.trainerEnabled ? await ensureTrainerId() : null;
       const insert = await query(
-        'INSERT INTO creature_template (entry, name, subname, minlevel, maxlevel, faction, npcflag, scale, speed_walk, speed_run, unit_class, rank, type, AIName, MovementType, RegenHealth, ScriptName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO creature_template (entry, name, subname, minlevel, maxlevel, faction, npcflag, scale, speed_walk, speed_run, unit_class, `rank`, `type`, AIName, MovementType, RegenHealth, ScriptName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [entry, name, preset.trainerEnabled ? preset.label : '', 1, 1, faction, npcflag, 1, 1, 1.14286, 1, 0, 7, '', 0, 1, '']
       );
       if (!insert.success) throw new Error(insert.error);
@@ -419,7 +444,7 @@ export default function NPCWorkflowPage() {
       const trainerId = trainerEnabled ? (trainer.trainerId ? Number(trainer.trainerId) : await ensureTrainerId()) : null;
 
       const insert = await query(
-        'INSERT INTO creature_template (entry, name, subname, minlevel, maxlevel, faction, npcflag, gossip_menu_id, scale, speed_walk, speed_run, unit_class, rank, type, AIName, MovementType, RegenHealth, ScriptName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        'INSERT INTO creature_template (entry, name, subname, minlevel, maxlevel, faction, npcflag, gossip_menu_id, scale, speed_walk, speed_run, unit_class, `rank`, `type`, AIName, MovementType, RegenHealth, ScriptName) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
         [
           entry,
           name,
@@ -491,7 +516,23 @@ export default function NPCWorkflowPage() {
                 onChange={e => { setSearch(e.target.value); searchCreatures(e.target.value); }}
               />
             </div>
-            <div className="npcwf-create-card">
+            <div className="npcwf-filter-grid">
+              <select aria-label="Filter by role" value={filterRole} onChange={e => setFilterRole(e.target.value)}>
+                <option value="">Any role</option>
+                <option value="class-trainer">Class Trainer</option>
+                <option value="profession-trainer">Profession Trainer</option>
+                <option value="vendor">Vendor</option>
+              </select>
+              <select aria-label="Filter by class" value={filterClass} onChange={e => setFilterClass(e.target.value)}>
+                <option value="">Any class</option>
+                {CLASS_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
+              </select>
+              <select aria-label="Filter by faction" value={filterFaction} onChange={e => setFilterFaction(e.target.value)}>
+                <option value="">Any faction</option>
+                <option value="alliance">Alliance</option>
+                <option value="horde">Horde</option>
+              </select>
+            </div>            <div className="npcwf-create-card">
               <label>New NPC role</label>
               <select value={createRole} onChange={e => setCreateRole(e.target.value)}>
                 <option value="class-trainer">Class Trainer</option>
@@ -516,6 +557,7 @@ export default function NPCWorkflowPage() {
                 <div className="list-item-meta">
                   <span className="mono">#{c.entry}</span>
                   <span>{c.subname || 'No subname'}</span>
+                  {c.TrainerId && <span>Trainer #{c.TrainerId} · {CLASS_OPTIONS.find(option => Number(option.value) === Number(c.TrainerRequirement))?.label || (Number(c.TrainerType) === 2 ? 'Profession' : 'Trainer')}</span>}
                 </div>
               </div>
             ))}
