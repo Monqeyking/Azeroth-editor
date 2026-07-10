@@ -17,7 +17,7 @@ const XP_DIFFICULTY_OPTIONS = [
 
 const ALLOWABLE_RACE_BITS = {
   1:'Human',2:'Orc',4:'Dwarf',8:'Night Elf',16:'Undead',
-  32:'Tauren',64:'Gnome',128:'Troll',512:'Blood Elf',1024:'Draenei',
+  32:'Tauren',64:'Gnome',128:'Troll',256:'Goblin',512:'Blood Elf',1024:'Draenei',2048:'Worgen',
 };
 
 const ALLOWABLE_CLASS_BITS = {
@@ -35,6 +35,8 @@ const ADDON_FIELDS = new Set([
   'RequiredSkillID','RequiredSkillPoints','RequiredMinRepFaction','RequiredMaxRepFaction',
   'RequiredMinRepValue','RequiredMaxRepValue','ProvidedItemCount','SpecialFlags',
 ]);
+
+const OFFER_REWARD_FIELDS = new Set(['RewardText']);
 
 const QUEST_FLAGS_BITS = {
   1:'Stay Alive',
@@ -638,6 +640,9 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
       {/* â”€â”€ Rewards â”€â”€ */}
       {tab === 'Rewards' && (
         <div style={{ padding: '20px 28px 32px' }}>
+          <H5>Turn-in Text</H5>
+          <FG label="Reward Text">{ta('RewardText', 5)}</FG>
+
           <H5>Currency</H5>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: '12px', maxWidth: '700px' }}>
             <FG label="Money flat (copper)">{num('RewardMoney')}</FG>
@@ -865,7 +870,7 @@ function QuestFilters({ filters, setFilters }) {
 
 // â”€â”€ QuestEditorPage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function QuestEditorPage() {
-  const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
+  const { query, soapCommand, soapConfig, findNextId, idRanges, runAtomicWrite } = useConnection();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' });
   const [quests, setQuests] = useState([]);
@@ -892,8 +897,8 @@ export default function QuestEditorPage() {
 
   const searchRef = useRef(null);
 
-  const ALLIANCE_MASK = 1 | 4 | 8 | 64 | 1024;
-  const HORDE_MASK    = 2 | 16 | 32 | 128 | 512;
+  const ALLIANCE_MASK = 1 | 4 | 8 | 64 | 1024 | 2048;
+  const HORDE_MASK    = 2 | 16 | 32 | 128 | 256 | 512;
 
   const doSearch = useCallback(async (term, f) => {
     setLoading(true);
@@ -948,12 +953,13 @@ export default function QuestEditorPage() {
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   const selectQuest = async (ID) => {
-    const [main, addon] = await Promise.all([
+    const [main, addon, offerReward] = await Promise.all([
       query('SELECT * FROM quest_template WHERE ID = ?', [ID]),
       query('SELECT * FROM quest_template_addon WHERE ID = ?', [ID]),
+      query('SELECT RewardText FROM quest_offer_reward WHERE ID = ?', [ID]),
     ]);
     if (main.data?.[0]) {
-      const merged = { ...main.data[0], ...(addon.data?.[0] || {}) };
+      const merged = { ...main.data[0], ...(addon.data?.[0] || {}), RewardText: offerReward.data?.[0]?.RewardText ?? '' };
       setSelected(merged);
       setForm(merged);
       setEditBaseline(merged);
@@ -1001,7 +1007,7 @@ export default function QuestEditorPage() {
     setCreateMsg(null);
     try {
       // Insert quest_template (only non-addon fields)
-      const mainData = { ID: createId, ...Object.fromEntries(Object.entries(createForm).filter(([k]) => !ADDON_FIELDS.has(k))) };
+      const mainData = { ID: createId, ...Object.fromEntries(Object.entries(createForm).filter(([k]) => !ADDON_FIELDS.has(k) && !OFFER_REWARD_FIELDS.has(k))) };
       const mainFields = Object.keys(mainData);
       const r1 = await query(
         `INSERT INTO quest_template (${mainFields.map(k=>`\`${k}\``).join(',')}) VALUES (${mainFields.map(()=>'?').join(',')})`,
@@ -1016,6 +1022,12 @@ export default function QuestEditorPage() {
         `INSERT IGNORE INTO quest_template_addon (ID, ${addonFields.map(k=>`\`${k}\``).join(',')}) VALUES (${addonVals.map(()=>'?').join(',')})`,
         addonVals
       );
+
+      const offerResult = await query(
+        'INSERT INTO quest_offer_reward (ID, RewardText) VALUES (?, ?) ON DUPLICATE KEY UPDATE RewardText = VALUES(RewardText)',
+        [createId, createForm.RewardText ?? '']
+      );
+      if (!offerResult.success) throw new Error(offerResult.error);
 
       if (soapConfig?.user) await soapCommand('.reload quest_template');
 
@@ -1038,21 +1050,30 @@ export default function QuestEditorPage() {
     setCopying(true);
     setMsg(null);
     try {
-      const idResult = await findNextId({ table: 'quest_template', idColumn: 'ID', startId: idRanges.quest });
-      if (!idResult.success) throw new Error(idResult.error);
-      const newId = idResult.nextId;
-      const fields = Object.keys(selected);
-      const cols = fields.map(k => `\`${k}\``).join(', ');
-      const vals = fields.map(k => k === 'ID' ? newId : selected[k]);
-      const placeholders = fields.map(() => '?').join(', ');
-      const result = await query(`INSERT INTO quest_template (${cols}) VALUES (${placeholders})`, vals);
-      if (!result.success) throw new Error(result.error);
-      const addonFields = [...ADDON_FIELDS];
-      const addonVals = [newId, ...addonFields.map(k => selected[k] ?? 0)];
-      await query(
-        `INSERT IGNORE INTO quest_template_addon (ID, ${addonFields.map(k=>`\`${k}\``).join(',')}) VALUES (${addonVals.map(()=>'?').join(',')})`,
-        addonVals
-      );
+      const newId = await runAtomicWrite([], async () => {
+        const idResult = await findNextId({ table: 'quest_template', idColumn: 'ID', startId: idRanges.quest });
+        if (!idResult.success) throw new Error(idResult.error);
+        const fields = Object.keys(selected).filter(k => !ADDON_FIELDS.has(k) && !OFFER_REWARD_FIELDS.has(k));
+        const cols = fields.map(k => `\`${k}\``).join(', ');
+        const vals = fields.map(k => k === 'ID' ? idResult.nextId : selected[k]);
+        const placeholders = fields.map(() => '?').join(', ');
+        const result = await query(`INSERT INTO quest_template (${cols}) VALUES (${placeholders})`, vals);
+        if (!result.success) throw new Error(result.error);
+        const addonFields = [...ADDON_FIELDS];
+        const addonVals = [idResult.nextId, ...addonFields.map(k => selected[k] ?? 0)];
+        const addonResult = await query(
+          `INSERT IGNORE INTO quest_template_addon (ID, ${addonFields.map(k=>`\`${k}\``).join(',')}) VALUES (${addonVals.map(()=>'?').join(',')})`,
+          addonVals
+        );
+        if (!addonResult.success) throw new Error(addonResult.error);
+        const offerResult = await query(
+          'INSERT INTO quest_offer_reward (ID, RewardText) VALUES (?, ?) ON DUPLICATE KEY UPDATE RewardText = VALUES(RewardText)',
+          [idResult.nextId, selected.RewardText ?? '']
+        );
+        if (!offerResult.success) throw new Error(offerResult.error);
+
+        return idResult.nextId;
+      });
       await refreshList();
       await selectQuest(newId);
       setMsg({ type: 'success', text: `âœ“ Gekloond naar ID #${newId}` });
@@ -1066,7 +1087,7 @@ export default function QuestEditorPage() {
     setSaving(true);
     setMsg(null);
     try {
-      const mainFields = Object.keys(form).filter(k => k !== 'ID' && !ADDON_FIELDS.has(k));
+      const mainFields = Object.keys(form).filter(k => k !== 'ID' && !ADDON_FIELDS.has(k) && !OFFER_REWARD_FIELDS.has(k));
       const addonFields = [...ADDON_FIELDS];
 
       const mainSets = mainFields.map(k => `\`${k}\` = ?`).join(', ');
@@ -1081,6 +1102,12 @@ export default function QuestEditorPage() {
         [form.ID, ...addonFields.map(k => form[k] ?? 0), ...addonVals]
       );
       if (!r2.success) throw new Error(r2.error);
+      const r3 = await query(
+        'INSERT INTO quest_offer_reward (ID, RewardText) VALUES (?, ?) ON DUPLICATE KEY UPDATE RewardText = VALUES(RewardText)',
+        [form.ID, form.RewardText ?? '']
+      );
+      if (!r3.success) throw new Error(r3.error);
+
 
       setSelected(form);
       setEditBaseline(form);

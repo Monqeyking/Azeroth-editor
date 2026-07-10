@@ -440,7 +440,7 @@ const SPELL_FIELDS = [
 ];
 
 export default function SpellEditorPage() {
-  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges, dbcPath } = useConnection();
+  const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges, dbcPath, runAtomicWrite } = useConnection();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -543,28 +543,64 @@ export default function SpellEditorPage() {
     setActiveView('spells');
   };
 
+  const focusSearchSoon = () => {
+    window.setTimeout(() => searchRef.current?.focus(), 0);
+  };
+
   const handleCopyFromCompare = async (row) => {
     if (!compareDbcPath) return;
     const label = row.Name_Lang_enUS || '(unnamed)';
-    if (!window.confirm(`Copy "${label}" (#${row.ID}) from the compare file into the local Spell.dbc at a new custom ID?`)) return;
-    setCopyingCompareId(row.ID);
     setMsg(null);
+
+    let targetId = null;
     try {
-      const idResult = await findNextSpellId(idRanges.spell);
-      if (!idResult.success) throw new Error(idResult.error);
-      const newId = idResult.nextId;
-      const result = await window.azeroth.dbc.copySpellCrossFile(compareDbcPath, row.ID, dbcPath, newId);
+      const sameIdCheck = await readSpellFull(row.ID);
+      const sameIdAvailable = !sameIdCheck?.success || !sameIdCheck?.data;
+
+      if (sameIdAvailable) {
+        const useSameId = window.confirm(
+          `"${label}" (#${row.ID}) can be copied 1:1 into your local Spell.dbc.\n\n` +
+          `Press OK for "Copy to same ID"\n` +
+          `Press Cancel to choose "Copy to custom range".`
+        );
+
+        if (useSameId) {
+          targetId = row.ID;
+        }
+      }
+
+      if (!targetId) {
+        const useCustomRange = sameIdAvailable
+          ? window.confirm(`Copy "${label}" (#${row.ID}) to a new custom-range ID?`)
+          : window.confirm(
+              `"${label}" (#${row.ID}) already exists locally, so 1:1 copy is not available.\n\n` +
+              `Press OK for "Copy to custom range".`
+            );
+        if (!useCustomRange) {
+          focusSearchSoon();
+          return;
+        }
+
+        const idResult = await findNextSpellId(idRanges.spell);
+        if (!idResult.success) throw new Error(idResult.error);
+        targetId = idResult.nextId;
+      }
+
+      setCopyingCompareId(row.ID);
+      const result = await window.azeroth.dbc.copySpellCrossFile(compareDbcPath, row.ID, dbcPath, targetId);
       if (!result.success) throw new Error(result.error);
       await searchSpells(search);
       setCompareSelected(null);
-      await selectSpell(newId);
-      setMsg({ type: 'success', text: `✓ "${label}" copied to local ID #${newId}` });
+      setActiveView('spells');
+      await selectSpell(targetId);
+      setMsg({ type: 'success', text: `Copied "${label}" to local ID #${targetId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Copy failed: ${e.message}` });
+      setMsg({ type: 'error', text: `Copy failed: ${e.message}` });
+    } finally {
+      setCopyingCompareId(null);
+      focusSearchSoon();
     }
-    setCopyingCompareId(null);
   };
-
   const selectCompareSpell = async (id) => {
     if (!compareDbcPath) return;
     const result = await window.azeroth.dbc.readSpellFull(compareDbcPath, id);
@@ -682,6 +718,7 @@ export default function SpellEditorPage() {
     }
     setCopying(false);
   };
+
 
   const handleSaveCloneTrainer = async () => {
     if (!clonePanel) return;

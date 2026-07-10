@@ -1,4 +1,4 @@
-﻿.npcwf-layout {
+.npcwf-layout {
   min-height: calc(100vh - 60px);
 }
 
@@ -269,4 +269,14 @@
 .npcwf-warning-item.error {
   border-color: rgba(240, 128, 128, 0.45);
   background: rgba(240, 128, 128, 0.08);
+}
+
+.npcwf-filter-grid {
+  margin: 0 10px 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.npcwf-filter-grid select {
+  width: 100%;
 }
