@@ -32,6 +32,7 @@ export function ConnectionProvider({ children }) {
     spell: 4000000,
     quest: 4000000,
     talent: 4000000,
+    display: 4000000,
     achievement: 4000000,
   });
 
@@ -227,6 +228,11 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.appendCharStartOutfit(dbcPath, rows);
   }, [dbcPath]);
 
+  const readCreatureDisplayCreator = useCallback(async () => window.azeroth.dbc.readCreatureDisplayCreator(dbcPath), [dbcPath]);
+  const findNextCreatureDisplayId = useCallback(async (startId) => window.azeroth.dbc.findNextCreatureDisplayId(dbcPath, startId), [dbcPath]);
+  const createCreatureDisplay = useCallback(async (payload) => window.azeroth.dbc.createCreatureDisplay(dbcPath, payload), [dbcPath]);
+  const readItemDisplayInfos = useCallback(async (dataPath, displayIds, opts) => window.azeroth.dbc.readItemDisplayInfos(dataPath, displayIds, opts), []);
+
   const readCharSections = useCallback(async () => {
     return window.azeroth.dbc.readCharSections(dbcPath);
   }, [dbcPath]);
@@ -299,6 +305,7 @@ export function ConnectionProvider({ children }) {
       readSkillLineAbility, readSkillLineTree, addSkillLineAbility,
       readCastTimes, readDurations, readRanges,
       readCharStartOutfit, appendCharStartOutfit, readCharSections, writeCharSections,
+      readCreatureDisplayCreator, findNextCreatureDisplayId, createCreatureDisplay, readItemDisplayInfos,
       readBlpTexture, readBlpTextures,
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,

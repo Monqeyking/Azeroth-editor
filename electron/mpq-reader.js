@@ -44,22 +44,22 @@ function ensureMounted(dataPath) {
 
 // ── MPQ-bestanden zoeken ───────────────────────────────────────────────────────
 function mpqScore(filePath) {
-  const name     = path.basename(filePath).toLowerCase();
+  const name = path.basename(filePath).toLowerCase();
   const isLocale = /[/\\]enus[/\\]/i.test(filePath);
-  // Matcht: patch.mpq  patch-3.mpq  patch-12.mpq  patch-a.mpq  patch-enUS.mpq  patch-enUS-3.mpq
   const m = name.match(/^patch(?:-enus)?(?:-([0-9]+|[a-z]))?\.mpq$/);
 
   if (m) {
-    const sfx = m[1];
-    let n = 0;
-    if (!sfx)              n = 0;
-    else if (/^\d+$/.test(sfx)) n = parseInt(sfx, 10);
-    else                   n = sfx.charCodeAt(0) - 96; // a=1 b=2 … z=26
-    // Locale patches hebben hogere prioriteit dan non-locale (lager = eerder doorzocht)
-    return (isLocale ? -1000 : 0) - n;
+    const suffix = m[1];
+    // Lettered patches are later custom/client patch generations than numeric WotLK patches.
+    // Example: Patch-C > Patch-B > Patch-A > patch-3 > patch-2 > patch.
+    const revision = !suffix ? 0 : /^\d+$/.test(suffix)
+      ? Number(suffix)
+      : 100 + suffix.charCodeAt(0) - 96;
+    // For the same revision, prefer the root archive: it contains the actual model/texture
+    // overrides, whereas enUS archives are normally locale/string overlays.
+    return -revision * 10 + (isLocale ? 1 : 0);
   }
-  // Base-MPQ's altijd na alle patches
-  return isLocale ? 300 : 200;
+  return isLocale ? 1001 : 1000;
 }
 
 function findMpqFiles(dataPath) {

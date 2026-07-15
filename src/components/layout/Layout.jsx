@@ -1,11 +1,11 @@
-﻿import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom';
 import { useConnection } from '../../lib/ConnectionContext';
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Map, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy
+  Layers, ShoppingBag, Map, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -17,7 +17,9 @@ const NAV_GROUPS = [
     icon: Swords,
     items: [
       { to: '/creatures',      icon: Swords,      label: 'Creatures' },
+      { to: '/creature-displays', icon: ScanFace,   label: 'Creature Displays' },
       { to: '/npc-workflow',   icon: GitBranch,   label: 'NPC Workflow' },
+      { to: '/npc-movement',   icon: Footprints,   label: 'NPC Movement' },
       { to: '/professions',    icon: Hammer,      label: 'Professions' },
       { to: '/trainer-spells', icon: BookOpen,     label: 'Trainers' },
       { to: '/vendors',        icon: ShoppingBag,  label: 'Vendors' },

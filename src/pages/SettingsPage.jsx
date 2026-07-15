@@ -6,6 +6,7 @@ import './EditorPage.css';
 
 const ID_RANGE_EDITORS = [
   { key: 'creature', label: 'Creature' },
+  { key: 'display',  label: 'Creature Display' },
   { key: 'item',     label: 'Item' },
   { key: 'spell',    label: 'Spell' },
   { key: 'quest',    label: 'Quest' },

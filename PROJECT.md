@@ -41,6 +41,7 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 | SpawnMapPage | `/map` | 2D kaart. BLP decoder, continent/zone tiles via MPQ. Creature + GO spawns, clustering, pan/zoom, inspector, waypoints, drag-and-drop. |
 | Editor3DPage | `/editor3d` | 3D world editor: terrain streaming via AzerothCore `.map` files (naadloos V9/V8), minimap-textures, M2 instancing + LOD, billboard-layer, spawn toggle, move/rotate gizmo's, SOAP teleport. TILE_RADIUS=4 (9Ãƒâ€”9), MAX_TILES=200. |
 | UIEditorPage | `/ui-editor` | MPQ-backed glue UI editor for login, character select, and character create. Exports to `output\Interface\GlueXML\...`. |
+| CreatureDisplaysPage | `/creature-displays` | WMV-style character display creator. Reads client DBC/assets for preview, writes CreatureDisplayInfo DBC records to the configured server path. Character M2 preview supports WotLK armor component atlas compositing, geosets, helm/shoulder/belt attachments, and WMV-equivalent item texture priority. |
 | SqlEditorPage | `/sql` | Raw SQL editor. Ctrl+Enter execute, table render, error display. |
 
 ---
