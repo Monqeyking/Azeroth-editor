@@ -54,6 +54,10 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
     appendCharStartOutfit: (dbcPath, rows) => ipcRenderer.invoke('dbc:appendCharStartOutfit', dbcPath, rows),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
+    readCreatureDisplayCreator: (dbcPath) => ipcRenderer.invoke('dbc:readCreatureDisplayCreator', dbcPath),
+    findNextCreatureDisplayId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextCreatureDisplayId', dbcPath, startId),
+    createCreatureDisplay: (dbcPath, payload) => ipcRenderer.invoke('dbc:createCreatureDisplay', dbcPath, payload),
+    readItemDisplayInfos: (dataPath, displayIds, opts) => ipcRenderer.invoke('dbc:readItemDisplayInfos', dataPath, displayIds, opts),
     writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
     readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
@@ -95,6 +99,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     load: () => ipcRenderer.invoke('config:load'),
     save: (config) => ipcRenderer.invoke('config:save', config),
   },
+  window: { openSpellLookup: () => ipcRenderer.invoke('window:openSpellLookup') },
+  clipboard: { writeText: (value) => ipcRenderer.invoke('clipboard:writeText', value) },
   // Spawn loader (3D editor)
   spawns: {
     load: (opts) => ipcRenderer.invoke('spawns:load', opts),

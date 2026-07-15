@@ -8,6 +8,7 @@ function parseSkinFile(buf) {
   const vertices = readSkinArray(buf, 4);
   const indices = readSkinArray(buf, 12);
   const subArr = readSkinArray(buf, 28);
+  const texArr = readSkinArray(buf, 36);
 
   const vertexLookup = [];
   for (let i = 0; i < vertices.count; i++)
@@ -27,11 +28,20 @@ function parseSkinFile(buf) {
     });
   }
 
-  return { vertexLookup, indexLookup, submeshes };
+  const textureUnits = [];
+  for (let i = 0; i < texArr.count; i++) {
+    const t = texArr.offset + i * 24;
+    if (t + 24 > buf.length) break;
+    textureUnits.push({ order: buf.readUInt16LE(t + 2), submeshIndex: buf.readUInt16LE(t + 4), shading: buf.readUInt16LE(t + 2), colorIndex: buf.readInt16LE(t + 8), flagsIndex: buf.readUInt16LE(t + 10), texUnit: buf.readUInt16LE(t + 12), mode: buf.readUInt16LE(t + 14), textureId: buf.readUInt16LE(t + 16), transId: buf.readUInt16LE(t + 20), texAnimId: buf.readUInt16LE(t + 22) });
+  }
+
+  return { vertexLookup, indexLookup, submeshes, textureUnits };
 }
 
 function geosetGroup(meshId) {
-  return meshId < 100 ? -1 : Math.floor(meshId / 100);
+  if (meshId === 0) return -1;
+  if (meshId < 100) return 0;
+  return Math.floor(meshId / 100);
 }
 
 function groupSubmeshIds(submeshes) {
@@ -49,10 +59,12 @@ function defaultVisibleGeosets(submeshes) {
   const groups = groupSubmeshIds(submeshes);
   for (const [g, ids] of groups) {
     if (g === -1) {
-      if (ids.includes(0)) visible.add(0);
+      for (const id of ids) visible.add(id);
       continue;
     }
-    visible.add(ids.find(id => id % 100 === 1) ?? ids[0]);
+    if (g === 12 || g === 17 || g === 18) continue;
+    const candidate = ids.find(id => id % 100 === 1);
+    if (candidate != null) visible.add(candidate);
   }
   return visible;
 }
@@ -84,21 +96,27 @@ function setGroupGeoset(visible, groups, geosetId) {
   visible.add(geosetId);
 }
 
-function filterSubmeshesByVisible(submeshes, visible, allowDefaultForUnsetGroups) {
+function clearGroup(visible, groups, group) {
+  for (const id of groups.get(group) || []) visible.delete(id);
+}
+
+function filterSubmeshesByVisible(submeshes, visible, allowDefaultForUnsetGroups, skipFallbackGroups = new Set()) {
   const allIds = submeshes.map(s => s.id);
   const filtered = new Set();
-  for (const sm of submeshes) {
+  for (let i = 0; i < submeshes.length; i++) {
+    const sm = submeshes[i];
     const g = geosetGroup(sm.id);
     if (g === -1) {
-      if (visible.has(sm.id)) filtered.add(sm.id);
+      if (visible.has(sm.id)) filtered.add(i);
       continue;
     }
     const groupIds = allIds.filter(id => geosetGroup(id) === g);
     const picked = groupIds.filter(id => visible.has(id));
     if (picked.length > 0) {
-      if (picked.includes(sm.id)) filtered.add(sm.id);
-    } else if (allowDefaultForUnsetGroups) {
-      filtered.add(groupIds.find(id => id % 100 === 1) ?? groupIds[0]);
+      if (picked.includes(sm.id)) filtered.add(i);
+    } else if (allowDefaultForUnsetGroups && !skipFallbackGroups.has(g) && g !== 12 && g !== 17 && g !== 18) {
+      const fallback = groupIds.find(id => id % 100 === 1);
+      if (fallback != null && sm.id === fallback) filtered.add(i);
     }
   }
   return filtered;
@@ -107,19 +125,35 @@ function filterSubmeshesByVisible(submeshes, visible, allowDefaultForUnsetGroups
 function resolveCharacterNpcGeosets(submeshes, cdi, extra, charHairRows, facialHairRows) {
   const groups = groupSubmeshIds(submeshes);
   const visible = defaultVisibleGeosets(submeshes);
+  const skipFallbackGroups = new Set();
 
   for (const id of geosetsFromBitmask(cdi?.creatureGeosetData)) {
     setGroupGeoset(visible, groups, id);
   }
-  setGroupGeoset(visible, groups, 101 + (extra.face ?? 0));
 
   const hairGeoset = findCharHairGeoset(charHairRows, extra.race, extra.sex, extra.hairStyle);
-  if (hairGeoset) setGroupGeoset(visible, groups, hairGeoset);
+  if (hairGeoset != null) {
+    if (hairGeoset === 0) {
+      clearGroup(visible, groups, 0);
+      skipFallbackGroups.add(0);
+    } else {
+      setGroupGeoset(visible, groups, hairGeoset);
+    }
+  }
 
-  const facialGeoset = findCharHairGeoset(facialHairRows, extra.race, extra.sex, extra.facialHair);
-  if (facialGeoset) setGroupGeoset(visible, groups, facialGeoset);
+  const facialRow = findFacialHairRow(facialHairRows, extra.race, extra.sex, extra.facialHair);
+  if (facialRow) {
+    if (facialRow.geosets[0] > 0) setGroupGeoset(visible, groups, 100 + facialRow.geosets[0]);
+    if (facialRow.geosets[1] > 0) setGroupGeoset(visible, groups, 300 + facialRow.geosets[1]);
+    if (facialRow.geosets[2] > 0) setGroupGeoset(visible, groups, 200 + facialRow.geosets[2]);
+  }
 
-  return filterSubmeshesByVisible(submeshes, visible, false);
+  return filterSubmeshesByVisible(submeshes, visible, true, skipFallbackGroups);
+}
+
+function findFacialHairRow(rows, race, sex, variation) {
+  if (variation == null) return null;
+  return rows.find(r => r.race === race && r.sex === sex && r.variation === variation) || null;
 }
 
 function resolveVisibleGeosets(submeshes, cdi, extra, charHairRows, facialHairRows) {
@@ -127,21 +161,22 @@ function resolveVisibleGeosets(submeshes, cdi, extra, charHairRows, facialHairRo
     return resolveCharacterNpcGeosets(submeshes, cdi, extra, charHairRows, facialHairRows);
   }
 
-  const visible = geosetsFromBitmask(cdi?.creatureGeosetData);
-  if (visible.size === 0) return defaultVisibleGeosets(submeshes);
+  const bitmask = geosetsFromBitmask(cdi?.creatureGeosetData);
+  const visible = bitmask.size > 0 ? bitmask : defaultVisibleGeosets(submeshes);
   return filterSubmeshesByVisible(submeshes, visible, true);
 }
 
 function buildGeosetDebugInfo(submeshes, visible, cdi, extra, charHairRows, facialHairRows) {
   const allIds = submeshes.map(s => s.id).sort((a, b) => a - b);
-  const visibleIds = [...visible].sort((a, b) => a - b);
+  const visibleIds = [...new Set([...visible].map(i => submeshes[i]?.id).filter(Boolean))].sort((a, b) => a - b);
   const hairGeoset = extra
     ? findCharHairGeoset(charHairRows, extra.race, extra.sex, extra.hairStyle)
     : null;
-  const facialGeoset = extra
-    ? findCharHairGeoset(facialHairRows, extra.race, extra.sex, extra.facialHair)
+  const facialRow = extra
+    ? findFacialHairRow(facialHairRows, extra.race, extra.sex, extra.facialHair)
     : null;
 
+  const visibleIdSet = new Set(visibleIds);
   return {
     mode: extra ? 'character-npc' : 'creature',
     creatureGeosetData: cdi?.creatureGeosetData ?? 0,
@@ -157,22 +192,23 @@ function buildGeosetDebugInfo(submeshes, visible, cdi, extra, charHairRows, faci
       facialHair: extra.facialHair,
       bakeName: extra.bakeName || null,
     } : null,
-    resolvedFaceGeoset: extra ? 101 + (extra.face ?? 0) : null,
+    resolvedFaceGeoset: extra && facialRow ? 100 + facialRow.geosets[0] : null,
     resolvedHairGeoset: hairGeoset,
-    resolvedFacialGeoset: facialGeoset,
+    resolvedFacialRow: facialRow?.geosets || null,
     allSubmeshIds: allIds,
     visibleGeosetIds: visibleIds,
-    hiddenGeosetIds: allIds.filter(id => !visible.has(id)),
+    hiddenGeosetIds: allIds.filter(id => !visibleIdSet.has(id)),
   };
 }
 
-function buildIndicesFromSkin(skin, visibleIds) {
+function buildIndicesFromSkin(skin, visibleIndices) {
   const { vertexLookup, indexLookup, submeshes } = skin;
   const out = [];
-  for (const sm of submeshes) {
-    if (!visibleIds.has(sm.id)) continue;
-    for (let i = 0; i < sm.indexCount; i++) {
-      const triIdx = indexLookup[sm.indexStart + i];
+  for (let i = 0; i < submeshes.length; i++) {
+    if (!visibleIndices.has(i)) continue;
+    const sm = submeshes[i];
+    for (let j = 0; j < sm.indexCount; j++) {
+      const triIdx = indexLookup[sm.indexStart + j];
       out.push(vertexLookup[triIdx] ?? 0);
     }
   }
@@ -195,7 +231,24 @@ function parseCharHairGeosets(dbc) {
 }
 
 function parseFacialHairGeosets(dbc) {
-  return parseCharHairGeosets(dbc);
+  const rows = [];
+  if (!dbc) return rows;
+  for (let i = 0; i < dbc.numRecords; i++) {
+    const off = dbc.dataStart + i * dbc.recordSize;
+    rows.push({
+      race: dbc.buf.readUInt32LE(off),
+      sex: dbc.buf.readUInt32LE(off + 4),
+      variation: dbc.buf.readUInt32LE(off + 8),
+      geosets: [
+        dbc.buf.readUInt32LE(off + 12),
+        dbc.buf.readUInt32LE(off + 16),
+        dbc.buf.readUInt32LE(off + 20),
+        dbc.buf.readUInt32LE(off + 24),
+        dbc.buf.readUInt32LE(off + 28),
+      ],
+    });
+  }
+  return rows;
 }
 
 function parseCreatureDisplayInfoExtra(dbc, id) {
@@ -241,6 +294,12 @@ function dbcStr(dbc, offset, corr = 1) {
 
 module.exports = {
   parseSkinFile,
+  defaultVisibleGeosets,
+  groupSubmeshIds,
+  geosetGroup,
+  setGroupGeoset,
+  findCharHairGeoset,
+  findFacialHairRow,
   resolveVisibleGeosets,
   buildGeosetDebugInfo,
   buildIndicesFromSkin,
@@ -248,6 +307,5 @@ module.exports = {
   parseFacialHairGeosets,
   parseCreatureDisplayInfoExtra,
   geosetsFromBitmask,
-  geosetGroup,
   filterSubmeshesByVisible,
 };

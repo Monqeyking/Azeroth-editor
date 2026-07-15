@@ -46,6 +46,13 @@ Uses ZamModelViewer (Wowhead cloud renderer) Ã¢â‚¬â€ requires interne
 - **CSP**: `blob:` in script-src + `cdn.jsdelivr.net` in connect-src vereist voor drei `<Text>` (troika worker/fonts).
 - Open issues: WDL garbage-height "pilaren", spawn billboards/labels niet instanced, drei 10 Ã¢â€ â€ fiber 8 mismatch. Zie `PROMPT_next_session.md`.
 
+## M2 geoset filtering (electron/m2-geoset.js)
+- `geosetGroup(id)`: **Group 0 = IDs 1-99** (hair/base head), **Group -1 = only ID=0** (body mesh). IDs >=100 map to `Math.floor(id/100)`. This matches WotLK convention where hair geosets (IDs 2-18 in Human Male) are NOT body group but rather group 0 (one-at-a-time selection).
+- `resolveCharacterNpcGeosets()` uses `skipFallbackGroups` Set to prevent `filterSubmeshesByVisible` from re-adding *01 fallback for explicitly-cleared groups (e.g., bald → group 0 cleared, no hair fallback).
+- `parseFacialHairGeosets()`: CharacterFacialHairStyles.dbc has RaceID at offset 0 (no leading record ID, unlike CharHairGeosets). Returns `geosets[5]` array — fields 0/1/2 map to groups 1/3/2 respectively (WMVx convention).
+- `findFacialHairRow()`: separate lookup for the facial hair DBC format (race/sex/variation-based, no single geosetId).
+- Character preview render path: visible `.skin` texture units are emitted as individual render passes. `type=1` maps to the composited character atlas, `type=6` to the selected `CharSections.Tex1` hair BLP; M2 blend/depth metadata is parsed from the WotLK render flag block. Keep character passes `DoubleSide` in Three.js: strict culling cuts Worgen/character geometry.
+
 ## Creature Editor Ã¢â‚¬â€ model table inputs
 - Integer columns (Idx, CreatureDisplayID, VerifiedBuild): type="text" inputMode="numeric" + custom Ã¢â€“Â²Ã¢â€“Â¼ buttons using onMouseDown+preventDefault Ã¢â‚¬â€ exactly one step per click, no auto-repeat
 - Decimal columns (DisplayScale, Probability): type="number" step="0.01" with onWheel Ã¢â€ â€™ blur() to prevent scroll-changing values
@@ -132,3 +139,8 @@ Geen tussentijdse bevestiging vragen voor deze doc-updates Ã¢â‚¬â€ di
 ## Enemies Editor Ã¢â‚¬â€ v1 notes
 - Route `/enemies` reuses `creature_template` for level, rank, and multipliers; editor-only visibility/status notes live in `enemy_editor_meta` and are created lazily by the page.
 - Hidden enemies are never deleted; the page only changes editor classification so content stays recoverable.
+
+## Creature Displays armor preview
+- WotLK character component atlas is fixed 256�256: torso lower is 128�32 at (128,64); pelvis/leg upper is (128,96,128,64); pelvis/leg lower is (128,160,128,64).
+- Component textures must compose by WMV SLOT_LAYERS priority, not NPC slot order: legs=10, chest=13, belt=18, wrist=19, gloves=20.
+- Belt uses both waist geoset and model1 on native ATT_BELT_BUCKLE (attachment 53).

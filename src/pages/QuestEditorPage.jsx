@@ -389,7 +389,82 @@ const H5 = ({ children }) => (
 );
 
 // â”€â”€ QuestFormFields â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeField, setActiveField, lookupEpoch }) {
+function QuestPoiEditor({ questId, query, dbcPath, soapConfig, soapCommand }) {
+  const [pois, setPois] = useState([]);
+  const [areas, setAreas] = useState([]);
+  const [spawnSearch, setSpawnSearch] = useState({});
+  const [spawnChoices, setSpawnChoices] = useState({});
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState('Add a turn-in point or an objective area. Spawn refresh copies map coordinates from a specific GUID.');
+
+  const load = useCallback(async () => {
+    if (!questId) return;
+    const result = await query('SELECT p.QuestID, p.id, p.ObjectiveIndex, p.MapID, p.WorldMapAreaId, p.Floor, p.Priority, p.Flags, pt.Idx2, pt.X, pt.Y FROM quest_poi p LEFT JOIN quest_poi_points pt ON pt.QuestID = p.QuestID AND pt.Idx1 = p.id WHERE p.QuestID = ? ORDER BY p.id, pt.Idx2', [questId]);
+    if (!result.success) return setMessage(`Could not load POIs: ${result.error}`);
+    const groups = new Map();
+    (result.data || []).forEach(row => {
+      if (!groups.has(row.id)) groups.set(row.id, { ...row, points: [] });
+      if (row.Idx2 !== null && row.Idx2 !== undefined) groups.get(row.id).points.push({ X: row.X, Y: row.Y });
+    });
+    setPois([...groups.values()].map(p => ({ ...p, points: p.points.length ? p.points : [{ X: 0, Y: 0 }] })));
+  }, [questId, query]);
+
+  useEffect(() => { load(); }, [load]);
+  useEffect(() => { if (dbcPath) window.azeroth.worldmap.readWorldMapAreas(dbcPath).then(r => r.success && setAreas(r.areas || [])); }, [dbcPath]);
+
+  const changePoi = (id, key, value) => setPois(rows => rows.map(row => row.id === id ? { ...row, [key]: value } : row));
+  const changePoint = (id, index, key, value) => setPois(rows => rows.map(row => row.id === id ? { ...row, points: row.points.map((point, i) => i === index ? { ...point, [key]: value } : point) } : row));
+  const addPoi = () => setPois(rows => [...rows, { id: rows.length ? Math.max(...rows.map(row => Number(row.id))) + 1 : 0, ObjectiveIndex: -1, MapID: 1, WorldMapAreaId: 0, Floor: 0, Priority: 0, Flags: 0, points: [{ X: 0, Y: 0 }] }]);
+  const findSpawns = async id => {
+    const term = (spawnSearch[id] || '').trim();
+    if (term.length < 2) return setMessage('Enter at least two characters or a numeric GUID.');
+    const numeric = /^\d+$/.test(term);
+    const result = await query(`SELECT c.guid, c.map, c.position_x, c.position_y, ct.name FROM creature c JOIN creature_template ct ON ct.entry = c.id1 WHERE ${numeric ? 'c.guid = ?' : 'ct.name LIKE ?'} ORDER BY ct.name, c.guid LIMIT 100`, [numeric ? Number(term) : `%${term}%`]);
+    if (!result.success) return setMessage(`Spawn search failed: ${result.error}`);
+    setSpawnChoices(prev => ({ ...prev, [id]: result.data || [] }));
+    if (!(result.data || []).length) setMessage('No matching world spawns found.');
+  };
+  const refreshFromSpawn = async (id, append = false) => {
+    const guid = pois.find(poi => String(poi.id) === String(id))?.spawnGuid;
+    if (!guid) return setMessage('Enter a Spawn GUID first.');
+    const result = await query('SELECT map, position_x, position_y FROM creature WHERE guid = ? LIMIT 1', [Number(guid)]);
+    const spawn = result.data?.[0];
+    if (!result.success || !spawn) return setMessage(result.error || `Spawn GUID ${guid} was not found.`);
+    const matching = areas.filter(area => Number(area.mapId) === Number(spawn.map) && Number(spawn.position_x) >= Math.min(area.locTop, area.locBottom) && Number(spawn.position_x) <= Math.max(area.locTop, area.locBottom) && Number(spawn.position_y) >= Math.min(area.locLeft, area.locRight) && Number(spawn.position_y) <= Math.max(area.locLeft, area.locRight)).sort((a, b) => Math.abs((a.locTop - a.locBottom) * (a.locLeft - a.locRight)) - Math.abs((b.locTop - b.locBottom) * (b.locLeft - b.locRight)))[0];
+    setPois(rows => rows.map(row => row.id === id ? { ...row, MapID: spawn.map, WorldMapAreaId: matching?.areaId || 0, points: append ? [...row.points, { X: Math.round(spawn.position_x), Y: Math.round(spawn.position_y) }] : [{ X: Math.round(spawn.position_x), Y: Math.round(spawn.position_y) }] } : row));
+    setMessage(`Loaded coordinates from GUID ${guid}.${matching ? ` Area ${matching.internalName || matching.areaId}.` : ' Set WorldMapArea manually if needed.'}`);
+  };
+  const save = async () => {
+    setBusy(true);
+    try {
+      const run = async (sql, params) => { const r = await query(sql, params); if (!r.success) throw new Error(r.error); };
+      await run('DELETE FROM quest_poi_points WHERE QuestID = ?', [questId]);
+      await run('DELETE FROM quest_poi WHERE QuestID = ?', [questId]);
+      for (const poi of pois) {
+        await run('INSERT INTO quest_poi (QuestID, id, ObjectiveIndex, MapID, WorldMapAreaId, Floor, Priority, Flags, VerifiedBuild) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)', [questId, Number(poi.id), Number(poi.ObjectiveIndex), Number(poi.MapID), Number(poi.WorldMapAreaId), Number(poi.Floor), Number(poi.Priority), Number(poi.Flags), 0]);
+        for (const [index, point] of poi.points.entries()) await run('INSERT INTO quest_poi_points (QuestID, Idx1, Idx2, X, Y, VerifiedBuild) VALUES (?, ?, ?, ?, ?, ?)', [questId, Number(poi.id), index, Math.round(Number(point.X)), Math.round(Number(point.Y)), 0]);
+      }
+      if (soapConfig?.user) await soapCommand('.reload quest_poi');
+      setMessage(soapConfig?.user ? 'Saved and reloaded quest POIs. Restart WoW and clear cache if its map still shows old data.' : 'Saved POIs. Run .reload quest_poi, then restart WoW and clear cache if needed.');
+      load();
+    } catch (error) { setMessage(`Save failed: ${error.message}`); }
+    setBusy(false);
+  };
+  if (!questId) return null;
+  return <section style={{ marginTop: '24px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+    <H5>World Map POIs</H5><p style={{ margin: '0 0 10px', color: 'var(--text-muted)', fontSize: '11px' }}>Objective index -1 is the quest turn-in. Use as marker replaces a point; Add to area appends the selected spawn as another polygon point.</p>
+    {pois.map(poi => <div key={poi.id} style={{ marginBottom: '12px', padding: '12px', border: '1px solid var(--border)', borderRadius: '6px', background: 'var(--bg-panel)' }}>
+      <div style={{ display: 'flex', gap: '8px', alignItems: 'end', flexWrap: 'wrap' }}>
+        {[['POI ID','id'],['Objective index','ObjectiveIndex'],['Map ID','MapID'],['World map area','WorldMapAreaId']].map(([label,key]) => <FG key={key} label={label} style={{ margin: 0 }}><input type="number" value={poi[key] ?? 0} onChange={e => changePoi(poi.id, key, e.target.value)} /></FG>)}
+        <FG label="Find spawn" style={{ margin: 0 }}><input type="text" placeholder="NPC name or GUID" value={spawnSearch[poi.id] ?? ''} onChange={e => setSpawnSearch(prev => ({ ...prev, [poi.id]: e.target.value }))} /></FG><button type="button" className="btn-ghost" onClick={() => findSpawns(poi.id)}>Find spawns</button>{(spawnChoices[poi.id] || []).length > 0 && <FG label="Select spawn" style={{ margin: 0 }}><select value={poi.spawnGuid ?? ''} onChange={e => changePoi(poi.id, 'spawnGuid', e.target.value)}><option value="">Choose GUID...</option>{spawnChoices[poi.id].map(spawn => <option key={spawn.guid} value={spawn.guid}>{spawn.name} - GUID {spawn.guid} - map {spawn.map}</option>)}</select></FG>}<button type="button" className="btn-ghost" onClick={() => refreshFromSpawn(poi.id)}>Use as marker</button><button type="button" className="btn-ghost" onClick={() => refreshFromSpawn(poi.id, true)}>Add to area</button><button type="button" className="btn-ghost" onClick={() => setPois(rows => rows.filter(row => row.id !== poi.id))}>Remove POI</button>
+      </div>
+      {poi.points.map((point, index) => <div key={index} style={{ display: 'flex', gap: '8px', alignItems: 'end', marginTop: '8px' }}><FG label={`Point ${index + 1} X`} style={{ margin: 0 }}><input type="number" value={point.X ?? 0} onChange={e => changePoint(poi.id, index, 'X', e.target.value)} /></FG><FG label="Y" style={{ margin: 0 }}><input type="number" value={point.Y ?? 0} onChange={e => changePoint(poi.id, index, 'Y', e.target.value)} /></FG><button type="button" className="btn-ghost" disabled={poi.points.length === 1} onClick={() => changePoi(poi.id, 'points', poi.points.filter((_, i) => i !== index))}>Remove point</button></div>)}
+      <button type="button" className="btn-ghost" style={{ marginTop: '8px' }} onClick={() => changePoi(poi.id, 'points', [...poi.points, { X: 0, Y: 0 }])}>Add area point</button>
+    </div>)}
+    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><button type="button" className="btn-ghost" onClick={addPoi}>Add POI</button><button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save World Map POIs'}</button><span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{message}</span></div>
+  </section>;
+}
+function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeField, setActiveField, lookupEpoch, poiProps }) {
   const [expandedFlags, setExpandedFlags] = useState(false);
   const [tab, setTab] = useState('General');
 
@@ -608,10 +683,10 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
           {npcgoField('RequiredNpcOrGo4', 'NPC/GO 4', 'RequiredNpcOrGoCount4')}
 
           <H5>Required Items</H5>
-          {[1,2,3,4,5,6].map(i => itemField(`RequiredItemId${i}`, `Item ${i}`, `RequiredItemCount${i}`))}
+          {[1,2,3,4,5,6].map(i => <React.Fragment key={i}>{itemField(`RequiredItemId${i}`, `Item ${i}`, `RequiredItemCount${i}`)}</React.Fragment>)}
 
           <H5>Item Drops (provided to player during quest)</H5>
-          {[1,2,3,4].map(i => itemField(`ItemDrop${i}`, `Drop ${i}`, `ItemDropQuantity${i}`))}
+          {[1,2,3,4].map(i => <React.Fragment key={i}>{itemField(`ItemDrop${i}`, `Drop ${i}`, `ItemDropQuantity${i}`)}</React.Fragment>)}
 
           <H5>Faction Requirements</H5>
           <div className="quest-faction-grid">
@@ -674,10 +749,10 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
           </div>
 
           <H5>Reward Items (guaranteed)</H5>
-          {[1,2,3,4].map(i => itemField(`RewardItem${i}`, `Item ${i}`, `RewardAmount${i}`))}
+          {[1,2,3,4].map(i => <React.Fragment key={i}>{itemField(`RewardItem${i}`, `Item ${i}`, `RewardAmount${i}`)}</React.Fragment>)}
 
           <H5>Reward Choice Items</H5>
-          {[1,2,3,4,5,6].map(i => itemField(`RewardChoiceItemID${i}`, `Choice ${i}`, `RewardChoiceItemQuantity${i}`))}
+          {[1,2,3,4,5,6].map(i => <React.Fragment key={i}>{itemField(`RewardChoiceItemID${i}`, `Choice ${i}`, `RewardChoiceItemQuantity${i}`)}</React.Fragment>)}
 
           <H5>Faction Rewards</H5>
           {[1,2,3,4,5].map(i => (
@@ -749,6 +824,7 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
             <FG label="POI Y"><input type="number" step="0.01" value={form.POIy ?? 0} onChange={e => onChange('POIy', e.target.value)} onFocus={() => setActiveField?.('POIy')} onWheel={e => e.target.blur()} className={fieldInputClass('POIy')} /></FG>
             <FG label="POI Priority">{num('POIPriority')}</FG>
           </div>
+          {poiProps && <QuestPoiEditor questId={form.ID} query={query} {...poiProps} />}
         </div>
       )}
     </>
@@ -870,7 +946,7 @@ function QuestFilters({ filters, setFilters }) {
 
 // â”€â”€ QuestEditorPage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function QuestEditorPage() {
-  const { query, soapCommand, soapConfig, findNextId, idRanges, runAtomicWrite } = useConnection();
+  const { query, soapCommand, soapConfig, findNextId, idRanges, runAtomicWrite, dbcPath } = useConnection();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' });
   const [quests, setQuests] = useState([]);
@@ -1221,7 +1297,7 @@ export default function QuestEditorPage() {
                   </div>
                 </div>
                 {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
-                <QuestFormFields form={form} baseline={editBaseline} onChange={handleChange} query={query} onNavigate={selectQuest} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} />
+                <QuestFormFields form={form} baseline={editBaseline} onChange={handleChange} query={query} onNavigate={selectQuest} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} poiProps={{ dbcPath, soapConfig, soapCommand }} />
               </>
             )
           )}

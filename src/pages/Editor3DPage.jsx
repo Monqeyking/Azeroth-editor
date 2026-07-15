@@ -52,7 +52,6 @@ export default function Editor3DPage() {
   const [loading,    setLoading]    = useState(false);
   const [terrain,    setTerrain]    = useState(null);
   const [tileTextures, setTileTextures] = useState({});
-  const [texturesEnabled, setTexturesEnabled] = useState(true); // debug toggle: 't' = texture aan/uit (isoleert geometry/lighting van texture-bugs)
 
   const [error,      setError]      = useState(null);
   const [focusTick,  setFocusTick]  = useState(0);
@@ -61,7 +60,6 @@ export default function Editor3DPage() {
   const worldLoadTimeoutRef = useRef(null);
   const camPosRef = useRef({ wx: 0, wy: 0 });
   const invalidateRef = useRef(null);
-  const [debugInfo, setDebugInfo] = useState({ batchMs: 0, tilesLoaded: 0, texLoaded: 0, inFlight: false });
 
   useEffect(() => {
     let cancelled = false;
@@ -87,11 +85,6 @@ export default function Editor3DPage() {
           const wy = res.data.reduce((s, sp) => s + sp.y, 0) / n;
           camPosRef.current = { wx, wy };
           invalidateRef.current?.();
-          // Debug: log eerste 5 spawns met hun hoogte
-          const sample = res.data.slice(0, 5);
-          console.log('[spawns] hoogte sample (WoW Z = Three.js Y):',
-            sample.map(s => `${s.name ?? s.guid} z=${s.z?.toFixed(1)}`).join(', '));
-          console.log('[spawns] centroid:', { wx: wx.toFixed(1), wy: wy.toFixed(1) });
         }
 
         // Terrein wordt gestreamd rond de camera (zie streaming-effect hieronder)
@@ -165,8 +158,6 @@ export default function Editor3DPage() {
       batch.forEach(t => loaded.add(`${t.tileX}_${t.tileY}`));
 
       terrainInFlight = true;
-      setDebugInfo(p => ({ ...p, inFlight: true }));
-      const t0 = performance.now();
       try {
         const tr = await window.azeroth.adt.getTerrain({ mapName, tiles: batch });
         if (disposed) return;
@@ -218,11 +209,8 @@ export default function Editor3DPage() {
 
         // Voeg toe aan texture queue (in batches van TEX_BATCH verwerkt door tickTexture)
         for (const { tileX, tileY } of tileBatch) texQueue.push({ tileX, tileY, evicted });
-        setDebugInfo(p => ({ ...p, tilesLoaded: p.tilesLoaded + tileBatch.length }));
-        console.log(`[terrain] batch ${tileBatch.length} tiles in ${(performance.now()-t0).toFixed(0)}ms`);
       } finally {
         terrainInFlight = false;
-        setDebugInfo(p => ({ ...p, inFlight: textureInFlight }));
       }
     }
 
@@ -233,12 +221,8 @@ export default function Editor3DPage() {
       const tileBatch = items.map(({ tileX, tileY }) => ({ tileX, tileY }));
 
       textureInFlight = true;
-      setDebugInfo(p => ({ ...p, inFlight: true }));
-      const t0 = performance.now();
       try {
         const tex = await window.azeroth.adt.getTextureLayers({ mapName, tiles: tileBatch });
-        const elapsed = performance.now() - t0;
-        console.log(`[texture] ${tileBatch.length} tiles palette geladen in ${elapsed.toFixed(0)}ms`);
         if (!disposed && tex.success && tex.data.length) {
           setTileTextures(prev => {
             const next = { ...prev };
@@ -248,11 +232,9 @@ export default function Editor3DPage() {
             return next;
           });
           invalidateRef.current?.();
-          setDebugInfo(p => ({ ...p, texLoaded: p.texLoaded + tex.data.length, batchMs: Math.round(elapsed) }));
         }
       } finally {
         textureInFlight = false;
-        setDebugInfo(p => ({ ...p, inFlight: terrainInFlight }));
       }
     }
 
@@ -279,9 +261,6 @@ export default function Editor3DPage() {
         setFocusTick(t => t + 1);
       }
       if (e.key === 'Escape') setSelectedId(null);
-      if (key === 't' && !e.ctrlKey && !e.metaKey) {
-        setTexturesEnabled(v => { console.log(`[debug] textures ${!v ? 'AAN' : 'UIT'}`); return !v; });
-      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -431,9 +410,6 @@ export default function Editor3DPage() {
       />
 
       {error && <div className="ed3-error-bar">Fout: {error}</div>}
-      <div style={{position:'absolute',top:40,right:8,zIndex:999,background:'rgba(0,0,0,.65)',color:'#9f9',fontFamily:'monospace',fontSize:11,padding:'4px 8px',borderRadius:4,pointerEvents:'none',lineHeight:1.6}}>
-        tiles: {debugInfo.tilesLoaded} | tex: {debugInfo.texLoaded} | last: {debugInfo.batchMs}ms{debugInfo.inFlight ? ' ⏳' : ''}
-      </div>
 
       <div className="ed3-workspace">
         <Editor3DHierarchy
@@ -458,7 +434,7 @@ export default function Editor3DPage() {
               activeTool={activeTool}
               onTransform={handleTransform}
               terrain={terrain}
-              tileTextures={texturesEnabled ? tileTextures : {}}
+              tileTextures={tileTextures}
               wdl={null}
               initialTarget={spawnCenter}
               resetKeys={resetKeys}
