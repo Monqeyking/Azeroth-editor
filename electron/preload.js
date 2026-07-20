@@ -54,6 +54,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
     appendCharStartOutfit: (dbcPath, rows) => ipcRenderer.invoke('dbc:appendCharStartOutfit', dbcPath, rows),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
+    readCharSectionsTestOutput: () => ipcRenderer.invoke('dbc:readCharSectionsTestOutput'),
     readCreatureDisplayCreator: (dbcPath) => ipcRenderer.invoke('dbc:readCreatureDisplayCreator', dbcPath),
     findNextCreatureDisplayId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextCreatureDisplayId', dbcPath, startId),
     createCreatureDisplay: (dbcPath, payload) => ipcRenderer.invoke('dbc:createCreatureDisplay', dbcPath, payload),
@@ -63,6 +64,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeCharSections: (dbcPath, records, stageOnly = false) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records, stageOnly),
     readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
     readBlpFile: (filePath) => ipcRenderer.invoke('dbc:readBlpFile', filePath),
+    readOutputBlpTexture: (blpPath) => ipcRenderer.invoke('dbc:readOutputBlpTexture', blpPath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
     writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false) =>
       ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput),

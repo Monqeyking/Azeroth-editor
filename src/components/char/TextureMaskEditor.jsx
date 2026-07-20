@@ -104,7 +104,10 @@ function hexToHsl(hex) {
   return rgbToHsl((v >> 16) & 255, (v >> 8) & 255, v & 255);
 }
 
-export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null, initialTargetFlags = 17, race, gender, characterRecords = [], colorIndex = 0, onClose, onSaved }) {
+const rgbDistance = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
+const hslToHex = (h, s, l) => `#${hslToRgb(h, s, l).map(value => value.toString(16).padStart(2, '0')).join('')}`;
+
+export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null, texturePartType = null, textureParts = [], onSelectTexturePart, initialTargetFlags = 17, race, gender, characterRecords = [], colorIndex = 0, preferOutput = false, onClose, onSaved }) {
   const canvasRef    = useRef(null); // toont het resultaat (basis + recolor binnen masker)
   const protectionOverlayRef = useRef(null);
   const baseRef       = useRef(null); // ImageData van de ongewijzigde texture
@@ -117,11 +120,13 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const panDragRef     = useRef(null);
   const canvasWrapRef = useRef(null);
   const templateBaseRef = useRef(null);
+  const skinSourceRef = useRef(null);
   const historyRef = useRef([]);
   const redoRef = useRef([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError]     = useState(null);
+  const [textureSize, setTextureSize] = useState(null);
   const [importedBlpPath, setImportedBlpPath] = useState(null);
   const [saving, setSaving]   = useState(false);
   const [saveError, setSaveError] = useState(null);
@@ -132,6 +137,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const [tool, setTool]             = useState('paint');
   const [targetColor, setTargetColor] = useState('#ff66cc');
   const [strength, setStrength]     = useState(1); // hoeveel van de doelkleur t.o.v. origineel (hue/sat mix)
+  const [maskRevision, setMaskRevision] = useState(0);
+  const [skinTransferProfile, setSkinTransferProfile] = useState(null);
   const [targetSetFlags, setTargetSetFlags] = useState(initialTargetFlags === 5 ? 5 : 17);
   const [semanticAnalysis, setSemanticAnalysis] = useState(null);
   const [semanticMasks, setSemanticMasks] = useState(null);
@@ -168,6 +175,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const mappingDragRef = useRef(null);
 
   const previewFaces = useMemo(() => characterRecords.filter(row => row.race === race && row.sex === gender && row.baseSection === 1 && row.colorIndex === colorIndex), [characterRecords, race, gender, colorIndex]);
+  const previewSkin = useMemo(() => characterRecords.find(row => row.race === race && row.sex === gender && row.baseSection === 0 && row.colorIndex === colorIndex) || null, [characterRecords, race, gender, colorIndex]);
   const previewHairs = useMemo(() => characterRecords.filter(row => row.race === race && row.sex === gender && row.baseSection === 3 && row.tex1), [characterRecords, race, gender]);
   const previewFace = previewFaces.find(row => String(row.id) === previewFaceId) || previewFaces[0] || null;
   const previewHair = previewHairs.find(row => String(row.id) === previewHairId) || previewHairs[0] || null;
@@ -208,12 +216,19 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setSemanticAnalysis(null);
+    setSemanticMasks(null);
     setCommittedPasses([]);
     historyRef.current = []; redoRef.current = [];
     const loadPath = importedBlpPath || blpPath;
+    // In Test output mode an already exported colour set is the editable
+    // source. This makes a second editor session continue from the saved Skin
+    // instead of silently reopening the untouched client BLP.
     const readTexture = importedBlpPath
       ? window.azeroth.dbc.readBlpFile(importedBlpPath)
-      : window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
+      : preferOutput && window.azeroth.dbc.readOutputBlpTexture
+        ? window.azeroth.dbc.readOutputBlpTexture(blpPath).then(result => result?.success ? result : window.azeroth.dbc.readBlpTexture(dataPath, blpPath))
+        : window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
     readTexture.then(res => {
       if (cancelled) return;
       if (!res?.success) { setError(res?.error || 'Texture kon niet geladen worden'); setLoading(false); return; }
@@ -228,7 +243,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
         baseRef.current = ctx.getImageData(0, 0, img.width, img.height);
         originalBaseRef.current = new ImageData(new Uint8ClampedArray(baseRef.current.data), img.width, img.height);
         recoveryOriginalRef.current = null;
-        if (importedBlpPath) {
+        if (importedBlpPath || preferOutput) {
           const original = await window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
           if (cancelled) return;
           if (original?.success && original.png) {
@@ -240,7 +255,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
         }
         strengthRef.current = new Float32Array(img.width * img.height);
         dimsRef.current = { w: img.width, h: img.height };
-        const analysis = textureClassifier.classify({ path: loadPath, width: img.width, height: img.height, rgba: new Uint8Array(baseRef.current.data) });
+        setTextureSize({ width: img.width, height: img.height });
+        const analysis = textureClassifier.classify({ path: loadPath, width: img.width, height: img.height, rgba: new Uint8Array(baseRef.current.data), textureType: texturePartType });
         const saved = analysis.template ? templateCorrectionStore.list(analysis.template.id, analysis.template.version).find(c => c.width === img.width && c.height === img.height && c.protectedMask) : null;
         const savedPolygons = saved?.polygonOverrides || {}, savedCustomPolygons = saved?.customPolygons || [], savedLabels = saved?.labelOverrides || {};
         templateBaseRef.current = analysis.template;
@@ -267,7 +283,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
       img.src = `data:image/png;base64,${res.png}`;
     }).catch(e => { if (!cancelled) { setError(e.message); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [dataPath, blpPath, importedBlpPath]);
+  }, [dataPath, blpPath, importedBlpPath, texturePartType]);
 
   const openExportedBlp = async () => {
     const filePath = await window.azeroth.dialog.openFile({ title: 'Open exported BLP', filters: [{ name: 'BLP textures', extensions: ['blp'] }] });
@@ -338,7 +354,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     }
   }, [targetColor, strength, respectProtection, showProtection, showComponentMappings, componentMappings, semanticAnalysis, polygonVisibility, selectedVertex]);
 
-  useEffect(() => { if (!loading && !error) repaint(); }, [loading, error, repaint]);
+  useEffect(() => { if (!loading && !error) repaint(); }, [loading, error, repaint, maskRevision]);
 
   const pushHistory = useCallback(() => {
     if (!strengthRef.current || !protectedRef.current) return;
@@ -598,6 +614,95 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     repaint();
   };
 
+  const deriveSkinTransferProfile = (current = baseRef.current, sourceProtection = protectedRef.current, baseline = recoveryOriginalRef.current) => {
+    if (!current) return null;
+    const canCompare = baseline?.width === current.width && baseline?.height === current.height;
+    let hueX = 0, hueY = 0, saturation = 0, lightness = 0, weightTotal = 0, samples = 0;
+
+    for (let i = 0; i < current.width * current.height; i++) {
+      const offset = i * 4;
+      if (current.data[offset + 3] <= 12 || sourceProtection?.[i]) continue;
+      const rgb = [current.data[offset], current.data[offset + 1], current.data[offset + 2]];
+      const originalRgb = canCompare ? [baseline.data[offset], baseline.data[offset + 1], baseline.data[offset + 2]] : null;
+      // When the original client BLP is available, use only genuinely changed
+      // pixels. A custom colour-index may exist only in output, in which case
+      // sampling the editable Skin remains a deterministic fallback.
+      if (originalRgb && rgbDistance(rgb, originalRgb) < 28) continue;
+      const [h, s, l] = rgbToHsl(...rgb);
+      if (s < .08 || l < .06 || l > .94) continue;
+      const weight = s * (.35 + Math.abs(l - .5));
+      hueX += Math.cos(h * Math.PI / 180) * weight;
+      hueY += Math.sin(h * Math.PI / 180) * weight;
+      saturation += s * weight;
+      lightness += l * weight;
+      weightTotal += weight;
+      samples++;
+    }
+    if (!weightTotal || samples < 32) return null;
+    const hue = (Math.atan2(hueY, hueX) * 180 / Math.PI + 360) % 360;
+    return {
+      targetColor: hslToHex(hue, saturation / weightTotal, lightness / weightTotal),
+      strength: 1,
+      source: canCompare ? 'saved Skin delta' : 'saved Skin sampling',
+      samples,
+    };
+  };
+
+  const selectTexturePart = (path) => {
+    if (texturePartType === 'skin-atlas' && strengthRef.current?.some(value => value > 0)) {
+      // The profile is intentionally colour/luminance based rather than a UV
+      // copy: Skin Extra has a different layout, but should inherit the same
+      // hue, saturation and strength while preserving its own shading.
+      const profile = { targetColor, strength, source: 'active paint' };
+      setSkinTransferProfile(profile);
+    } else if (texturePartType === 'skin-atlas') {
+      const canvas = canvasRef.current;
+      const current = canvas ? canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height) : baseRef.current;
+      const sourceProtection = protectedRef.current ? Uint8Array.from(protectedRef.current) : null;
+      const baseline = recoveryOriginalRef.current ? new ImageData(new Uint8ClampedArray(recoveryOriginalRef.current.data), recoveryOriginalRef.current.width, recoveryOriginalRef.current.height) : null;
+      skinSourceRef.current = { image: current, protectedMask: sourceProtection, baseline };
+      setSkinTransferProfile(deriveSkinTransferProfile(current, sourceProtection, baseline));
+    }
+    // Mark the old canvas as loading before the parent swaps BLP props. This
+    // prevents the pending profile from being applied to the previous Skin.
+    setLoading(true);
+    onSelectTexturePart?.(path);
+  };
+
+  const loadLinkedSkinProfile = async () => {
+    const skinPath = textureParts.find(part => part.path !== blpPath && /skin atlas/i.test(part.label))?.path || textureParts.find(part => /skin atlas/i.test(part.label))?.path;
+    if (!skinPath) return null;
+    const output = preferOutput && window.azeroth?.dbc?.readOutputBlpTexture
+      ? await window.azeroth.dbc.readOutputBlpTexture(skinPath)
+      : null;
+    const result = output?.success ? output : await window.azeroth.dbc.readBlpTexture(dataPath, skinPath);
+    if (!result?.success || !result.png) return null;
+    const image = await pngToImageData(result.png);
+    const analysis = textureClassifier.classify({ path: skinPath, width: image.width, height: image.height, rgba: new Uint8Array(image.data), textureType: 'skin-atlas' });
+    const resolved = analysis.template ? semanticMaskResolver.resolve({ template: analysis.template, rgba: new Uint8Array(image.data), width: image.width, height: image.height }) : null;
+    const source = { image, protectedMask: resolved?.protectedMask || null, baseline: null };
+    skinSourceRef.current = source;
+    return deriveSkinTransferProfile(source.image, source.protectedMask, source.baseline);
+  };
+
+  const applySkinColourTransfer = async () => {
+    const source = skinSourceRef.current;
+    const profile = skinTransferProfile || deriveSkinTransferProfile(source?.image, source?.protectedMask, source?.baseline) || await loadLinkedSkinProfile();
+    if (!profile || !baseRef.current || !strengthRef.current) {
+      setTemplateSaveMsg('Could not analyse the linked Skin atlas. Check that Test output only is enabled and the saved Skin BLP exists.');
+      return;
+    }
+    setSkinTransferProfile(profile);
+    pushHistory();
+    setTargetColor(profile.targetColor);
+    setStrength(profile.strength);
+    const base = baseRef.current, mask = strengthRef.current, protectedMask = protectedRef.current;
+    for (let i = 0; i < mask.length; i++) {
+      mask[i] = base.data[i * 4 + 3] > 12 && !(respectProtection && protectedMask?.[i]) ? 1 : 0;
+    }
+    setMaskRevision(value => value + 1);
+  };
+
   const changeTargetColor = nextColor => {
     if (nextColor === targetColor || !canvasRef.current || !baseRef.current || !strengthRef.current) { setTargetColor(nextColor); return; }
     // Flatten the current colour pass into the temporary working base before a
@@ -709,8 +814,15 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
           <div className="tme-workspace" style={{ display: (loading || error) ? 'none' : 'grid' }}>
             <aside className="tme-left-panel">
               <h4>Layers</h4>
+              {textureParts.length > 1 && <label className="tme-field">
+                Texture part
+                <select value={blpPath} onChange={e => selectTexturePart(e.target.value)}>
+                  {textureParts.map(part => <option key={part.path} value={part.path}>{part.label}</option>)}
+                </select>
+                <span className="tme-part-hint">Atlas components are projected from Skin. Independent BLPs open on their own canvas.</span>
+              </label>}
               {semanticAnalysis && <>
-                <div className="tme-analysis"><strong>Semantic analysis: {semanticAnalysis.status === 'ready' ? 'ready' : semanticAnalysis.status === 'review' ? 'review' : 'manual'}</strong><span>{Math.round(semanticAnalysis.confidence.total * 100)}% · {semanticAnalysis.template?.id || 'no template'}</span>{reusedCorrection && <span>Saved correction applied</span>}</div>
+                <div className="tme-analysis"><strong>Semantic analysis: {semanticAnalysis.status === 'ready' ? 'ready' : semanticAnalysis.status === 'review' ? 'review' : 'manual'}</strong><span>{Math.round((semanticAnalysis.confidence?.total ?? 0) * 100)}% · {semanticAnalysis.template?.id || 'no template'}</span>{reusedCorrection && <span>Saved correction applied</span>}</div>
                 {semanticAnalysis?.template?.match?.textureType === 'skin-atlas' && <details className="tme-collapsible"><summary>Component mappings</summary><select value={mappingComponent} onChange={e => setMappingComponent(e.target.value)}>{Object.keys(componentMappings).map(name => <option key={name}>{name}</option>)}</select>{['x','y','width','height'].map(key => <label className="tme-field" key={key}>{key}<input type="number" min="0" max="1" step="0.005" value={componentMappings[mappingComponent]?.[key] ?? 0} onChange={e => setComponentMappings(current => ({ ...current, [mappingComponent]: { ...current[mappingComponent], [key]: Math.max(0, Math.min(1, Number(e.target.value) || 0)) } }))} /></label>)}<button className="tme-tool-btn" onClick={() => { componentMappingStore.save(semanticAnalysis.template.id, componentMappings); setTemplateSaveMsg('Component mappings saved for this atlas layout.'); }}>Save component mappings</button></details>}
                 {(semanticAnalysis.template?.regions || []).some(region => region.polygon) && <details className="tme-collapsible"><summary>Protection layers</summary><select value={polygonSemantic} onChange={e => setPolygonSemantic(e.target.value)}>{semanticAnalysis.template.regions.filter(region => region.polygon).map(region => <option key={region.semantic} value={region.semantic}>{region.label || region.semantic.replace('-candidate', '')}</option>)}</select><button className={`tme-tool-btn ${polygonEdit ? 'active' : ''}`} onClick={() => setPolygonEdit(value => !value)}>{polygonEdit ? 'Finish polygon' : 'Edit polygon'}</button><div className="tme-tool-row"><button className="tme-tool-btn" onClick={addCustomPolygon}>New region</button>{customPolygons.some(item => item.semantic === polygonSemantic) && <button className="tme-tool-btn" onClick={removeCustomPolygon}>Remove region</button>}</div><div className="tme-polygon-layers">{semanticAnalysis.template.regions.filter(region => region.polygon).map(region => <label key={region.semantic}><input type="checkbox" checked={polygonVisibility[region.semantic] !== false} onChange={e => setPolygonVisibility(current => ({ ...current, [region.semantic]: e.target.checked }))} /><span style={{ background: '#1ebeff' }} />{region.label || region.semantic.replace('-candidate', '')}</label>)}</div>{polygonEdit && <span className="tme-polygon-hint">Drag a vertex to move it · drag inside the polygon to move the layer · click a line to add a vertex.</span>}<div className="tme-tool-row"><button className="tme-tool-btn" onClick={copyTemplateJson}>Copy JSON</button><button className="tme-tool-btn" onClick={pasteTemplateJson}>Paste JSON</button></div></details>}
               </>}
@@ -718,14 +830,14 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 {templateSaveMsg && <div className="tme-template-ok">{templateSaveMsg}</div>}
             </aside>
             <div ref={canvasWrapRef} className="tme-canvas-wrap">
-              <div className={`tme-canvas-stack ${polygonEdit ? 'polygon-editing' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><canvas ref={canvasRef} className="tme-canvas" onContextMenu={e => e.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} /><canvas ref={protectionOverlayRef} className="tme-protection-overlay" />{brushCursor && !polygonEdit && <div className={`tme-brush-cursor ${tool}${brushSoft ? ' soft' : ''}`} style={{ left: `${brushCursor.left}%`, top: `${brushCursor.top}%`, width: `${brushCursor.width}%`, height: `${brushCursor.height}%` }}><span>{brushSize}px</span></div>}</div><div className="tme-canvas-status"><span>{tool}</span><span>{targetColor}</span><span>{brushSize}px</span>{mappingEdit && <span>Moving {mappingComponent}</span>}</div>
+              <div className={`tme-canvas-stack ${polygonEdit ? 'polygon-editing' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><canvas ref={canvasRef} className="tme-canvas" onContextMenu={e => e.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} /><canvas ref={protectionOverlayRef} className="tme-protection-overlay" />{brushCursor && !polygonEdit && <div className={`tme-brush-cursor ${tool}${brushSoft ? ' soft' : ''}`} style={{ left: `${brushCursor.left}%`, top: `${brushCursor.top}%`, width: `${brushCursor.width}%`, height: `${brushCursor.height}%` }} />}</div><div className="tme-canvas-status"><span>{tool}</span><span>{targetColor}</span><span>{brushSize}px</span>{textureSize && <span>{textureSize.width} × {textureSize.height}px</span>}{mappingEdit && <span>Moving {mappingComponent}</span>}</div>
             </div>
 
             <div className="tme-controls">
               {semanticAnalysis && (
                 <div className="tme-semantic-controls">
                   <strong>Semantic analysis: {semanticAnalysis.status === 'ready' ? 'ready' : semanticAnalysis.status === 'review' ? 'review' : 'manual'}</strong>
-                  <span> {Math.round(semanticAnalysis.confidence.total * 100)}% · {semanticAnalysis.template?.id || 'geen template'}</span>
+                  <span> {Math.round((semanticAnalysis.confidence?.total ?? 0) * 100)}% · {semanticAnalysis.template?.id || 'geen template'}</span>
                   {reusedCorrection && <span> · opgeslagen correctie toegepast</span>}
                   {semanticOptions.length > 0 && <>
                     <select value={semanticRegion} onChange={e => setSemanticRegion(e.target.value)}>
@@ -757,6 +869,12 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                   <RotateCcw size={14} /> Reset
                 </button>
               </div>
+
+              {texturePartType === 'skin-extra' && <button className="tme-tool-btn" onClick={applySkinColourTransfer} title="Load the linked saved Skin atlas, analyse its colour, and apply it to Skin Extra while preserving Skin Extra shading">
+                Analyse & apply Skin colour
+              </button>}
+              {texturePartType === 'skin-extra' && skinTransferProfile && <span className="tme-viewport-hint">Profile: {skinTransferProfile.source}{skinTransferProfile.samples ? ` (${skinTransferProfile.samples} pixels)` : ''}</span>}
+              {texturePartType === 'skin-extra' && !skinTransferProfile && skinSourceRef.current && <span className="tme-viewport-hint">No reliable Skin colour was found yet. You can still run the analysis.</span>}
 
               <div className="tme-tool-row">
                 <button className="tme-tool-btn" onClick={() => setZoom(value => Math.max(.5, Number((value - .25).toFixed(2))))}><ZoomOut size={14} /> Uitzoomen</button>
@@ -819,7 +937,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
               </button>
             </div>
           </div>
-          {activeTab === 'preview' && <div className="tme-model-preview"><div className="tme-preview-controls">{previewFaces.length > 0 && <label>Face<select value={previewFaceId} onChange={e => setPreviewFaceId(e.target.value)}>{previewFaces.map(row => <option key={row.id} value={row.id}>Face {row.variationIndex}</option>)}</select></label>}{previewHairs.length > 0 && <label>Hair<select value={previewHairId} onChange={e => setPreviewHairId(e.target.value)}><option value="">None</option>{previewHairs.map(row => <option key={row.id} value={row.id}>Style {row.variationIndex} / colour {row.colorIndex}</option>)}</select></label>}</div>{previewRgba ? <CharM2Viewer race={race} gender={gender} skinBlp={blpPath} skinRgba={previewRgba} componentTransfer={previewTransfer} appearance={{ face: previewFace?.variationIndex || 0, hairStyle: previewHair?.variationIndex || 0, hairColor: previewHair?.colorIndex || 0 }} textureLayers={[...(previewFace ? [{ path: previewFace.tex1, region: 'face-lower' }, { path: previewFace.tex2, region: 'face-upper' }] : []), ...(previewHair ? [{ path: previewHair.tex1, region: 'hair-primary' }] : [])]} active={!!dataPath} /> : <span>Open the preview after the texture has loaded.</span>}</div>}
+          {activeTab === 'preview' && <div className="tme-model-preview"><div className="tme-preview-controls">{previewFaces.length > 0 && <label>Face<select value={previewFaceId} onChange={e => setPreviewFaceId(e.target.value)}>{previewFaces.map(row => <option key={row.id} value={row.id}>Face {row.variationIndex}</option>)}</select></label>}{previewHairs.length > 0 && <label>Hair<select value={previewHairId} onChange={e => setPreviewHairId(e.target.value)}><option value="">None</option>{previewHairs.map(row => <option key={row.id} value={row.id}>Style {row.variationIndex} / colour {row.colorIndex}</option>)}</select></label>}</div>{previewRgba ? <CharM2Viewer race={race} gender={gender} skinBlp={previewSkin?.tex1 || blpPath} skinExtraBlp={previewSkin?.tex2 || null} skinRgba={texturePartType === 'skin-atlas' ? previewRgba : null} skinExtraRgba={texturePartType === 'skin-extra' ? previewRgba : null} componentTransfer={texturePartType === 'skin-atlas' ? previewTransfer : null} appearance={{ face: previewFace?.variationIndex || 0, hairStyle: previewHair?.variationIndex || 0, hairColor: previewHair?.colorIndex || 0 }} textureLayers={[...(previewFace ? [{ path: previewFace.tex1, region: 'face-lower' }, { path: previewFace.tex2, region: 'face-upper' }] : []), ...(previewHair ? [{ path: previewHair.tex1, region: 'hair-primary' }] : [])]} preferOutput={preferOutput} active={!!dataPath} /> : <span>Open the preview after the texture has loaded.</span>}</div>}
         </div>
       </div>
     </div>

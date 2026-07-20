@@ -38,6 +38,14 @@ export const DEFAULT_ATLAS_TEMPLATES = [
       { semantic: 'uv-padding', rect: [0, 0, 1, 1], role: 'protected-background' },
     ],
   })),
+  ...['male', 'female'].map(gender => ({
+    id: `wotlk-worgen-${gender}-skin-extra-v1`, version: 1, schemaVersion: ATLAS_TEMPLATE_SCHEMA_VERSION,
+    match: { race: 'worgen', gender, textureType: 'skin-extra' }, aspectRatio: 1,
+    regions: [
+      { semantic: 'skin-extra', rect: [0, 0, 1, 1], role: 'refine', editorVisible: true, label: 'Skin extra overlay' },
+      { semantic: 'uv-padding', rect: [0, 0, 1, 1], role: 'protected-background' },
+    ],
+  })),
   {
     id: 'wotlk-character-atlas-v1', version: 1, schemaVersion: ATLAS_TEMPLATE_SCHEMA_VERSION,
     match: { race: '*', gender: '*', textureType: 'skin-atlas' }, aspectRatio: 1,
@@ -60,5 +68,10 @@ export const DEFAULT_ATLAS_TEMPLATES = [
     id: 'wotlk-character-hair-component-v1', version: 1, schemaVersion: ATLAS_TEMPLATE_SCHEMA_VERSION,
     match: { race: '*', gender: '*', textureType: 'hair-component' }, aspectRatio: 1,
     regions: [{ semantic: 'hair', rect: [0, 0, 1, 1], role: 'refine', editorVisible: true }, { semantic: 'uv-padding', rect: [0, 0, 1, 1], role: 'protected-background' }],
+  },
+  {
+    id: 'wotlk-character-skin-extra-v1', version: 1, schemaVersion: ATLAS_TEMPLATE_SCHEMA_VERSION,
+    match: { race: '*', gender: '*', textureType: 'skin-extra' }, aspectRatio: 1,
+    regions: [{ semantic: 'skin-extra', rect: [0, 0, 1, 1], role: 'refine', editorVisible: true, label: 'Skin extra overlay' }, { semantic: 'uv-padding', rect: [0, 0, 1, 1], role: 'protected-background' }],
   },
 ];

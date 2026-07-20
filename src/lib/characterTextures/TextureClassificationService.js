@@ -4,8 +4,9 @@ import { LayoutFingerprintService } from './LayoutFingerprintService.js';
 export class TextureClassificationService {
   constructor(registry, fingerprintService = new LayoutFingerprintService()) { this.registry = registry; this.fingerprintService = fingerprintService; }
 
-  classify({ path, width = 0, height = 0, rgba = null }) {
+  classify({ path, width = 0, height = 0, rgba = null, textureType = null }) {
     const parsed = parseTextureName(path);
+    if (textureType) parsed.textureType = textureType;
     const fingerprint = rgba ? this.fingerprintService.create(rgba, width, height) : null;
     const candidates = this.registry.candidates(parsed, { width, height }, fingerprint);
     const best = candidates[0] || null;

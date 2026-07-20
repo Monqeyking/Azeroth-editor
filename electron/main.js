@@ -4987,6 +4987,52 @@ ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {
   }
 });
 
+// Read the Character Customization test build only. Keeping this as a separate
+// IPC makes the staging folder explicit: it is never confused with the server
+// DBC path and is never used unless the editor asks for it.
+ipcMain.handle('dbc:readCharSectionsTestOutput', async () => {
+  try {
+    const outputRoot = path.join(__dirname, '..', 'output');
+    const filePath = path.join(outputRoot, 'DBFilesClient', 'CharSections.dbc');
+    const textureRoot = path.join(outputRoot, 'PlayerTextures');
+    const blpFiles = [];
+    const collectBlps = (dir) => {
+      if (!fs.existsSync(dir)) return;
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const absolute = path.join(dir, entry.name);
+        if (entry.isDirectory()) collectBlps(absolute);
+        else if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.blp') {
+          blpFiles.push(path.relative(textureRoot, absolute).replace(/\\/g, '\\'));
+        }
+      }
+    };
+    collectBlps(textureRoot);
+    if (!fs.existsSync(filePath)) return { success: false, missing: true, blpFiles };
+
+    const dbc = await readDbcFile(filePath);
+    if (!dbc) return { success: false, error: 'Kon test CharSections.dbc niet lezen', blpFiles };
+    const { recordCount, recordSize, dataBuffer, stringBlock } = dbc;
+    const readStr = (offset) => {
+      if (!offset) return '';
+      let end = offset;
+      while (end < stringBlock.length && stringBlock[end] !== 0) end++;
+      return stringBlock.toString('utf8', offset, end);
+    };
+    const records = [];
+    for (let i = 0; i < recordCount; i++) {
+      const b = i * recordSize;
+      records.push({
+        id: dataBuffer.readUInt32LE(b), race: dataBuffer.readUInt32LE(b + 4), sex: dataBuffer.readUInt32LE(b + 8), baseSection: dataBuffer.readUInt32LE(b + 12),
+        tex1: readStr(dataBuffer.readUInt32LE(b + 16)), tex2: readStr(dataBuffer.readUInt32LE(b + 20)), tex3: readStr(dataBuffer.readUInt32LE(b + 24)),
+        flags: dataBuffer.readUInt32LE(b + 28), variationIndex: dataBuffer.readUInt32LE(b + 32), colorIndex: dataBuffer.readUInt32LE(b + 36),
+      });
+    }
+    return { success: true, records, blpFiles, stagedPath: filePath };
+  } catch (e) {
+    return { success: false, error: e.message, blpFiles: [] };
+  }
+});
+
 ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records, stageOnly = false) => {
   try {
     const filePath = path.join(dbcPath, 'CharSections.dbc');
@@ -5104,6 +5150,23 @@ ipcMain.handle('dbc:readBlpFile', async (_, filePath) => {
     return { success: true, w: decoded.w, h: decoded.h, png: rgbaToPNG(Buffer.from(decoded.rgba), decoded.w, decoded.h).toString('base64'), path: filePath };
   } catch (e) {
     return { success: false, error: e.message, path: filePath };
+  }
+});
+
+// Explicit staged texture read for Character Customization test previews.
+// Normal client previews never consult output\PlayerTextures implicitly.
+ipcMain.handle('dbc:readOutputBlpTexture', async (_, blpPath) => {
+  try {
+    const safeRelPath = String(blpPath || '').replace(/\\/g, path.sep);
+    if (!safeRelPath || path.isAbsolute(safeRelPath) || safeRelPath.split(path.sep).includes('..')) return { success: false, error: 'Ongeldig output-BLP pad' };
+    const filePath = path.join(__dirname, '..', 'output', 'PlayerTextures', safeRelPath);
+    if (!fs.existsSync(filePath)) return { success: false, missing: true, path: blpPath };
+    const buf = fs.readFileSync(filePath);
+    if (buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') return { success: false, error: 'Outputbestand is geen BLP2', path: blpPath };
+    const decoded = decodeBLP(buf);
+    return { success: true, w: decoded.w, h: decoded.h, png: rgbaToPNG(Buffer.from(decoded.rgba), decoded.w, decoded.h).toString('base64'), path: blpPath };
+  } catch (e) {
+    return { success: false, error: e.message, path: blpPath };
   }
 });
 

@@ -71,7 +71,7 @@ function CategorySelector({ label, records, selectedIdx, onSelect }) {
   );
 }
 
-export default function CharCreationPreview({ allRecords, race, gender, hasDataPath }) {
+export default function CharCreationPreview({ allRecords, race, gender, hasDataPath, preferOutput = false }) {
   const bySection = useMemo(() => {
     const m = new Map();
     for (const r of allRecords) {
@@ -99,6 +99,12 @@ export default function CharCreationPreview({ allRecords, race, gender, hasDataP
   }, [bySection]);
 
   const currentSkin = skinSorted[indices[0]];
+  const selectedForSection = (section) => {
+    const rows = [...(bySection.get(section) || [])].sort((a, b) => a.flags - b.flags || a.variationIndex - b.variationIndex || a.colorIndex - b.colorIndex);
+    return rows[indices[section]] || rows[0] || null;
+  };
+  const currentFace = selectedForSection(1);
+  const currentHair = selectedForSection(3);
 
   const sections = [0, 1, 2, 3, 4].filter(s => (bySection.get(s) || []).length > 0);
 
@@ -110,6 +116,13 @@ export default function CharCreationPreview({ allRecords, race, gender, hasDataP
           race={race}
           gender={gender}
           skinBlp={currentSkin?.tex1 || null}
+          skinExtraBlp={currentSkin?.tex2 || null}
+          textureLayers={[
+            ...(currentFace ? [{ path: currentFace.tex1, region: 'face-lower' }, { path: currentFace.tex2, region: 'face-upper' }] : []),
+            ...(currentHair?.tex1 ? [{ path: currentHair.tex1, region: 'hair-primary' }] : []),
+          ]}
+          appearance={{ face: currentFace?.variationIndex || 0, hairStyle: currentHair?.variationIndex || 0, hairColor: currentHair?.colorIndex || 0 }}
+          preferOutput={preferOutput}
           active={hasDataPath}
         />
         {!hasDataPath && (
