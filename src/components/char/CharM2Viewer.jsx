@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
+import { AtlasComponentTransferService } from '../../lib/characterTextures/AtlasComponentTransferService.js';
+import { TextureRecolorEngine } from '../../lib/characterTextures/TextureRecolorEngine.js';
+
+const previewTransferService = new AtlasComponentTransferService();
+const previewRecolorEngine = new TextureRecolorEngine();
 import { useConnection } from '../../lib/ConnectionContext';
 import { Loader2 } from 'lucide-react';
 
@@ -99,7 +104,7 @@ function buildColorBuffer(vertexCount, enabledIndices, skinData) {
   return colors;
 }
 
-// Scene houdt de Canvas altijd gemount; texture wordt in-place geÃƒÂ¼pdatet
+// Scene houdt de Canvas altijd gemount; texture wordt in-place geÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¼pdatet
 // zodat de WebGL context nooit opnieuw aangemaakt hoeft te worden.
 function CharScene({ geoRef, hairGeoRef, textureRef, hairTextureRef, hairMaterialRef, noTexRef, colorDebug }) {
   const matRef = useRef(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, transparent: true, alphaTest: 0.05, color: '#44cc44' }));
@@ -160,7 +165,7 @@ function AttachedM2({ model, anchor }) {
   const passes = data.renderPasses?.length ? data.renderPasses : data.skinData?.submeshes.map((_, submeshIndex) => ({ index: submeshIndex, submeshIndex, blend: 0, order: submeshIndex })) || [];
   return <group position={[anchor[0] + offset[0], anchor[1] + offset[1], anchor[2] + offset[2]]}>{passes.map(pass => <AttachedM2Pass key={`${pass.index}:${pass.submeshIndex}`} pass={pass} data={data} texture={texture}/>)}</group>;
 }
-export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, colorDebug = false, attachedModels = [], itemGeosets = {} }) {
+export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, componentTransfer = null }) {
   const { worldmapMpqPath } = useConnection();
 
   const [mounted, setMounted]     = useState(false);
@@ -190,7 +195,46 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
 
   const isCreatureModel = !!creatureModelPath;
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬ Geometry laden Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  useEffect(() => {
+    if (!skinRgba?.data || !skinRgba.width || !skinRgba.height || isCreatureModel) return;
+    textureRef.current?.dispose?.();
+    const tex = new THREE.DataTexture(new Uint8Array(skinRgba.data), skinRgba.width, skinRgba.height, THREE.RGBAFormat);
+    tex.needsUpdate = true; tex.flipY = false;
+    textureRef.current = tex; noTexRef.current = false; setNoTex(false); setTextureVersion(v => v + 1);
+    return () => tex.dispose();
+  }, [skinRgba, isCreatureModel]);
+
+  useEffect(() => {
+    const layers = textureLayers.map(layer => typeof layer === 'string' ? { path: layer } : layer).filter(layer => layer?.path && layer.region !== 'hair-primary');
+    if (!skinRgba?.data || !layers.length || !active || !worldmapMpqPath || isCreatureModel) return;
+    let cancelled = false;
+    Promise.all(layers.map(layer => window.azeroth.dbc.readBlpTexture(worldmapMpqPath, layer.path).then(row => new Promise(resolve => { if (!row?.success || !row.png) return resolve(null); const image = new Image(); image.onload = () => resolve({ layer, image }); image.onerror = () => resolve(null); image.src = `data:image/png;base64,${row.png}`; })))).then(entries => {
+      if (cancelled) return;
+      const canvas = document.createElement('canvas'); canvas.width = skinRgba.width; canvas.height = skinRgba.height;
+      const ctx = canvas.getContext('2d'); ctx.putImageData(new ImageData(new Uint8ClampedArray(skinRgba.data), skinRgba.width, skinRgba.height), 0, 0);
+      for (const entry of entries) if (entry) {
+        const rect = characterAtlasRect(entry.layer.region, canvas.width, canvas.height); if (!rect) continue;
+        const passes = componentTransfer?.passes || [];
+        if (!passes.length) { ctx.drawImage(entry.image, rect.x, rect.y, rect.width, rect.height); continue; }
+        const layerCanvas = document.createElement('canvas'); layerCanvas.width = entry.image.width; layerCanvas.height = entry.image.height;
+        const layerCtx = layerCanvas.getContext('2d'); layerCtx.drawImage(entry.image, 0, 0);
+        const layerData = layerCtx.getImageData(0, 0, layerCanvas.width, layerCanvas.height);
+        let working = layerData.data;
+        for (const pass of passes) {
+          const sourceRect = pass.mappings?.[entry.layer.region];
+          if (!sourceRect) continue;
+          const mask = previewTransferService.projectMask(pass.mask, componentTransfer.width, componentTransfer.height, sourceRect, layerCanvas.width, layerCanvas.height);
+          working = previewRecolorEngine.recolor(working, mask, pass.targetColor, pass.strength);
+        }
+        layerCtx.putImageData(new ImageData(working, layerCanvas.width, layerCanvas.height), 0, 0);
+        ctx.drawImage(layerCanvas, rect.x, rect.y, rect.width, rect.height);
+      }
+      textureRef.current?.dispose?.(); const tex = new THREE.DataTexture(new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data), canvas.width, canvas.height, THREE.RGBAFormat); tex.needsUpdate = true; tex.flipY = false; textureRef.current = tex; setTextureVersion(v => v + 1);
+    });
+    return () => { cancelled = true; };
+  }, [skinRgba, textureLayers, active, worldmapMpqPath, isCreatureModel]);
+
+  // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Geometry laden ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
   useEffect(() => {
     if (!active) return;
 
@@ -205,7 +249,12 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
       setGeoReady(false);
       setMounted(true);
 
-      window.azeroth.m2.loadModelByPath({ modelPath: creatureModelPath })
+      const loadModel = creatureDisplayId ? window.azeroth.m2.loadModel({ displayId: creatureDisplayId }) : window.azeroth.m2.loadModelByPath({ modelPath: creatureModelPath });
+      textureRef.current = null;
+      noTexRef.current = false;
+      setTextureVersion(version => version + 1);
+
+      loadModel
         .then(res => {
           if (geoKey.current !== key) return;
           if (res?.success && res.data) {
@@ -263,7 +312,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
 
     if (geoKey.current === fullKey) return;
 
-    // Model changed Ã¢â‚¬â€ full server load
+    // Model changed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â full server load
     if (!geoKey.current?.startsWith(modelKey + '|')) {
       geoKey.current = fullKey;
       serverDefaultRef.current = null;
@@ -336,7 +385,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
           setGeoLoad(false);
         });
     } else {
-      // Only submesh indices changed Ã¢â‚¬â€ rebuild from cached skinData
+      // Only submesh indices changed ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â rebuild from cached skinData
       const sd = skinDataRef.current;
       const useIds = enabledSubmeshIndices != null ? enabledSubmeshIndices : serverDefaultRef.current;
       if (sd && sd.vertexLookup && sd.indexLookup && sd.submeshes && useIds) {
@@ -351,13 +400,14 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
         }
       }
     }
-  }, [active, isCreatureModel, creatureModelPath, race, gender, appearance.skin, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, JSON.stringify(itemGeosets), enabledSubmeshIndices]);
+  }, [active, isCreatureModel, creatureModelPath, creatureDisplayId, race, gender, appearance.skin, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, JSON.stringify(itemGeosets), enabledSubmeshIndices]);
 
-  // Ã¢â€â‚¬Ã¢â€â‚¬ Texture laden (alleen voor player character modellen) Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Texture laden (alleen voor player character modellen) ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
   useEffect(() => {
     if (isCreatureModel) return;
     const layers = textureLayers.map(layer => typeof layer === 'string' ? { path: layer } : layer).filter(layer => layer?.path);
     const sources = [{ path: skinBlp }, ...layers.filter(layer => layer.region !== 'hair-primary')].filter(layer => layer.path);
+    if (skinRgba?.data) return;
     if (!active || !sources.length || !worldmapMpqPath) { textureRef.current = null; noTexRef.current = sources.length > 0; setNoTex(noTexRef.current); return; }
     const key = `${worldmapMpqPath}|${appearance.face || 0}:${appearance.hairStyle || 0}:${appearance.hairColor || 0}:${appearance.facialHair || 0}|${sources.map(layer => `${layer.path}:${layer.region || ''}`).join('|')}`;
     if (texKey.current === key) return;
@@ -365,7 +415,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
     Promise.all(sources.map(layer => window.azeroth.dbc.readBlpTexture(worldmapMpqPath, layer.path).then(row => new Promise((resolve, reject) => { if (!row?.success || !row.png) return resolve(null); const img = new Image(); img.onload = () => resolve({ layer, img }); img.onerror = reject; img.src = `data:image/png;base64,${row.png}`; }))))
       .then(images => { if (texKey.current !== key || !images[0]?.img) return; const base=images[0].img,cvs=document.createElement('canvas');cvs.width=base.width;cvs.height=base.height;const ctx=cvs.getContext('2d');ctx.drawImage(base,0,0);for(const entry of images.slice(1)){if(!entry)continue;const rect=characterAtlasRect(entry.layer.region,cvs.width,cvs.height);if(rect)ctx.drawImage(entry.img,rect.x,rect.y,rect.width,rect.height);else if(entry.img.width===cvs.width&&entry.img.height===cvs.height)ctx.drawImage(entry.img,0,0);}const data=ctx.getImageData(0,0,cvs.width,cvs.height).data;const tex=new THREE.DataTexture(new Uint8Array(data),cvs.width,cvs.height,THREE.RGBAFormat);tex.needsUpdate=true;tex.flipY=false;textureRef.current=tex;noTexRef.current=false;setNoTex(false);setTextureVersion(v => v + 1);setTexLoad(false); })
       .catch(() => { if (texKey.current !== key) return; textureRef.current=null;noTexRef.current=true;setNoTex(true);setTexLoad(false); });
-  }, [active, isCreatureModel, skinBlp, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), worldmapMpqPath]);
+  }, [active, isCreatureModel, skinRgba, skinBlp, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), worldmapMpqPath]);
 
   useEffect(() => {
     if (isCreatureModel) return;
@@ -383,7 +433,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
     }).catch(() => { if (!cancelled) { hairTextureRef.current = null; if (hairMaterialRef.current) { hairMaterialRef.current.map = textureRef.current || null; hairMaterialRef.current.needsUpdate = true; } setTextureVersion(v => v + 1); } });
     return () => { cancelled = true; };
   }, [active, isCreatureModel, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), worldmapMpqPath]);
-  // Ã¢â€â‚¬Ã¢â€â‚¬ Color debug: apply per-group colors to geometry Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
+  // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Color debug: apply per-group colors to geometry ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
   useEffect(() => {
     const geo = geoRef.current;
     if (!geo) return;
@@ -405,7 +455,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
       {geoLoading && !geoReady && (
         <div className="char-m2-overlay">
           <Loader2 size={20} className="cc-spin" />
-          <span>Model ladenÃ¢â‚¬Â¦</span>
+          <span>Model ladenÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦</span>
         </div>
       )}
       {geoError && !geoReady && (
@@ -413,7 +463,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
       )}
       {noTex && geoReady && (
         <div className="char-m2-notex-badge" title={`Skin BLP niet gevonden:\n${skinBlp}`}>
-          Ã¢Å¡Â  Texture niet gevonden
+          ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â  Texture niet gevonden
         </div>
       )}
       {texLoading && (
@@ -422,7 +472,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
         </div>
       )}
 
-      {/* Canvas blijft altijd gemount Ã¢â‚¬â€ nooit opnieuw aanmaken */}
+      {/* Canvas blijft altijd gemount ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â nooit opnieuw aanmaken */}
       {mounted && (
         <Canvas
           style={{ width: '100%', height: '100%' }}

@@ -57,12 +57,17 @@ contextBridge.exposeInMainWorld('azeroth', {
     readCreatureDisplayCreator: (dbcPath) => ipcRenderer.invoke('dbc:readCreatureDisplayCreator', dbcPath),
     findNextCreatureDisplayId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextCreatureDisplayId', dbcPath, startId),
     createCreatureDisplay: (dbcPath, payload) => ipcRenderer.invoke('dbc:createCreatureDisplay', dbcPath, payload),
+    setCreatureDisplayBakeName: (dbcPath, extraId) => ipcRenderer.invoke('dbc:setCreatureDisplayBakeName', dbcPath, extraId),
+    setCreatureDisplayObjectPackage: (dbcPath, displayId) => ipcRenderer.invoke('dbc:setCreatureDisplayObjectPackage', dbcPath, displayId),
     readItemDisplayInfos: (dataPath, displayIds, opts) => ipcRenderer.invoke('dbc:readItemDisplayInfos', dataPath, displayIds, opts),
-    writeCharSections: (dbcPath, records) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records),
+    writeCharSections: (dbcPath, records, stageOnly = false) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records, stageOnly),
     readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
+    readBlpFile: (filePath) => ipcRenderer.invoke('dbc:readBlpFile', filePath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
-    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath) =>
-      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath),
+    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false) =>
+      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput),
+    bakeNpcTexture: (dataPath, extraId, rgbaBase64, maskBase64) =>
+      ipcRenderer.invoke('dbc:bakeNpcTexture', dataPath, extraId, rgbaBase64, maskBase64),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
     readDurations: (dbcPath) => ipcRenderer.invoke('dbc:readDurations', dbcPath),
     readRanges: (dbcPath) => ipcRenderer.invoke('dbc:readRanges', dbcPath),

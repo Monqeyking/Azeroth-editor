@@ -375,7 +375,7 @@ export default function NPCWorkflowPage() {
       setDirty(false);
       await loadCreature(form.entry);
       if (soapConfig.user) {
-        await soapCommand('.reload creature_template');
+        await soapCommand(`.reload creature_template ${form.entry}`);
         setMsg({ type: 'success', text: `✓ Saved entry ${form.entry} and reloaded creature_template` });
       } else {
         setMsg({ type: 'success', text: `✓ Saved entry ${form.entry}` });
@@ -425,7 +425,7 @@ export default function NPCWorkflowPage() {
       await loadCreature(entry);
       setCreateName('New NPC');
       setMsg({ type: 'success', text: `✓ Created entry ${entry}` });
-      if (soapConfig.user) await soapCommand('.reload creature_template');
+      if (soapConfig.user) await soapCommand(`.reload creature_template ${entry}`);
     } catch (err) {
       setMsg({ type: 'error', text: `✗ ${err.message}` });
     }
@@ -487,7 +487,7 @@ export default function NPCWorkflowPage() {
       await searchCreatures(search);
       await loadCreature(entry);
       setMsg({ type: 'success', text: `✓ Cloned entry ${selected.entry} to ${entry}` });
-      if (soapConfig.user) await soapCommand('.reload creature_template');
+      if (soapConfig.user) await soapCommand(`.reload creature_template ${entry}`);
     } catch (err) {
       setMsg({ type: 'error', text: `✗ ${err.message}` });
     }

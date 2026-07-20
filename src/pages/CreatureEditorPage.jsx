@@ -392,7 +392,7 @@ export default function CreatureEditorPage() {
       sql += ' AND ct.minlevel <= ?';
       params.push(Number(maxLevelFilter));
     }
-    sql += ' ORDER BY CASE WHEN ct.rank = 3 THEN 0 WHEN ct.rank = 2 THEN 1 WHEN ct.rank = 1 THEN 2 ELSE 3 END ASC, ct.entry DESC LIMIT 200';
+    sql += ' ORDER BY ct.entry DESC';
     const result = await query(sql, params);
     setCreatures(result.data || []);
     setLoading(false);
@@ -1672,7 +1672,7 @@ export default function CreatureEditorPage() {
           </div>
           <div className="list-items">
             {loading && <div className="loading-text">Searching...</div>}
-            {!loading && creatures.map(c => (
+            {!loading && creatures.slice(0, 200).map(c => (
               <div key={c.entry} className={`list-item ${selected?.entry === c.entry ? 'active' : ''}`} onClick={() => selectCreature(c.entry)}>
                 <div className="list-item-main">
                   <span className="list-item-name">{c.name}</span>
@@ -1687,6 +1687,7 @@ export default function CreatureEditorPage() {
                 </div>
               </div>
             ))}
+            {!loading && creatures.length > 200 && <div className="loading-text">Showing the first 200 of {creatures.length} matches. Refine your search to narrow the list.</div>}
             {!loading && creatures.length === 0 && <div className="loading-text">No results</div>}
           </div>
         </div>
