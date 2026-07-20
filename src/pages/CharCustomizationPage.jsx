@@ -291,7 +291,7 @@ function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDa
   );
 }
 
-function ColorSetWorkspace({ records, race, gender, hasDataPath, onEditTexture }) {
+function ColorSetWorkspace({ records, race, gender, hasDataPath, preferOutput = false, onEditTexture }) {
   const skins = useMemo(() => records.filter(r => r.race === race && r.sex === gender && r.baseSection === 0).sort((a, b) => a.colorIndex - b.colorIndex), [records, race, gender]);
   const [skinId, setSkinId] = useState(null);
   const [faceId, setFaceId] = useState(null);
@@ -300,7 +300,11 @@ function ColorSetWorkspace({ records, race, gender, hasDataPath, onEditTexture }
   const faces = useMemo(() => !skin ? [] : records.filter(r => r.race === race && r.sex === gender && r.baseSection === 1 && r.colorIndex === skin.colorIndex && r.flags === (setFlags === 5 ? 5 : 1)).sort((a, b) => a.variationIndex - b.variationIndex), [records, race, gender, skin, setFlags]);
   const underwear = useMemo(() => !skin ? [] : records.filter(r => r.race === race && r.sex === gender && r.baseSection === 4 && r.colorIndex === skin.colorIndex && r.flags === setFlags), [records, race, gender, skin, setFlags]);
   const face = faces.find(r => r.id === faceId) || faces[0] || null;
-  const layers = face ? [{ path: face.tex1, region: 'face-lower' }, { path: face.tex2, region: 'face-upper' }] : [];
+  const hair = useMemo(() => !skin ? null : records.find(r => r.race === race && r.sex === gender && r.baseSection === 3 && r.colorIndex === skin.colorIndex && r.tex1) || records.find(r => r.race === race && r.sex === gender && r.baseSection === 3 && r.tex1) || null, [records, race, gender, skin]);
+  const layers = [
+    ...(face ? [{ path: face.tex1, region: 'face-lower' }, { path: face.tex2, region: 'face-upper' }] : []),
+    ...(hair?.tex1 ? [{ path: hair.tex1, region: 'hair-primary' }] : []),
+  ];
   const linkedComponents = useMemo(() => {
     if (!skin) return [];
     const faceFlags = setFlags === 5 ? 5 : 1;
@@ -336,7 +340,7 @@ function ColorSetWorkspace({ records, race, gender, hasDataPath, onEditTexture }
       </button>)}
     </aside>
     <section className="cc-set-preview">
-      <CharM2Viewer race={race} gender={gender} skinBlp={skin?.tex1 || null} textureLayers={layers} active={hasDataPath} />
+      <CharM2Viewer race={race} gender={gender} skinBlp={skin?.tex1 || null} skinExtraBlp={skin?.tex2 || null} textureLayers={layers} appearance={{ face: face?.variationIndex || 0, hairStyle: hair?.variationIndex || 0, hairColor: hair?.colorIndex || 0 }} preferOutput={preferOutput} active={hasDataPath} />
       {skin && <button className="cc-btn cc-btn-primary" onClick={() => onEditTexture(skin)}><Pencil size={14}/> Bewerk skin</button>}
     </section>
     <aside className="cc-set-parts">
@@ -365,6 +369,7 @@ export default function CharCustomizationPage() {
   const [error, setError]           = useState(null);
   const [saving, setSaving]         = useState(false);
   const [testMode, setTestMode]     = useState(true);
+  const [testOutput, setTestOutput] = useState(null);
   const [saveMsg, setSaveMsg]       = useState(null);
   const [dirty, setDirty]           = useState(false);
   const unsavedGuard = useUnsavedGuard(dirty);
@@ -375,21 +380,39 @@ export default function CharCustomizationPage() {
   const [selectedId, setSelectedId] = useState(null);
   const [viewMode,  setViewMode] = useState('sets'); // 'sets' | 'table' | 'preview'
   const [editingTexRow, setEditingTexRow] = useState(null); // rij waarvan tex1 bewerkt wordt
+  const [editingTextureField, setEditingTextureField] = useState('tex1');
+
+  const openTextureEditor = (row, field = 'tex1') => {
+    if (!row?.[field]) return;
+    setEditingTextureField(field);
+    setEditingTexRow(row);
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
-    const r = await readCharSections();
+    const testResult = testMode ? await window.azeroth.dbc.readCharSectionsTestOutput() : null;
+    const r = testResult?.success ? testResult : await readCharSections();
     setLoading(false);
     if (r.success) {
       setAllRecords(r.records);
+      setTestOutput(testMode ? testResult : null);
       setDirty(false);
     } else {
+      setTestOutput(testMode ? testResult : null);
       setError(r.error);
     }
-  }, [readCharSections]);
+  }, [readCharSections, testMode]);
 
   useEffect(() => { load(); }, [load]);
+
+  const toggleTestMode = (enabled) => {
+    if (dirty) {
+      setSaveMsg('Save or discard the current changes before switching the test build.');
+      return;
+    }
+    setTestMode(enabled);
+  };
 
   // Flags 8 contains the custom NPC-skin set. Keep it in the DBC,
   // but hide it from the normal character-look workflow until that set gets its own editor.
@@ -409,10 +432,11 @@ export default function CharCustomizationPage() {
     const nextColor = allRecords
       .filter(row => row.race === editingTexRow.race && row.sex === editingTexRow.sex && row.baseSection === 0)
       .reduce((max, row) => Math.max(max, row.colorIndex), -1) + 1;
-    return hasColorIndexReplacement(editingTexRow.tex1, editingTexRow.colorIndex, nextColor)
-      ? replaceColorIndexInPath(editingTexRow.tex1, editingTexRow.colorIndex, nextColor)
+    const sourcePath = editingTexRow[editingTextureField];
+    return hasColorIndexReplacement(sourcePath, editingTexRow.colorIndex, nextColor)
+      ? replaceColorIndexInPath(sourcePath, editingTexRow.colorIndex, nextColor)
       : null;
-  }, [editingTexRow, allRecords]);
+  }, [editingTexRow, editingTextureField, allRecords]);
 
   const updateField = (id, field, value) => {
     setAllRecords(prev => prev.map(r => r.id === id ? { ...r, [field]: value } : r));
@@ -444,7 +468,10 @@ export default function CharCustomizationPage() {
 
   const handleTextureSaved = async (exportResult) => {
     const sourceRow = editingTexRow;
+    const sourceField = editingTextureField;
+    const sourceTexturePath = sourceRow?.[sourceField];
     setEditingTexRow(null);
+    setEditingTextureField('tex1');
     if (!sourceRow || !allRecords) return;
     const newRelPath = exportResult?.path;
     const targetSetFlags = exportResult?.targetSetFlags === 5 ? 5 : 17;
@@ -482,34 +509,44 @@ export default function CharCustomizationPage() {
         setSaveMsg(`Export stopped: ${unmappable.length} linked BLP path(s) do not contain ColorIndex ${sourceRow.colorIndex}.`);
         return;
       }
+      const isSkinAtlasExport = sourceField === 'tex1';
+      const stagedSkinBase = new Map();
+      if (!isSkinAtlasExport && sourceRow.tex1) {
+        const outputPath = replaceColorIndexInPath(sourceRow.tex1, sourceRow.colorIndex, nextColor);
+        const staged = await stageLinkedTexture(worldmapMpqPath, sourceRow.tex1, outputPath, exportResult.targetColor, exportResult.strength, false, null, true);
+        if (staged) stagedSkinBase.set(sourceRow.tex1, staged);
+      }
       const stagedSkinExtras = new Map();
       for (const extraPath of skinExtraPaths) {
         const outputPath = replaceColorIndexInPath(extraPath, sourceRow.colorIndex, nextColor);
-        const staged = await stageLinkedTexture(worldmapMpqPath, extraPath, outputPath, exportResult.targetColor, exportResult.strength, false, null, true);
+        const staged = extraPath === sourceTexturePath
+          ? newRelPath
+          : await stageLinkedTexture(worldmapMpqPath, extraPath, outputPath, exportResult.targetColor, exportResult.strength, false, null, true);
         if (staged) stagedSkinExtras.set(extraPath, staged);
       }
       const stagedFaces = new Map();
       for (const facePath of facePaths) {
         const component = componentMappingFromPath(facePath);
         const outputPath = replaceColorIndexInPath(facePath, sourceRow.colorIndex, nextColor);
-        const staged = await stageLinkedTexture(worldmapMpqPath, facePath, outputPath, exportResult.targetColor, exportResult.strength, true, transferFor(component));
+        const staged = await stageLinkedTexture(worldmapMpqPath, facePath, outputPath, exportResult.targetColor, exportResult.strength, true, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport);
         if (staged) stagedFaces.set(facePath, staged);
       }
       const stagedUnderwear = new Map();
       for (const underwearPath of underwearPaths) {
         const component = componentMappingFromPath(underwearPath);
         const outputPath = replaceColorIndexInPath(underwearPath, sourceRow.colorIndex, nextColor);
-        const staged = await stageLinkedTexture(worldmapMpqPath, underwearPath, outputPath, exportResult.targetColor, exportResult.strength, false, transferFor(component));
+        const staged = await stageLinkedTexture(worldmapMpqPath, underwearPath, outputPath, exportResult.targetColor, exportResult.strength, false, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport);
         if (staged) stagedUnderwear.set(underwearPath, staged);
       }
+      const stagedPathFor = texturePath => texturePath === sourceTexturePath ? newRelPath : stagedSkinBase.get(texturePath) || stagedSkinExtras.get(texturePath) || stagedFaces.get(texturePath) || stagedUnderwear.get(texturePath) || texturePath;
       const clones = templates.map(r => ({
         ...r,
         id: nextId++,
         colorIndex: nextColor,
         flags: r.baseSection === 1 ? (targetSetFlags === 5 ? 5 : 1) : targetSetFlags,
-        tex1: r.id === sourceRow.id ? newRelPath : stagedSkinExtras.get(r.tex1) || stagedFaces.get(r.tex1) || stagedUnderwear.get(r.tex1) || r.tex1,
-        tex2: stagedSkinExtras.get(r.tex2) || stagedFaces.get(r.tex2) || stagedUnderwear.get(r.tex2) || r.tex2,
-        tex3: stagedSkinExtras.get(r.tex3) || stagedFaces.get(r.tex3) || stagedUnderwear.get(r.tex3) || r.tex3,
+        tex1: stagedPathFor(r.tex1),
+        tex2: stagedPathFor(r.tex2),
+        tex3: stagedPathFor(r.tex3),
       }));
       const selected = clones.find(r => r.baseSection === 0 && r.variationIndex === sourceRow.variationIndex);
       setAllRecords(prev => [...prev, ...clones]);
@@ -558,7 +595,7 @@ export default function CharCustomizationPage() {
             <span className="cc-warn">DBC path niet ingesteld — ga naar Settings</span>
           )}
           {saveMsg && <span className={saveMsg.startsWith('Fout') ? 'cc-error-msg' : 'cc-ok-msg'}>{saveMsg}</span>}
-          <label className="cc-test-toggle"><input type="checkbox" checked={testMode} onChange={e => setTestMode(e.target.checked)} /> Test output only</label>
+          <label className="cc-test-toggle"><input type="checkbox" checked={testMode} onChange={e => toggleTestMode(e.target.checked)} /> Test output only</label>
           <button className="cc-btn cc-btn-ghost" onClick={load} disabled={loading}>
             <RefreshCw size={14} />
             Herladen
@@ -569,6 +606,12 @@ export default function CharCustomizationPage() {
           </button>
         </div>
       </div>
+
+      {testMode && <div className={`cc-test-output ${testOutput?.success ? 'ready' : ''}`}>
+        {testOutput?.success
+          ? <>Test build loaded: <strong>{testOutput.records.length}</strong> CharSections rows and <strong>{testOutput.blpFiles.length}</strong> staged BLPs from <code>output</code>.</>
+          : <>Test build mode: no staged CharSections DBC yet. Showing the server DBC; <strong>{testOutput?.blpFiles?.length || 0}</strong> staged BLPs currently found in <code>output\PlayerTextures</code>.</>}
+      </div>}
 
       <div className="cc-toolbar">
         <div className="cc-toolbar-group">
@@ -626,10 +669,11 @@ export default function CharCustomizationPage() {
             race={race}
             gender={gender}
             hasDataPath={!!worldmapMpqPath}
+            preferOutput={testMode}
           />
         )}
         {!loading && !error && allRecords && viewMode === 'sets' && (
-          <ColorSetWorkspace records={normalRecords} race={race} gender={gender} hasDataPath={!!worldmapMpqPath} onEditTexture={setEditingTexRow} />
+          <ColorSetWorkspace records={normalRecords} race={race} gender={gender} hasDataPath={!!worldmapMpqPath} preferOutput={testMode} onEditTexture={openTextureEditor} />
         )}
         {!loading && !error && allRecords && viewMode === 'table' && (
           <div className="cc-layout">
@@ -748,7 +792,7 @@ export default function CharCustomizationPage() {
               race={race}
               gender={gender}
               hasDataPath={!!worldmapMpqPath}
-              onEditTexture={setEditingTexRow}
+              onEditTexture={openTextureEditor}
             />
           </div>
         )}
@@ -757,14 +801,21 @@ export default function CharCustomizationPage() {
       {editingTexRow && (
         <TextureMaskEditor
           dataPath={worldmapMpqPath}
-          blpPath={editingTexRow.tex1}
+          blpPath={editingTexRow[editingTextureField]}
           outputPath={editorOutputPath}
+          texturePartType={editingTexRow.baseSection === 0 ? (editingTextureField === 'tex2' ? 'skin-extra' : 'skin-atlas') : null}
+          preferOutput={testMode}
+          textureParts={editingTexRow.baseSection === 0 ? [
+            { label: 'Skin atlas', path: editingTexRow.tex1 },
+            ...(editingTexRow.tex2 ? [{ label: 'Skin extra (independent overlay)', path: editingTexRow.tex2 }] : []),
+          ] : []}
+          onSelectTexturePart={path => setEditingTextureField(path === editingTexRow.tex2 ? 'tex2' : 'tex1')}
           initialTargetFlags={editingTexRow.flags}
           race={editingTexRow.race}
           gender={editingTexRow.sex}
           colorIndex={editingTexRow.colorIndex}
           characterRecords={normalRecords}
-          onClose={() => setEditingTexRow(null)}
+          onClose={() => { setEditingTexRow(null); setEditingTextureField('tex1'); }}
           onSaved={handleTextureSaved}
         />
       )}

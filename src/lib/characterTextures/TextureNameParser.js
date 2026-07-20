@@ -34,7 +34,9 @@ export function parseTextureName(texturePath) {
   const regions = TOKEN_RULES.filter(([, rule]) => rule.test(stem)).map(([region]) => region);
   const variationNumbers = (stem.match(/\d{1,3}/g) || []).map(Number);
   const isCharacterPath = segments.includes('character') || !!race;
-  const textureType = regions.includes('skin') ? 'skin-atlas'
+  const isSkinExtra = /(?:^|[_-])extra(?:$|[_-])/i.test(stem);
+  const textureType = isSkinExtra ? 'skin-extra'
+    : regions.includes('skin') ? 'skin-atlas'
     : regions.some(region => ['face-upper', 'face-lower'].includes(region)) ? 'face-component'
     : regions.includes('hair') || regions.includes('scalp') ? 'hair-component'
     : regions.length ? 'body-component' : 'unknown';

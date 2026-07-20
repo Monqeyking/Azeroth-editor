@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
@@ -106,25 +106,29 @@ function buildColorBuffer(vertexCount, enabledIndices, skinData) {
 
 // Scene houdt de Canvas altijd gemount; texture wordt in-place geÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¼pdatet
 // zodat de WebGL context nooit opnieuw aangemaakt hoeft te worden.
-function CharScene({ geoRef, hairGeoRef, textureRef, hairTextureRef, hairMaterialRef, noTexRef, colorDebug }) {
+function CharScene({ geoRef, hairGeoRef, textureRef, skinExtraTextureRef, hairTextureRef, hairMaterialRef, noTexRef, colorDebug }) {
   const matRef = useRef(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, transparent: true, alphaTest: 0.05, color: '#44cc44' }));
   const hairMatRef = useRef(new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, transparent: true, alphaTest: 0.05, color: '#ffffff' }));
   useEffect(() => { hairMaterialRef.current = hairMatRef.current; return () => { if (hairMaterialRef.current === hairMatRef.current) hairMaterialRef.current = null; }; }, [hairMaterialRef]);
   useEffect(() => {
     const mat = matRef.current; const hair = hairMatRef.current;
     if (colorDebug) { mat.map = null; mat.vertexColors = true; mat.color.set('#ffffff'); hair.map = null; hair.color.set('#ff66cc'); }
-    else { mat.vertexColors = false; mat.map = textureRef?.current || null; mat.color.set(textureRef?.current ? '#ffffff' : (noTexRef?.current ? '#44cc44' : '#ccaa88')); hair.map = hairTextureRef?.current || textureRef?.current || null; hair.color.set('#ffffff'); }
+    else { mat.vertexColors = false; mat.map = textureRef?.current || skinExtraTextureRef?.current || null; mat.color.set((textureRef?.current || skinExtraTextureRef?.current) ? '#ffffff' : (noTexRef?.current ? '#44cc44' : '#ccaa88')); hair.map = hairTextureRef?.current || textureRef?.current || null; hair.color.set('#ffffff'); }
     mat.needsUpdate = true; hair.needsUpdate = true;
   });
   return <>{geoRef?.current && <mesh geometry={geoRef.current} material={matRef.current} />}{hairGeoRef?.current && <mesh geometry={hairGeoRef.current} material={hairMatRef.current} />}</>;
 }
 
-function CharacterRenderPass({ pass, textureRef, hairTextureRef, colorDebug, textureVersion }) {
+function CharacterRenderPass({ pass, textureRef, skinExtraTextureRef, hairTextureRef, colorDebug, textureVersion }) {
   const material = useMemo(() => new THREE.MeshLambertMaterial({ side: THREE.DoubleSide, alphaTest: pass.blend === 1 ? 0.7 : 0, transparent: pass.blend >= 2, depthWrite: !pass.noDepthWrite }), [pass]);
   useEffect(() => {
     if (colorDebug) { material.map = null; material.color.set(pass.textureType === 6 ? '#ff66cc' : '#44ccff'); material.vertexColors = false; }
     else {
-      material.map = pass.textureType === 6 ? hairTextureRef.current : textureRef.current;
+      // Worgen's M2 texture lookup resolves CharSections.Tex2 (Skin Extra) to
+      // type 8; type 1 is the composited Skin atlas and type 6 is Hair. Each
+      // render pass therefore
+      // samples its own source instead of drawing all BLPs over one atlas.
+      material.map = pass.textureType === 6 ? hairTextureRef.current : pass.textureType === 8 ? skinExtraTextureRef.current : textureRef.current;
       material.color.set('#ffffff'); material.vertexColors = false;
       material.transparent = pass.blend >= 2; material.alphaTest = pass.blend === 1 ? 0.7 : 0;
       material.depthWrite = !pass.noDepthWrite;
@@ -132,13 +136,13 @@ function CharacterRenderPass({ pass, textureRef, hairTextureRef, colorDebug, tex
       if (pass.blend >= 5) { material.blendSrc = THREE.DstColorFactor; material.blendDst = THREE.SrcColorFactor; }
     }
     material.needsUpdate = true;
-  }, [pass, textureRef, hairTextureRef, colorDebug, textureVersion, material]);
+  }, [pass, textureRef, skinExtraTextureRef, hairTextureRef, colorDebug, textureVersion, material]);
   useEffect(() => () => material.dispose(), [material]);
   return <mesh geometry={pass.geometry} material={material} renderOrder={pass.order ?? pass.index} />;
 }
 
-function CharacterPassScene({ passes, textureRef, hairTextureRef, colorDebug, textureVersion }) {
-  return <>{passes.map(pass => <CharacterRenderPass key={`${pass.index}-${pass.submeshIndex}`} pass={pass} textureRef={textureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} />)}</>;
+function CharacterPassScene({ passes, textureRef, skinExtraTextureRef, hairTextureRef, colorDebug, textureVersion }) {
+  return <>{passes.map(pass => <CharacterRenderPass key={`${pass.index}-${pass.submeshIndex}`} pass={pass} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} />)}</>;
 }
 function AttachedM2Pass({ pass, data, texture }) {
   const geometry = useMemo(() => {
@@ -165,7 +169,7 @@ function AttachedM2({ model, anchor }) {
   const passes = data.renderPasses?.length ? data.renderPasses : data.skinData?.submeshes.map((_, submeshIndex) => ({ index: submeshIndex, submeshIndex, blend: 0, order: submeshIndex })) || [];
   return <group position={[anchor[0] + offset[0], anchor[1] + offset[1], anchor[2] + offset[2]]}>{passes.map(pass => <AttachedM2Pass key={`${pass.index}:${pass.submeshIndex}`} pass={pass} data={data} texture={texture}/>)}</group>;
 }
-export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, componentTransfer = null }) {
+export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = null, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, skinExtraRgba = null, componentTransfer = null, preferOutput = false }) {
   const { worldmapMpqPath } = useConnection();
 
   const [mounted, setMounted]     = useState(false);
@@ -174,6 +178,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
   const [geoError, setGeoError]   = useState(null);
   const [texLoading, setTexLoad]  = useState(false);
   const [noTex, setNoTex]         = useState(false);
+  const [skinExtraStatus, setSkinExtraStatus] = useState('idle');
   const [textureVersion, setTextureVersion] = useState(0);
   const [renderPasses, setRenderPasses] = useState([]);
   const [headAnchor, setHeadAnchor] = useState(null);
@@ -183,6 +188,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
   const geoRef     = useRef(null);
   const hairGeoRef = useRef(null);
   const hairTextureRef = useRef(null);
+  const skinExtraTextureRef = useRef(null);
   const hairMaterialRef = useRef(null);
   const hairSubmeshRef = useRef([]);
   const textureRef = useRef(null);
@@ -194,6 +200,14 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
   const serverDefaultRef = useRef(null);
 
   const isCreatureModel = !!creatureModelPath;
+  const readPreviewBlp = useCallback(async (blpPath) => {
+    if (preferOutput && window.azeroth?.dbc?.readOutputBlpTexture) {
+      const staged = await window.azeroth.dbc.readOutputBlpTexture(blpPath);
+      if (staged?.success) return { ...staged, source: 'output' };
+    }
+    const client = await window.azeroth.dbc.readBlpTexture(worldmapMpqPath, blpPath);
+    return client?.success ? { ...client, source: 'client' } : client;
+  }, [preferOutput, worldmapMpqPath]);
 
   useEffect(() => {
     if (!skinRgba?.data || !skinRgba.width || !skinRgba.height || isCreatureModel) return;
@@ -205,10 +219,19 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
   }, [skinRgba, isCreatureModel]);
 
   useEffect(() => {
+    if (!skinExtraRgba?.data || !skinExtraRgba.width || !skinExtraRgba.height || isCreatureModel) return;
+    skinExtraTextureRef.current?.dispose?.();
+    const tex = new THREE.DataTexture(new Uint8Array(skinExtraRgba.data), skinExtraRgba.width, skinExtraRgba.height, THREE.RGBAFormat);
+    tex.needsUpdate = true; tex.flipY = false;
+    skinExtraTextureRef.current = tex; setTextureVersion(v => v + 1);
+    return () => tex.dispose();
+  }, [skinExtraRgba, isCreatureModel]);
+
+  useEffect(() => {
     const layers = textureLayers.map(layer => typeof layer === 'string' ? { path: layer } : layer).filter(layer => layer?.path && layer.region !== 'hair-primary');
     if (!skinRgba?.data || !layers.length || !active || !worldmapMpqPath || isCreatureModel) return;
     let cancelled = false;
-    Promise.all(layers.map(layer => window.azeroth.dbc.readBlpTexture(worldmapMpqPath, layer.path).then(row => new Promise(resolve => { if (!row?.success || !row.png) return resolve(null); const image = new Image(); image.onload = () => resolve({ layer, image }); image.onerror = () => resolve(null); image.src = `data:image/png;base64,${row.png}`; })))).then(entries => {
+    Promise.all(layers.map(layer => readPreviewBlp(layer.path).then(row => new Promise(resolve => { if (!row?.success || !row.png) return resolve(null); const image = new Image(); image.onload = () => resolve({ layer, image }); image.onerror = () => resolve(null); image.src = `data:image/png;base64,${row.png}`; })))).then(entries => {
       if (cancelled) return;
       const canvas = document.createElement('canvas'); canvas.width = skinRgba.width; canvas.height = skinRgba.height;
       const ctx = canvas.getContext('2d'); ctx.putImageData(new ImageData(new Uint8ClampedArray(skinRgba.data), skinRgba.width, skinRgba.height), 0, 0);
@@ -232,7 +255,29 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
       textureRef.current?.dispose?.(); const tex = new THREE.DataTexture(new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data), canvas.width, canvas.height, THREE.RGBAFormat); tex.needsUpdate = true; tex.flipY = false; textureRef.current = tex; setTextureVersion(v => v + 1);
     });
     return () => { cancelled = true; };
-  }, [skinRgba, textureLayers, active, worldmapMpqPath, isCreatureModel]);
+  }, [skinRgba, textureLayers, active, readPreviewBlp, isCreatureModel]);
+
+  useEffect(() => {
+    if (isCreatureModel || skinExtraRgba?.data) { if (skinExtraRgba?.data) setSkinExtraStatus('canvas'); return; }
+    if (!active || !skinExtraBlp || !worldmapMpqPath) { skinExtraTextureRef.current = null; setSkinExtraStatus('missing'); setTextureVersion(v => v + 1); return; }
+    let cancelled = false;
+    readPreviewBlp(skinExtraBlp).then(row => {
+      if (cancelled) return;
+      if (!row?.success || !row.png) { setSkinExtraStatus('missing'); return; }
+      const image = new Image();
+      image.onload = () => {
+        if (cancelled) return;
+        const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height;
+        const context = canvas.getContext('2d'); context.drawImage(image, 0, 0);
+        skinExtraTextureRef.current?.dispose?.();
+        const tex = new THREE.DataTexture(new Uint8Array(context.getImageData(0, 0, canvas.width, canvas.height).data), canvas.width, canvas.height, THREE.RGBAFormat);
+        tex.needsUpdate = true; tex.flipY = false; skinExtraTextureRef.current = tex; setSkinExtraStatus(row.source || 'client'); setTextureVersion(v => v + 1);
+      };
+      image.onerror = () => { if (!cancelled) setSkinExtraStatus('decode-error'); };
+      image.src = `data:image/png;base64,${row.png}`;
+    }).catch(() => { if (!cancelled) setSkinExtraStatus('load-error'); });
+    return () => { cancelled = true; };
+  }, [active, isCreatureModel, skinExtraRgba, skinExtraBlp, readPreviewBlp]);
 
   // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Geometry laden ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
   useEffect(() => {
@@ -412,10 +457,10 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
     const key = `${worldmapMpqPath}|${appearance.face || 0}:${appearance.hairStyle || 0}:${appearance.hairColor || 0}:${appearance.facialHair || 0}|${sources.map(layer => `${layer.path}:${layer.region || ''}`).join('|')}`;
     if (texKey.current === key) return;
     texKey.current = key; setTexLoad(true);
-    Promise.all(sources.map(layer => window.azeroth.dbc.readBlpTexture(worldmapMpqPath, layer.path).then(row => new Promise((resolve, reject) => { if (!row?.success || !row.png) return resolve(null); const img = new Image(); img.onload = () => resolve({ layer, img }); img.onerror = reject; img.src = `data:image/png;base64,${row.png}`; }))))
+    Promise.all(sources.map(layer => readPreviewBlp(layer.path).then(row => new Promise((resolve, reject) => { if (!row?.success || !row.png) return resolve(null); const img = new Image(); img.onload = () => resolve({ layer, img }); img.onerror = reject; img.src = `data:image/png;base64,${row.png}`; }))))
       .then(images => { if (texKey.current !== key || !images[0]?.img) return; const base=images[0].img,cvs=document.createElement('canvas');cvs.width=base.width;cvs.height=base.height;const ctx=cvs.getContext('2d');ctx.drawImage(base,0,0);for(const entry of images.slice(1)){if(!entry)continue;const rect=characterAtlasRect(entry.layer.region,cvs.width,cvs.height);if(rect)ctx.drawImage(entry.img,rect.x,rect.y,rect.width,rect.height);else if(entry.img.width===cvs.width&&entry.img.height===cvs.height)ctx.drawImage(entry.img,0,0);}const data=ctx.getImageData(0,0,cvs.width,cvs.height).data;const tex=new THREE.DataTexture(new Uint8Array(data),cvs.width,cvs.height,THREE.RGBAFormat);tex.needsUpdate=true;tex.flipY=false;textureRef.current=tex;noTexRef.current=false;setNoTex(false);setTextureVersion(v => v + 1);setTexLoad(false); })
       .catch(() => { if (texKey.current !== key) return; textureRef.current=null;noTexRef.current=true;setNoTex(true);setTexLoad(false); });
-  }, [active, isCreatureModel, skinRgba, skinBlp, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), worldmapMpqPath]);
+  }, [active, isCreatureModel, skinRgba, skinBlp, appearance.face, appearance.hairStyle, appearance.hairColor, appearance.facialHair, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), readPreviewBlp]);
 
   useEffect(() => {
     if (isCreatureModel) return;
@@ -425,14 +470,14 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
     hairTextureRef.current = null;
     if (hairMaterialRef.current) { hairMaterialRef.current.map = textureRef.current || null; hairMaterialRef.current.needsUpdate = true; }
     setTextureVersion(v => v + 1);
-    window.azeroth.dbc.readBlpTexture(worldmapMpqPath, hairLayer.path).then(row => {
+    readPreviewBlp(hairLayer.path).then(row => {
       if (cancelled || !row?.success || !row.png) return;
       const img = new Image();
       img.onload = () => { if (cancelled) return; const cvs = document.createElement('canvas'); cvs.width = img.width; cvs.height = img.height; const ctx = cvs.getContext('2d'); ctx.drawImage(img, 0, 0); const data = ctx.getImageData(0, 0, cvs.width, cvs.height).data; const tex = new THREE.DataTexture(new Uint8Array(data), cvs.width, cvs.height, THREE.RGBAFormat); tex.needsUpdate = true; tex.flipY = false; hairTextureRef.current = tex; if (hairMaterialRef.current) { hairMaterialRef.current.map = tex; hairMaterialRef.current.needsUpdate = true; } setTextureVersion(v => v + 1); };
       img.src = `data:image/png;base64,${row.png}`;
     }).catch(() => { if (!cancelled) { hairTextureRef.current = null; if (hairMaterialRef.current) { hairMaterialRef.current.map = textureRef.current || null; hairMaterialRef.current.needsUpdate = true; } setTextureVersion(v => v + 1); } });
     return () => { cancelled = true; };
-  }, [active, isCreatureModel, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), worldmapMpqPath]);
+  }, [active, isCreatureModel, textureLayers.map(layer => typeof layer === 'string' ? layer : `${layer?.path || ''}:${layer?.region || ''}`).join('|'), readPreviewBlp]);
   // ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ Color debug: apply per-group colors to geometry ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã‚ÂÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬
   useEffect(() => {
     const geo = geoRef.current;
@@ -466,6 +511,9 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
           ÃƒÆ’Ã‚Â¢Ãƒâ€¦Ã‚Â¡Ãƒâ€šÃ‚Â  Texture niet gevonden
         </div>
       )}
+      {!isCreatureModel && skinExtraBlp && <div className={`char-m2-loading-badge ${skinExtraStatus === 'missing' || skinExtraStatus === 'load-error' || skinExtraStatus === 'decode-error' ? 'char-m2-overlay-err' : ''}`}>
+        Skin Extra: {skinExtraStatus}
+      </div>}
       {texLoading && (
         <div className="char-m2-loading-badge">
           <Loader2 size={11} className="cc-spin" />
@@ -484,7 +532,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, textureLayers = []
           <directionalLight position={[3, 8, 5]} intensity={1.2} />
           <directionalLight position={[-2, 3, -4]} intensity={0.3} />
           <OrbitControls enablePan={true} enableZoom={true} minDistance={0.5} maxDistance={20} target={[0, 1.0, 0]} />
-          <>{renderPasses.length ? <CharacterPassScene passes={renderPasses} textureRef={textureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} /> : <CharScene geoRef={geoRef} hairGeoRef={hairGeoRef} textureRef={textureRef} hairTextureRef={hairTextureRef} hairMaterialRef={hairMaterialRef} noTexRef={noTexRef} colorDebug={colorDebug} />}{attachedModels.map(model => <AttachedM2 key={`${model.slot}:${model.modelPath}`} model={model} anchor={attachmentPoints[model.attachmentId] || (model.attachmentId === 11 ? headAnchor : null)}/>)}</>
+          <>{renderPasses.length ? <CharacterPassScene passes={renderPasses} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} /> : <CharScene geoRef={geoRef} hairGeoRef={hairGeoRef} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} hairMaterialRef={hairMaterialRef} noTexRef={noTexRef} colorDebug={colorDebug} />}{attachedModels.map(model => <AttachedM2 key={`${model.slot}:${model.modelPath}`} model={model} anchor={attachmentPoints[model.attachmentId] || (model.attachmentId === 11 ? headAnchor : null)}/>)}</>
         </Canvas>
       )}
     </div>

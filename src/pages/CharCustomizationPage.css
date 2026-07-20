@@ -50,6 +50,17 @@
   color: var(--accent-red, #cc4a4a);
 }
 
+.cc-test-output {
+  padding: 7px 28px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(220, 163, 45, .08);
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.cc-test-output.ready { color: var(--accent-green, #4aaa6a); }
+.cc-test-output code { color: var(--gold-bright); }
+
 /* Toolbar */
 .cc-toolbar {
   display: flex;
