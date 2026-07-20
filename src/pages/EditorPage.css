@@ -21,7 +21,7 @@
 /* ── Editor split layout ─────────────────────────────────────── */
 .editor-layout {
 	display: flex;
-	height: calc(100vh - 60px);
+	height: calc(100vh - 67px);
 	overflow: hidden;
 }
 
@@ -29,6 +29,7 @@
 .editor-list {
 	width: 280px;
 	flex-shrink: 0;
+	min-height: 0;
 	border-right: 1px solid var(--border);
 	display: flex;
 	flex-direction: column;
@@ -75,7 +76,9 @@
 
 .list-items {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
+	overflow-x: hidden;
 }
 
 .list-item {
@@ -102,6 +105,7 @@
 }
 
 .list-item-name {
+	min-width: 0;
 	font-size: 13px;
 	font-weight: 500;
 	color: var(--text-primary);
@@ -1048,3 +1052,17 @@
 .creature-display-item-offsets label { display: grid; grid-template-columns: 52px 1fr 72px; gap: 8px; align-items: center; font-size: 12px; }
 .creature-display-item-offsets input[type="range"] { width: 100%; accent-color: #c8912e; }
 .creature-display-item-offsets input[type="number"] { min-width: 0; padding: 5px 7px; }
+.creature-display-help {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 11px;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}

@@ -144,3 +144,6 @@ Geen tussentijdse bevestiging vragen voor deze doc-updates Ã¢â‚¬â€ di
 - WotLK character component atlas is fixed 256�256: torso lower is 128�32 at (128,64); pelvis/leg upper is (128,96,128,64); pelvis/leg lower is (128,160,128,64).
 - Component textures must compose by WMV SLOT_LAYERS priority, not NPC slot order: legs=10, chest=13, belt=18, wrist=19, gloves=20.
 - Belt uses both waist geoset and model1 on native ATT_BELT_BUCKLE (attachment 53).
+- NPC bake export uses the fixed client template `Textures\BakedNPCTextures\CreatureDisplayExtra-24081.blp` and writes `output\BakedNPCTextures\CreatureDisplayExtra-<ExtraID>.blp`. Save automatically writes the matching non-empty filename to CreatureDisplayInfoExtra BakeName field 20; it never writes MPQs. An empty BakeName can crash the 3.3.5 client.
+- `CreatureGeosetData` contains eight 4-bit values: M2 group 1 begins in the low nibble, so group `n`, variant `v` is `v << ((n - 1) * 4)`. NPC character equipment is resolved by the client from `NPCItemDisplay_*`; do not automatically populate this field from ItemDisplayInfo. Existing NPC references with boots use `0`.
+- WotLK `ItemDisplayInfo.dbc` has exactly three `GeosetGroup` fields (7–9). Fields 10–12 are Flags, SpellVisualID and GroupSoundIndex, not further geosets; the reader must never expose them as geosets.

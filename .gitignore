@@ -4,6 +4,7 @@ dist-electron/
 PNG/
 debug-blp/
 output/
+tests/
 .env
 .DS_Store
 *.log

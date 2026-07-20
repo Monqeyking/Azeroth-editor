@@ -7,7 +7,8 @@
     "dev": "concurrently \"vite\" \"wait-on http://localhost:5173 && electron .\"",
     "build": "vite build && electron-builder",
     "preview": "vite preview",
-    "rebuild": "electron-rebuild -f -w node-pty,better-sqlite3"
+    "rebuild": "electron-rebuild -f -w node-pty,better-sqlite3",
+    "test:textures": "node tests/semantic-textures.test.mjs"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",

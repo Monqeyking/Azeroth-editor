@@ -74,7 +74,7 @@ function geosetsFromBitmask(creatureGeosetData) {
   if (!creatureGeosetData) return visible;
   for (let g = 0; g < 8; g++) {
     const v = (creatureGeosetData >> (g * 4)) & 0xF;
-    if (v > 0) visible.add(g * 100 + v);
+    if (v > 0) visible.add((g + 1) * 100 + v);
   }
   return visible;
 }

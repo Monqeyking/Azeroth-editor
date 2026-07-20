@@ -237,8 +237,8 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.readCharSections(dbcPath);
   }, [dbcPath]);
 
-  const writeCharSections = useCallback(async (records) => {
-    return window.azeroth.dbc.writeCharSections(dbcPath, records);
+  const writeCharSections = useCallback(async (records, stageOnly = false) => {
+    return window.azeroth.dbc.writeCharSections(dbcPath, records, stageOnly);
   }, [dbcPath]);
 
   const readBlpTexture = useCallback(async (dataPath, blpPath) => {
