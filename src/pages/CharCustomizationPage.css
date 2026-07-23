@@ -61,6 +61,14 @@
 .cc-test-output.ready { color: var(--accent-green, #4aaa6a); }
 .cc-test-output code { color: var(--gold-bright); }
 
+.cc-race-collision {
+  padding: 8px 28px;
+  border-bottom: 1px solid rgba(235, 150, 49, .35);
+  background: rgba(235, 150, 49, .12);
+  color: #f3bc6b;
+  font-size: 12px;
+}
+
 /* Toolbar */
 .cc-toolbar {
   display: flex;
@@ -903,6 +911,12 @@
 .cc-set-preview .char-m2-viewer { flex:1; min-height:460px; }
 .cc-set-part { display:flex; justify-content:space-between; align-items:center; gap:8px; }
 .cc-set-hint { margin:0; color:var(--text-secondary); font-size:11px; line-height:1.45; }
+.cc-set-completeness { display:flex; flex-direction:column; gap:6px; padding:8px; border:1px solid var(--border); border-radius:6px; font-size:11px; }
+.cc-set-completeness.incomplete { border-color:rgba(224,173,75,.65); background:rgba(224,173,75,.06); }
+.cc-set-completeness.complete { border-color:rgba(67,178,112,.55); background:rgba(67,178,112,.06); }
+.cc-set-completeness small { color:var(--text-secondary); line-height:1.4; }
+.cc-set-completeness label { display:flex; align-items:center; justify-content:space-between; gap:6px; color:var(--text-secondary); }
+.cc-set-completeness select { min-width:84px; }
 .cc-set-blp-group { display:flex; flex-direction:column; gap:5px; padding:8px; border:1px solid var(--border); border-radius:6px; color:var(--text-secondary); font-size:11px; }
 .cc-set-blp-pair,.cc-set-blp { display:flex; align-items:center; gap:7px; }
 .cc-set-blp-pair em,.cc-set-blp-group small { color:var(--text-muted); font-size:10px; font-style:normal; }
