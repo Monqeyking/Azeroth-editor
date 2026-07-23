@@ -55,6 +55,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     appendCharStartOutfit: (dbcPath, rows) => ipcRenderer.invoke('dbc:appendCharStartOutfit', dbcPath, rows),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
     readCharSectionsTestOutput: () => ipcRenderer.invoke('dbc:readCharSectionsTestOutput'),
+    exportCharSectionsCsv: (rows) => ipcRenderer.invoke('dbc:exportCharSectionsCsv', rows),
     readCreatureDisplayCreator: (dbcPath) => ipcRenderer.invoke('dbc:readCreatureDisplayCreator', dbcPath),
     findNextCreatureDisplayId: (dbcPath, startId) => ipcRenderer.invoke('dbc:findNextCreatureDisplayId', dbcPath, startId),
     createCreatureDisplay: (dbcPath, payload) => ipcRenderer.invoke('dbc:createCreatureDisplay', dbcPath, payload),

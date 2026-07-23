@@ -5,6 +5,7 @@ import './DashboardPage.css';
 import './EditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 // â”€â”€ Constants â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const QUEST_TYPE_OPTIONS = [
@@ -178,18 +179,34 @@ function LookupName({ id, type, query, placeholder = "-" }) {
   );
 }
 
-function QuestGiverList({ questId, table, label, query }) {
+const QUEST_NPC_MAP_NAMES = { 0: 'Eastern Kingdoms', 1: 'Kalimdor', 530: 'Outland', 571: 'Northrend' };
+
+function QuestGiverList({ questId, table: initialTable, label, query, navigate, customStart = 4000000 }) {
+  const [table, setTable] = useState(initialTable);
   const [rows, setRows] = useState([]);
   const [search, setSearch] = useState('');
   const [results, setResults] = useState([]);
+  const [customOnly, setCustomOnly] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [searching, setSearching] = useState(false);
+  const [error, setError] = useState('');
 
   const load = useCallback(async () => {
     if (!questId) { setRows([]); return; }
-    const r = await query(
-      `SELECT t.id, c.name FROM ${table} t LEFT JOIN creature_template c ON c.entry = t.id WHERE t.quest = ? ORDER BY t.id`,
-      [questId]
-    );
-    setRows(r.data || []);
+    setLoading(true); setError('');
+    try {
+      const r = await query(
+        `SELECT t.id, ct.name, COUNT(c.guid) AS spawnCount,
+                (SELECT c1.map FROM creature c1 WHERE c1.id1 = t.id ORDER BY c1.guid LIMIT 1) AS firstMap,
+                (SELECT c1.position_x FROM creature c1 WHERE c1.id1 = t.id ORDER BY c1.guid LIMIT 1) AS firstX,
+                (SELECT c1.position_y FROM creature c1 WHERE c1.id1 = t.id ORDER BY c1.guid LIMIT 1) AS firstY
+         FROM ${table} t LEFT JOIN creature_template ct ON ct.entry = t.id LEFT JOIN creature c ON c.id1 = t.id
+         WHERE t.quest = ? GROUP BY t.id, ct.name ORDER BY t.id`, [questId]
+      );
+      if (!r.success) throw new Error(r.error || 'Could not load NPC relations.');
+      setRows(r.data || []);
+    } catch (e) { setRows([]); setError(e.message); }
+    setLoading(false);
   }, [questId, table, query]);
 
   useEffect(() => { load(); }, [load]);
@@ -199,42 +216,60 @@ function QuestGiverList({ questId, table, label, query }) {
     if (term.length < 2) { setResults([]); return; }
     const isNum = /^\d+$/.test(term);
     const t = setTimeout(async () => {
-      const r = await query(
-        `SELECT entry, name FROM creature_template WHERE ${isNum ? 'entry = ?' : 'name LIKE ?'} ORDER BY entry LIMIT 20`,
-        [isNum ? term : `%${term}%`]
-      );
-      setResults(r.data || []);
+      setSearching(true); setError('');
+      try {
+        const r = await query(
+          `SELECT entry, name FROM creature_template WHERE ${isNum ? 'entry = ?' : 'name LIKE ?'}${customOnly ? ' AND entry >= ?' : ''} ORDER BY entry >= ? DESC, entry DESC LIMIT 20`,
+          [...(isNum ? [Number(term)] : [`%${term}%`]), ...(customOnly ? [customStart] : []), customStart]
+        );
+        if (!r.success) throw new Error(r.error || 'Creature search failed.');
+        setResults((r.data || []).filter(c => !rows.some(row => Number(row.id) === Number(c.entry))));
+      } catch (e) { setResults([]); setError(e.message); }
+      setSearching(false);
     }, 250);
     return () => clearTimeout(t);
-  }, [search, query]);
+  }, [search, query, customOnly, customStart, rows]);
 
   const add = async (entry) => {
-    await query(`INSERT IGNORE INTO ${table} (id, quest) VALUES (?, ?)`, [entry, questId]);
-    setSearch('');
-    setResults([]);
-    load();
+    try {
+      const r = await query(`INSERT IGNORE INTO ${table} (id, quest) VALUES (?, ?)`, [entry, questId]);
+      if (!r.success) throw new Error(r.error || 'Could not add NPC relation.');
+      setSearch(''); setResults([]); await load();
+    } catch (e) { setError(e.message); }
   };
 
   const remove = async (entry) => {
-    await query(`DELETE FROM ${table} WHERE id = ? AND quest = ?`, [entry, questId]);
-    load();
+    if (!window.confirm(`Remove creature #${entry} from this quest? The creature and quest will not be deleted.`)) return;
+    try {
+      const r = await query(`DELETE FROM ${table} WHERE id = ? AND quest = ?`, [entry, questId]);
+      if (!r.success) throw new Error(r.error || 'Could not remove NPC relation.');
+      await load();
+    } catch (e) { setError(e.message); }
   };
 
   return (
-    <div>
-      <H5>{label}</H5>
+    <div style={{ padding: '20px 28px 32px' }}>
+      <div className="creature-subtabs" style={{ marginBottom: '16px' }}>
+        <button className={`creature-subtab ${table === 'creature_queststarter' ? 'active' : ''}`} onClick={() => setTable('creature_queststarter')}>Quest Givers</button>
+        <button className={`creature-subtab ${table === 'creature_questender' ? 'active' : ''}`} onClick={() => setTable('creature_questender')}>Quest Enders</button>
+      </div>
+      <H5>{table === 'creature_queststarter' ? 'Quest Givers' : 'Quest Enders'}</H5>
+      {error && <div className="editor-msg error">{error}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
+        {loading && <span className="loading-text">Loading NPC relations...</span>}
         {rows.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Geen NPCs gekoppeld</span>}
         {rows.map(r => (
-          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>{r.id}</span>
-            <span>{r.name || '?'}</span>
+          <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 9px', border: '1px solid var(--border)', borderRadius: '5px', fontSize: '12px' }}>
+            <div><strong>{r.name || '(missing creature template)'}</strong><div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>Entry #{r.id} · {Number(r.spawnCount) ? `${r.spawnCount} spawn${Number(r.spawnCount) === 1 ? '' : 's'}${r.firstMap != null ? ` · ${QUEST_NPC_MAP_NAMES[r.firstMap] || `Map ${r.firstMap}`} (${Number(r.firstX).toFixed(1)}, ${Number(r.firstY).toFixed(1)})` : ''}` : 'No spawn'}</div></div>
+            <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', whiteSpace: 'nowrap' }} onClick={() => navigate(r.id)}>Open NPC</button>
             <button type="button" className="btn-ghost" style={{ marginLeft: 'auto', padding: '1px 6px' }} onClick={() => remove(r.id)}><X size={12} /></button>
           </div>
         ))}
       </div>
       <div style={{ position: 'relative', maxWidth: '280px' }}>
-        <input type="text" placeholder="Zoek NPC op naam of entryâ€¦" value={search} onChange={e => setSearch(e.target.value)} />
+        <label style={{ display: 'flex', gap: '6px', alignItems: 'center', fontSize: '12px', marginBottom: '6px' }}><input type="checkbox" checked={customOnly} onChange={e => setCustomOnly(e.target.checked)} /> Custom creatures only</label>
+        <input type="text" placeholder="Search by NPC name or entry ID..." value={search} onChange={e => setSearch(e.target.value)} />
+        {searching && <div className="loading-text">Searching creatures...</div>}
         {results.length > 0 && (
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', marginTop: '2px' }}>
             {results.map(c => (
@@ -464,7 +499,7 @@ function QuestPoiEditor({ questId, query, dbcPath, soapConfig, soapCommand }) {
     <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}><button type="button" className="btn-ghost" onClick={addPoi}>Add POI</button><button type="button" className="btn-primary" disabled={busy} onClick={save}>{busy ? 'Saving...' : 'Save World Map POIs'}</button><span style={{ color: 'var(--text-muted)', fontSize: '11px' }}>{message}</span></div>
   </section>;
 }
-function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeField, setActiveField, lookupEpoch, poiProps }) {
+function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNpc, activeField, setActiveField, lookupEpoch, poiProps }) {
   const [expandedFlags, setExpandedFlags] = useState(false);
   const [tab, setTab] = useState('General');
 
@@ -608,7 +643,7 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
     </div>
   );
 
-  const tabs = ['General', 'Texts', 'Objectives', 'Rewards', 'Chain'];
+  const tabs = ['General', 'Texts', 'Objectives', 'Rewards', 'Chain', ...(form.ID ? ['NPCs'] : [])];
 
   return (
     <>
@@ -651,11 +686,11 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, activeFi
             <BitmaskRow fieldKey="AllowableClasses" bits={ALLOWABLE_CLASS_BITS} label="Allowable Classes" note="(0 = all)" />
             <BitmaskRow fieldKey="SpecialFlags" bits={SPECIAL_FLAGS_BITS} label="Special Flags" />
           </div>
-          <div style={{ gridColumn: '1/-1', display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: '16px' }}>
-            <QuestGiverList questId={form.ID} table="creature_queststarter" label="Quest Starter NPCs" query={query} />
-            <QuestGiverList questId={form.ID} table="creature_questender" label="Quest Ender NPCs" query={query} />
-          </div>
         </div>
+      )}
+
+      {tab === 'NPCs' && (
+        <QuestGiverList questId={form.ID} table="creature_queststarter" label="Quest Givers" query={query} navigate={onOpenNpc} />
       )}
 
       {/* â”€â”€ Texts â”€â”€ */}
@@ -947,6 +982,8 @@ function QuestFilters({ filters, setFilters }) {
 // â”€â”€ QuestEditorPage â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 export default function QuestEditorPage() {
   const { query, soapCommand, soapConfig, findNextId, idRanges, runAtomicWrite, dbcPath } = useConnection();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [search, setSearch] = useState('');
   const [filters, setFilters] = useState({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' });
   const [quests, setQuests] = useState([]);
@@ -972,6 +1009,7 @@ export default function QuestEditorPage() {
   const [createMsg, setCreateMsg] = useState(null);
 
   const searchRef = useRef(null);
+  const requestedQuestRef = useRef(null);
 
   const ALLIANCE_MASK = 1 | 4 | 8 | 64 | 1024 | 2048;
   const HORDE_MASK    = 2 | 16 | 32 | 128 | 256 | 512;
@@ -1045,6 +1083,14 @@ export default function QuestEditorPage() {
       setMsg(null);
     }
   };
+
+  useEffect(() => {
+    const id = Number(new URLSearchParams(location.search).get('quest'));
+    if (!id || requestedQuestRef.current === id) return;
+    requestedQuestRef.current = id;
+    setSearch(String(id));
+    selectQuest(id);
+  }, [location.search]);
 
   const handleChange = (key, value) => {
     setForm(f => ({ ...f, [key]: value }));
@@ -1297,7 +1343,7 @@ export default function QuestEditorPage() {
                   </div>
                 </div>
                 {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
-                <QuestFormFields form={form} baseline={editBaseline} onChange={handleChange} query={query} onNavigate={selectQuest} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} poiProps={{ dbcPath, soapConfig, soapCommand }} />
+                <QuestFormFields form={form} baseline={editBaseline} onChange={handleChange} query={query} onNavigate={selectQuest} onOpenNpc={entry => navigate(`/creatures?entry=${entry}`)} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} poiProps={{ dbcPath, soapConfig, soapCommand }} />
               </>
             )
           )}

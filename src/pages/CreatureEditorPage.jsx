@@ -1,7 +1,7 @@
 ﻿import { useState, useEffect, useCallback, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Plus, Save, RotateCcw, Copy, ChevronRight, MousePointerClick, Columns2, ClipboardCopy, Trash2, GitBranch } from 'lucide-react';
+import { Search, Plus, Save, RotateCcw, Copy, ChevronRight, MousePointerClick, Columns2, ClipboardCopy, Trash2, GitBranch, MapPin } from 'lucide-react';
 import FlagsSelector from '../components/FlagsSelector';
 import CreatureModelPreview from '../components/creature/CreatureModelPreview';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
@@ -35,6 +35,8 @@ const SUB_TABS = [
   { id: 'trainer', label: 'Trainer Settings', role: 'trainer' },
   { id: 'vendor', label: 'Vendor Items', role: 'vendor' },
   { id: 'spawns', label: 'World Spawns', role: 'spawn' },
+  { id: 'directions', label: 'Directions' },
+  { id: 'quests', label: 'Quests' },
 ];
 
 const VISIBILITY_OPTIONS = [
@@ -275,11 +277,13 @@ function toEnemyMeta(row) {
 export default function CreatureEditorPage() {
   const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
   const navigate = useNavigate();
+  const location = useLocation();
   const [search, setSearch] = useState('');
   const [creatureTypeFilter, setCreatureTypeFilter] = useState('all');
   const [minLevelFilter, setMinLevelFilter] = useState('');
   const [maxLevelFilter, setMaxLevelFilter] = useState('');
   const [rankFilter, setRankFilter] = useState('all');
+  const [gossipFilter, setGossipFilter] = useState('all');
   const [factionFilter, setFactionFilter] = useState('');
   const [creatures, setCreatures] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -319,6 +323,15 @@ export default function CreatureEditorPage() {
   const [refModelRows, setRefModelRows] = useState([EMPTY_MODEL_ROW(0)]);
   const [refSelectedModelIdx, setRefSelectedModelIdx] = useState(0);
   const [refRoles, setRefRoles] = useState({ trainer: false, vendor: false, spawn: false });
+  const [questRelations, setQuestRelations] = useState({ starters: [], enders: [] });
+  const [directions, setDirections] = useState({ loading: false, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null });
+  const [directionTargetEntry, setDirectionTargetEntry] = useState('4000002');
+  const [directionTarget, setDirectionTarget] = useState(null);
+  const [directionTargetSpawns, setDirectionTargetSpawns] = useState([]);
+  const [directionSpawnGuid, setDirectionSpawnGuid] = useState('');
+  const [directionPlan, setDirectionPlan] = useState(null);
+  const [directionSaving, setDirectionSaving] = useState(false);
+  const [questRelationTab, setQuestRelationTab] = useState('starters');
   const [enemyMeta, setEnemyMeta] = useState(DEFAULT_ENEMY_META);
   const [refEnemyMeta, setRefEnemyMeta] = useState(DEFAULT_ENEMY_META);
   const [dirty, setDirty] = useState(false);
@@ -329,6 +342,8 @@ export default function CreatureEditorPage() {
   const [errors, setErrors] = useState({});
   const [copying, setCopying] = useState(false);
   const searchRef = useRef(null);
+  const creatureSearchRequestRef = useRef(0);
+  const requestedEntryRef = useRef(null);
   const refSearchRef = useRef(null);
 
   const saveRecent = useCallback((entry) => {
@@ -341,12 +356,14 @@ export default function CreatureEditorPage() {
   }, []);
 
   const searchCreatures = useCallback(async (term) => {
+    const requestId = ++creatureSearchRequestRef.current;
     setLoading(true);
-    await ensureEnemyMetaTable();
-    const trimmed = term.trim();
-    const isNum = /^\d+$/.test(trimmed);
-    const params = [];
-    let sql = `
+    try {
+      await ensureEnemyMetaTable();
+      const trimmed = term.trim();
+      const isNum = /^\d+$/.test(trimmed);
+      const params = [];
+      let sql = `
       SELECT
         ct.entry,
         ct.name,
@@ -363,43 +380,212 @@ export default function CreatureEditorPage() {
       LEFT JOIN enemy_editor_meta em ON em.entry = ct.entry
       WHERE 1=1
     `;
-    if (trimmed) {
-      if (isNum) {
-        sql += ' AND ct.entry = ?';
-        params.push(Number(trimmed));
-      } else {
-        sql += ' AND ct.name LIKE ?';
-        params.push('%' + trimmed + '%');
+      if (trimmed) {
+        if (isNum) {
+          sql += ' AND ct.entry = ?';
+          params.push(Number(trimmed));
+        } else {
+          sql += ' AND ct.name LIKE ?';
+          params.push('%' + trimmed + '%');
+        }
       }
+      if (creatureTypeFilter !== 'all') {
+        sql += ' AND ct.type = ?';
+        params.push(Number(creatureTypeFilter));
+      }
+      if (rankFilter !== 'all') {
+        sql += ' AND ct.rank = ?';
+        params.push(Number(rankFilter));
+      }
+      if (gossipFilter === 'guards') sql += `
+        AND (ct.npcflag & 1) <> 0
+        AND EXISTS (
+          SELECT 1 FROM gossip_menu_option gmo
+          WHERE gmo.MenuID = ct.gossip_menu_id
+            AND gmo.OptionText IN ('Class Trainer', 'A class trainer')
+        )
+      `;
+      if (factionFilter.trim() !== '') {
+        sql += ' AND ct.faction = ?';
+        params.push(Number(factionFilter));
+      }
+      if (minLevelFilter !== '') {
+        sql += ' AND ct.maxlevel >= ?';
+        params.push(Number(minLevelFilter));
+      }
+      if (maxLevelFilter !== '') {
+        sql += ' AND ct.minlevel <= ?';
+        params.push(Number(maxLevelFilter));
+      }
+      sql += ' ORDER BY ct.entry DESC';
+      const result = await query(sql, params);
+      if (requestId === creatureSearchRequestRef.current) setCreatures(result.data || []);
+    } finally {
+      if (requestId === creatureSearchRequestRef.current) setLoading(false);
     }
-    if (creatureTypeFilter !== 'all') {
-      sql += ' AND ct.type = ?';
-      params.push(Number(creatureTypeFilter));
+  }, [query, creatureTypeFilter, rankFilter, gossipFilter, factionFilter, minLevelFilter, maxLevelFilter]);
+
+  const loadDirections = useCallback(async (entry) => {
+    setDirections({ loading: true, error: '', menus: [], pois: [], conditions: [], guardSpawns: [] });
+    try {
+      const [treeRes, guardSpawnRes, metaRes] = await Promise.all([
+        query(`
+          WITH RECURSIVE menu_tree AS (
+            SELECT gossip_menu_id AS MenuID, 0 AS depth, CAST(gossip_menu_id AS CHAR(2000)) AS path
+            FROM creature_template WHERE entry = ?
+            UNION ALL
+            SELECT gmo.ActionMenuID, mt.depth + 1, CONCAT(mt.path, ' -> ', gmo.ActionMenuID)
+            FROM menu_tree mt JOIN gossip_menu_option gmo ON gmo.MenuID = mt.MenuID
+            WHERE gmo.ActionMenuID <> 0 AND mt.depth < 8
+              AND FIND_IN_SET(gmo.ActionMenuID, REPLACE(mt.path, ' -> ', ',')) = 0
+          )
+          SELECT mt.depth, mt.path, mt.MenuID, gm.TextID, gmo.OptionID, gmo.OptionText,
+                 gmo.OptionType, gmo.OptionNpcFlag, gmo.ActionMenuID, gmo.ActionPoiID
+          FROM menu_tree mt
+          LEFT JOIN gossip_menu gm ON gm.MenuID = mt.MenuID
+          LEFT JOIN gossip_menu_option gmo ON gmo.MenuID = mt.MenuID
+          ORDER BY mt.depth, mt.MenuID, gmo.OptionID`, [entry]),
+        query('SELECT guid, map, zoneId, areaId, position_x, position_y, position_z FROM creature WHERE id1 = ? ORDER BY map, guid', [entry]),
+        query('SELECT * FROM guard_directions_editor_meta WHERE guard_entry = ? LIMIT 1', [entry]).catch(() => ({ data: [] })),
+      ]);
+      const menus = treeRes.data || [];
+      const poiIds = [...new Set(menus.map(row => Number(row.ActionPoiID)).filter(Boolean))];
+      const menuIds = [...new Set(menus.map(row => Number(row.MenuID)).filter(Boolean))];
+      const optionIds = [...new Set(menus.map(row => Number(row.OptionID)).filter(Number.isFinite))];
+      const [poiRes, conditionRes] = await Promise.all([
+        poiIds.length
+          ? query(`SELECT poi.*, ct.entry AS destinationEntry, ct.name AS destinationName, ct.subname AS destinationSubname,
+                    c.guid AS destinationGuid, c.map AS destinationMap, c.position_x, c.position_y, c.position_z
+                   FROM points_of_interest poi
+                   LEFT JOIN creature_template ct ON ct.name = poi.Name
+                   LEFT JOIN creature c ON c.id1 = ct.entry
+                   WHERE poi.ID IN (${poiIds.map(() => '?').join(',')})
+                   ORDER BY poi.ID, c.guid`, poiIds)
+          : Promise.resolve({ data: [] }),
+        menuIds.length
+          ? query(`SELECT DISTINCT c.* FROM conditions c
+                   WHERE c.SourceGroup IN (${menuIds.map(() => '?').join(',')})
+                      OR c.SourceEntry IN (${menuIds.map(() => '?').join(',')})
+                      OR c.SourceId IN (${menuIds.map(() => '?').join(',')})
+                      ${optionIds.length ? `OR c.SourceEntry IN (${optionIds.map(() => '?').join(',')}) OR c.SourceGroup IN (${optionIds.map(() => '?').join(',')})` : ''}
+                   ORDER BY c.SourceTypeOrReferenceId, c.SourceGroup, c.SourceEntry`, [...menuIds, ...menuIds, ...menuIds, ...optionIds, ...optionIds])
+          : Promise.resolve({ data: [] }),
+      ]);
+      const poiGroups = Object.values((poiRes.data || []).reduce((out, row) => {
+        const key = row.ID;
+        if (!out[key]) out[key] = { ...row, destinations: [] };
+        if (row.destinationEntry) out[key].destinations.push({ entry: row.destinationEntry, name: row.destinationName, subname: row.destinationSubname, guid: row.destinationGuid, map: row.destinationMap, x: row.position_x, y: row.position_y, z: row.position_z });
+        return out;
+      }, {}));
+      setDirections({ loading: false, error: '', menus, pois: poiGroups, conditions: conditionRes.data || [], guardSpawns: guardSpawnRes.data || [], meta: metaRes.data?.[0] || null });
+    } catch (err) {
+      setDirections({ loading: false, error: err?.message || 'Could not inspect directions.', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null });
     }
-    if (rankFilter !== 'all') {
-      sql += ' AND ct.rank = ?';
-      params.push(Number(rankFilter));
-    }
-    if (factionFilter.trim() !== '') {
-      sql += ' AND ct.faction = ?';
-      params.push(Number(factionFilter));
-    }
-    if (minLevelFilter !== '') {
-      sql += ' AND ct.maxlevel >= ?';
-      params.push(Number(minLevelFilter));
-    }
-    if (maxLevelFilter !== '') {
-      sql += ' AND ct.minlevel <= ?';
-      params.push(Number(maxLevelFilter));
-    }
-    sql += ' ORDER BY ct.entry DESC';
-    const result = await query(sql, params);
-    setCreatures(result.data || []);
-    setLoading(false);
-  }, [query, creatureTypeFilter, rankFilter, factionFilter, minLevelFilter, maxLevelFilter]);
+  }, [query]);
+
+  const loadDirectionTarget = useCallback(async (entry) => {
+    const id = Number(entry);
+    if (!id) { setDirectionTarget(null); setDirectionTargetSpawns([]); return; }
+    const [templateRes, spawnRes] = await Promise.all([
+      query('SELECT entry, name, subname FROM creature_template WHERE entry = ? LIMIT 1', [id]),
+      query('SELECT guid, map, position_x, position_y, position_z FROM creature WHERE id1 = ? ORDER BY map, guid', [id]),
+    ]);
+    setDirectionTarget(templateRes.data?.[0] || null);
+    setDirectionTargetSpawns(spawnRes.data || []);
+    setDirectionSpawnGuid(spawnRes.data?.[0]?.guid ? String(spawnRes.data[0].guid) : '');
+  }, [query]);
+
+  const buildDirectionPlan = useCallback(async () => {
+    const rootMenuId = Number(form.gossip_menu_id);
+    const classRoot = directions.menus.find(row => Number(row.MenuID) === rootMenuId && ['Class Trainer', 'A class trainer'].includes(row.OptionText));
+    const classMenuId = Number(classRoot?.ActionMenuID);
+    const spawn = directionTargetSpawns.find(row => String(row.guid) === String(directionSpawnGuid));
+    if (!rootMenuId || !classMenuId) { setMsg({ type: 'error', text: 'This guard needs an existing Class Trainer direction branch first.' }); return; }
+    if (!directionTarget || !spawn) { setMsg({ type: 'error', text: 'Select a destination template and one of its live spawns.' }); return; }
+    const [rootMenuRes, classMenuRes, rootOptionsRes, classOptionsRes, leafRes, usedMenusRes, usedPoiRes, classRefsRes] = await Promise.all([
+      query('SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1', [rootMenuId]),
+      query('SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1', [classMenuId]),
+      query('SELECT * FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID', [rootMenuId]),
+      query('SELECT * FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID', [classMenuId]),
+      query('SELECT TextID FROM gossip_menu WHERE MenuID = 1909 LIMIT 1'),
+      query('SELECT MenuID FROM gossip_menu WHERE MenuID >= 4000000 ORDER BY MenuID'),
+      query('SELECT ID FROM points_of_interest WHERE ID >= 4000000 ORDER BY ID'),
+      query('SELECT MenuID, OptionID FROM gossip_menu_option WHERE ActionMenuID = ?', [classMenuId]),
+    ]);
+    const nextFree = (rows, field) => { const used = new Set((rows.data || []).map(row => Number(row[field]))); let id = 4000000; while (used.has(id)) id++; return id; };
+    const refs = classRefsRes.data || [];
+    const canUseSharedClassMenu = refs.length === 1 && Number(refs[0].MenuID) === rootMenuId && Number(refs[0].OptionID) === Number(classRoot.OptionID);
+    if (!canUseSharedClassMenu) { setMsg({ type: 'error', text: 'This Class Trainer submenu is shared outside this city root; private cloning remains required for it.' }); return; }
+    const usedMenus = new Set((usedMenusRes.data || []).map(row => Number(row.MenuID)));
+    let newLeaf = 4000000; while (usedMenus.has(newLeaf)) newLeaf++;
+    const newPoi = nextFree(usedPoiRes, 'ID');
+    const rootOptions = rootOptionsRes.data || [];
+    const classOptions = classOptionsRes.data || [];
+    const shaman = classOptions.find(row => row.OptionText === 'Shaman');
+    if (shaman) { setMsg({ type: 'error', text: 'This city already has a Shaman option. Inspect it instead of overwriting it.' }); return; }
+    const shamanOptionId = Math.max(-1, ...classOptions.map(row => Number(row.OptionID))) + 1;
+    setDirectionPlan({ mode: 'shared', rootMenuId, classMenuId, newLeaf, newPoi, rootTextId: rootMenuRes.data?.[0]?.TextID, classTextId: classMenuRes.data?.[0]?.TextID, leafTextId: leafRes.data?.[0]?.TextID || 2562, rootOptions, classOptions, classRootOptionId: Number(classRoot.OptionID), shamanOptionId, spawn, target: directionTarget });
+  }, [directions.menus, directionSpawnGuid, directionTarget, directionTargetSpawns, form.gossip_menu_id, query]);
+
+  const saveDirectionPlan = useCallback(async () => {
+    if (!directionPlan || !selected) return;
+    if (!window.confirm(`Add a shared city Shaman direction for ${selected.name}? This changes the verified city Class Trainer menu for its guard spawns.`)) return;
+    const p = directionPlan;
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    const optionSql = `INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`;
+    const optionParams = (row, menuId, patch = {}) => [menuId, row.OptionID, row.OptionIcon, row.OptionText, row.OptionBroadcastTextID, row.OptionType, row.OptionNpcFlag, patch.actionMenuId ?? row.ActionMenuID, patch.actionPoiId ?? row.ActionPoiID, row.BoxCoded, row.BoxMoney, row.BoxText, row.BoxBroadcastTextID, row.VerifiedBuild];
+    setDirectionSaving(true);
+    try {
+      await run(`CREATE TABLE IF NOT EXISTS guard_directions_editor_meta (
+        guard_entry INT UNSIGNED NOT NULL PRIMARY KEY, root_menu_id INT UNSIGNED NOT NULL, class_menu_id INT UNSIGNED NOT NULL,
+        leaf_menu_id INT UNSIGNED NOT NULL, poi_id INT UNSIGNED NOT NULL, previous_root_menu_id INT UNSIGNED NOT NULL,
+        destination_entry INT UNSIGNED NOT NULL, destination_guid INT UNSIGNED NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`);
+      const modeColumn = await query("SHOW COLUMNS FROM guard_directions_editor_meta LIKE 'mode'");
+      if (!modeColumn.data?.length) await run("ALTER TABLE guard_directions_editor_meta ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'clone', ADD COLUMN shaman_option_id SMALLINT UNSIGNED NULL");
+      await run('START TRANSACTION');
+      await run('INSERT INTO gossip_menu (MenuID, TextID) VALUES (?,?)', [p.newLeaf, p.leafTextId]);
+      await run(optionSql, [p.classMenuId, p.shamanOptionId, 0, 'Shaman', 45410, 1, 1, p.newLeaf, p.newPoi, 0, 0, '', 0, null]);
+      await run('INSERT INTO points_of_interest (ID, PositionX, PositionY, Icon, Flags, Importance, Name) VALUES (?,?,?,?,?,?,?)', [p.newPoi, p.spawn.position_x, p.spawn.position_y, 7, 99, 0, p.target.name]);
+      await run('INSERT INTO guard_directions_editor_meta (guard_entry, root_menu_id, class_menu_id, leaf_menu_id, poi_id, previous_root_menu_id, destination_entry, destination_guid, mode, shaman_option_id) VALUES (?,?,?,?,?,?,?,?,?,?)', [selected.entry, p.rootMenuId, p.classMenuId, p.newLeaf, p.newPoi, p.rootMenuId, p.target.entry, p.spawn.guid, 'shared', p.shamanOptionId]);
+      await run('COMMIT');
+      setMsg({ type: 'success', text: `Added shared city Shaman directions to ${p.target.name} at spawn #${p.spawn.guid}.` });
+      setDirectionPlan(null);
+      await selectCreature(selected.entry);
+    } catch (err) {
+      try { await query('ROLLBACK'); } catch { /* noop */ }
+      setMsg({ type: 'error', text: err.message || 'Could not create directions.' });
+    } finally { setDirectionSaving(false); }
+  }, [directionPlan, query, selected]);
+
+  const removeDirectionPlan = useCallback(async () => {
+    const meta = directions.meta;
+    if (!meta || !selected || !window.confirm(`Remove only the editor-created Shaman directions from ${selected.name}?`)) return;
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    setDirectionSaving(true);
+    try {
+      await run('START TRANSACTION');
+      if (meta.mode === 'shared') {
+        await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [meta.class_menu_id, meta.shaman_option_id]);
+        await run('DELETE FROM gossip_menu WHERE MenuID = ?', [meta.leaf_menu_id]);
+      } else {
+        await run('UPDATE creature_template SET gossip_menu_id = ? WHERE entry = ?', [meta.previous_root_menu_id, selected.entry]);
+        await run('DELETE FROM gossip_menu_option WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
+        await run('DELETE FROM gossip_menu WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
+      }
+      await run('DELETE FROM points_of_interest WHERE ID = ?', [meta.poi_id]);
+      await run('DELETE FROM guard_directions_editor_meta WHERE guard_entry = ?', [selected.entry]);
+      await run('COMMIT');
+      setMsg({ type: 'success', text: 'Removed only the directions route created by this editor.' });
+      await selectCreature(selected.entry);
+    } catch (err) {
+      try { await query('ROLLBACK'); } catch { /* noop */ }
+      setMsg({ type: 'error', text: err.message || 'Could not remove directions.' });
+    } finally { setDirectionSaving(false); }
+  }, [directions.meta, query, selected]);
 
   const loadRelatedData = useCallback(async (entry) => {
-    const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes, trainerDefRes] = await Promise.all([
+    const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes, trainerDefRes, starterRes, enderRes] = await Promise.all([
       query('SELECT SpellID, MoneyCost, ReqSkillLine, ReqSkillRank, ReqLevel, ReqSpell FROM npc_trainer WHERE ID = ?', [entry]),
       query('SELECT item, maxcount, incrtime, ExtendedCost FROM npc_vendor WHERE entry = ? ORDER BY slot', [entry]),
       query('SELECT guid, map, position_x, position_y, position_z, orientation, spawnMask, phaseMask FROM creature WHERE id1 = ? LIMIT 1', [entry]),
@@ -407,6 +593,8 @@ export default function CreatureEditorPage() {
       query('SELECT Idx, CreatureDisplayID, DisplayScale, Probability, VerifiedBuild FROM creature_template_model WHERE CreatureID = ? ORDER BY Idx', [entry]),
       query('SELECT ItemID1, ItemID2, ItemID3 FROM creature_equip_template WHERE CreatureID = ? AND ID = 1 LIMIT 1', [entry]),
       query('SELECT cdt.TrainerId, t.Type, t.Requirement, t.Greeting FROM creature_default_trainer cdt JOIN trainer t ON t.Id = cdt.TrainerId WHERE cdt.CreatureId = ? LIMIT 1', [entry]),
+      query('SELECT qt.ID, qt.LogTitle FROM creature_queststarter cqs JOIN quest_template qt ON qt.ID = cqs.quest WHERE cqs.id = ? ORDER BY qt.ID', [entry]),
+      query('SELECT qt.ID, qt.LogTitle FROM creature_questender cqe JOIN quest_template qt ON qt.ID = cqe.quest WHERE cqe.id = ? ORDER BY qt.ID', [entry]),
     ]);
     const trainerDefRow = trainerDefRes.data?.[0] || null;
     const trainerSpellSummaryRes = trainerDefRow
@@ -421,6 +609,7 @@ export default function CreatureEditorPage() {
       equip: equipRes.data?.[0] || null,
       trainerDef: trainerDefRow,
       trainerSpellSummary: trainerSpellSummaryRes?.data?.[0] || null,
+      questRelations: { starters: starterRes.data || [], enders: enderRes.data || [] },
     };
   }, [query]);
 
@@ -492,6 +681,8 @@ export default function CreatureEditorPage() {
     setTrainerSpells(related.trainerSpells);
     setTrainerDef(related.trainerDef);
     setTrainerSpellSummary(related.trainerSpellSummary);
+    setQuestRelations(related.questRelations);
+    loadDirections(entry);
     setTrainerDefMode(null);
     setVendorItems(related.vendorItems.length ? related.vendorItems : [EMPTY_VENDOR_ROW()]);
     setSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
@@ -516,6 +707,14 @@ export default function CreatureEditorPage() {
     setActiveSubTab('general');
     saveRecent(entry);
   };
+
+  useEffect(() => {
+    const entry = Number(new URLSearchParams(location.search).get('entry'));
+    if (!entry || requestedEntryRef.current === entry) return;
+    requestedEntryRef.current = entry;
+    setSearch(String(entry));
+    selectCreature(entry);
+  }, [location.search]);
 
   const searchReference = useCallback(async (term) => {
     setRefLoading(true);
@@ -1223,6 +1422,85 @@ export default function CreatureEditorPage() {
     </div>
   );
 
+  const renderDirectionsPanel = () => {
+    if (directions.loading) return <div className="creature-section-block"><p className="field-hint">Inspecting gossip menus and linked points of interest…</p></div>;
+    if (directions.error) return <div className="creature-section-block"><p className="field-hint" style={{ color: 'var(--danger, #ee7070)' }}>{directions.error}</p></div>;
+    const optionRows = directions.menus.filter(row => row.OptionID != null);
+    const poiIds = new Set(directions.pois.map(poi => Number(poi.ID)));
+    return (
+      <div className="creature-section-block directions-panel">
+        <div className="creature-section-head"><h4 className="field-section-title">Guard Directions Inspector</h4></div>
+        <p className="field-hint">Read-only. This follows ActionMenuID submenu links and ActionPoiID map markers; it does not modify gossip, POIs, conditions, or spawns.</p>
+        {!Number(form.gossip_menu_id) || !hasFlag(form.npcflag, 1) ? (
+          <p className="field-hint directions-warning">This creature is not a verified gossip guard: it needs both a gossip menu and NPC flag 1 before a directions route can exist.</p>
+        ) : null}
+        <div className="directions-summary">
+          <span>Root menu <strong>#{form.gossip_menu_id || 0}</strong></span>
+          <span>{optionRows.length} option{optionRows.length === 1 ? '' : 's'}</span>
+          <span>{directions.pois.length} POI{directions.pois.length === 1 ? '' : 's'}</span>
+          <span>{directions.conditions.length} condition{directions.conditions.length === 1 ? '' : 's'}</span>
+        </div>
+        {directions.guardSpawns.length === 0 && <p className="field-hint directions-warning">No live guard spawn was found. A POI has no map column, so its map cannot be verified from this guard.</p>}
+        {directions.guardSpawns.length > 0 && <p className="field-hint">Guard spawn context: {directions.guardSpawns.map(s => `#${s.guid} on map ${s.map} (${Number(s.position_x).toFixed(2)}, ${Number(s.position_y).toFixed(2)})`).join(' · ')}</p>}
+        <div className="directions-options">
+          {optionRows.length === 0 ? <p className="field-hint">No reachable gossip options.</p> : optionRows.map((row, index) => (
+            <div className={`directions-option ${poiIds.has(Number(row.ActionPoiID)) ? 'has-poi' : ''}`} key={`${row.path}-${row.MenuID}-${row.OptionID}-${index}`}>
+              <span className="mono">{row.path}</span>
+              <strong>{row.OptionText || '(no option text)'}</strong>
+              {row.ActionMenuID ? <span>→ menu #{row.ActionMenuID}</span> : null}
+              {row.ActionPoiID ? <span className="directions-poi-link"><MapPin size={12} /> POI #{row.ActionPoiID}</span> : null}
+            </div>
+          ))}
+        </div>
+        <h5 className="field-subsection-title">Linked points of interest</h5>
+        {directions.pois.length === 0 ? <p className="field-hint">No points of interest are linked from this gossip tree.</p> : directions.pois.map(poi => (
+          <div className="directions-poi-card" key={poi.ID}>
+            <div><MapPin size={15} /><strong>#{poi.ID} — {poi.Name}</strong></div>
+            <span>X {Number(poi.PositionX).toFixed(3)} · Y {Number(poi.PositionY).toFixed(3)} · icon {poi.Icon} · flags {poi.Flags}</span>
+            {poi.destinations.length ? poi.destinations.map(dest => (
+              <button type="button" className="btn-ghost directions-destination" key={`${dest.entry}-${dest.guid ?? 'template'}`} onClick={() => navigate(`/creatures?entry=${dest.entry}`)}>
+                Destination name match: {dest.name} #{dest.entry}{dest.guid ? ` · spawn #${dest.guid} map ${dest.map}` : ' · no spawn'}
+              </button>
+            )) : <p className="field-hint directions-warning">No creature template could be resolved by the POI name. The database schema has no explicit POI → creature-entry relation.</p>}
+          </div>
+        ))}
+        {directions.conditions.length > 0 && <details className="directions-conditions"><summary>Related conditions ({directions.conditions.length})</summary><pre>{JSON.stringify(directions.conditions, null, 2)}</pre></details>}
+        <h5 className="field-subsection-title">Add or replace Shaman direction</h5>
+        {directions.meta && <p className="field-hint directions-warning">This guard has an editor-owned route to creature #{directions.meta.destination_entry}, spawn #{directions.meta.destination_guid}. <button type="button" className="btn-danger" onClick={removeDirectionPlan} disabled={directionSaving}>Remove this direction</button></p>}
+        <p className="field-hint">Adds to the verified city Class Trainer menu when it is used only by this guard root. No menu tree is cloned.</p>
+        <div className="directions-editor-grid">
+          <div className="field-group"><label>Destination creature entry</label><input type="text" inputMode="numeric" value={directionTargetEntry} onChange={e => setDirectionTargetEntry(e.target.value)} onBlur={() => loadDirectionTarget(directionTargetEntry)} /><span className="field-hint">{directionTarget ? `${directionTarget.name} #${directionTarget.entry}` : 'Load a creature template first'}</span></div>
+          <div className="field-group"><label>Live destination spawn</label><select value={directionSpawnGuid} onChange={e => setDirectionSpawnGuid(e.target.value)} disabled={!directionTargetSpawns.length}><option value="">Select spawn…</option>{directionTargetSpawns.map(spawn => <option key={spawn.guid} value={spawn.guid}>#{spawn.guid} · map {spawn.map} · {Number(spawn.position_x).toFixed(2)}, {Number(spawn.position_y).toFixed(2)}</option>)}</select></div>
+        </div>
+        <div className="directions-editor-actions"><button type="button" className="btn-ghost" onClick={buildDirectionPlan} disabled={!!directions.meta || !directionTarget || !directionSpawnGuid}>Preview changes</button></div>
+        {directionPlan && <div className="directions-plan"><strong>Planned shared city route</strong><span>Guard root #{directionPlan.rootMenuId} → Class Trainer menu #{directionPlan.classMenuId} → new Shaman option #{directionPlan.shamanOptionId} → result menu #{directionPlan.newLeaf} → POI #{directionPlan.newPoi}</span><span>POI: {directionPlan.target.name}, map {directionPlan.spawn.map}, X {Number(directionPlan.spawn.position_x).toFixed(3)}, Y {Number(directionPlan.spawn.position_y).toFixed(3)}</span><pre>{`INSERT gossip_menu: ${directionPlan.newLeaf}\nINSERT Shaman option into menu ${directionPlan.classMenuId}\nINSERT points_of_interest: ${directionPlan.newPoi}\nNo creature_template update`}</pre><button type="button" className="btn-primary" onClick={saveDirectionPlan} disabled={directionSaving}>{directionSaving ? 'Saving…' : 'Confirm & save Shaman direction'}</button></div>}
+      </div>
+    );
+  };
+
+  const renderQuestRelationsPanel = () => {
+    const isStarter = questRelationTab === 'starters';
+    const rows = isStarter ? questRelations.starters : questRelations.enders;
+    return (
+      <div className="creature-section-block">
+        <div className="creature-section-head"><h4 className="field-section-title">Quest Relations</h4></div>
+        <div className="creature-subtabs" style={{ marginBottom: '12px' }}>
+          <button type="button" className={`creature-subtab ${isStarter ? 'active' : ''}`} onClick={() => setQuestRelationTab('starters')}>Quest Starter</button>
+          <button type="button" className={`creature-subtab ${!isStarter ? 'active' : ''}`} onClick={() => setQuestRelationTab('enders')}>Quest Ender</button>
+        </div>
+        <p className="field-hint">{isStarter ? 'Quests this creature starts.' : 'Quests this creature ends.'} Manage links in Quest Editor.</p>
+        {rows.length === 0 ? <p className="field-hint">No quests linked.</p> : (
+          <div className="list-items" style={{ maxHeight: '360px' }}>
+            {rows.map(quest => <button type="button" key={quest.ID} className="list-item creature-quest-relation-row" onClick={() => navigate(`/quests?quest=${quest.ID}`)}>
+              <div className="list-item-main"><span className="list-item-name">{quest.LogTitle || '(untitled)'}</span></div>
+              <div className="list-item-meta"><span className="mono">#{quest.ID}</span></div>
+            </button>)}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderModelsPanel = (rows, setRows, selIdx, setSelIdx, readOnly, onCopySection, previewActive, weapons, setWeapons, wNames, setWNames, wDisplayIds, setWDisplayIds) => {
     const selected = rows[selIdx] ?? rows[0];
     const updateRow = (i, col, val) => {
@@ -1579,6 +1857,12 @@ export default function CreatureEditorPage() {
             readOnly ? copyHandler : null
           )}
         </div>
+        <div className="creature-subtab-panel" hidden={!show('directions')}>
+          {readOnly ? <p className="field-hint">Directions inspection is available in the editable creature view.</p> : renderDirectionsPanel()}
+        </div>
+        <div className="creature-subtab-panel" hidden={!show('quests')}>
+          {readOnly ? <p className="field-hint">Quest relations are available in the editable creature view.</p> : renderQuestRelationsPanel()}
+        </div>
       </>
     );
   };
@@ -1656,6 +1940,13 @@ export default function CreatureEditorPage() {
               <label>Rank</label>
               <select value={rankFilter} onChange={e => setRankFilter(e.target.value)}>
                 {RANK_FILTER_OPTIONS.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+              </select>
+            </div>
+            <div className="field-group">
+              <label>Gossip</label>
+              <select value={gossipFilter} onChange={e => setGossipFilter(e.target.value)}>
+                <option value="all">All creatures</option>
+                <option value="guards">Directions guards</option>
               </select>
             </div>
             <div className="field-group">

@@ -2648,32 +2648,89 @@ function encodeBlp2Dxt5(rgba, width, height) {
   return Buffer.concat([header, ...mipChunks]);
 }
 
+function buildAdaptiveBlpPalette(source) {
+  // Quantise the source into a compact histogram first, then split the
+  // occupied buckets by their actual colour range. Unlike a fixed 3-3-2 cube,
+  // this spends palette entries on the many close fur shades in this texture.
+  const bins = new Map();
+  for (let i = 0; i < source.length; i += 4) {
+    if (source[i + 3] === 0) continue;
+    const key = (source[i] >> 3) | ((source[i + 1] >> 3) << 5) | ((source[i + 2] >> 3) << 10);
+    let bin = bins.get(key);
+    if (!bin) { bin = { r: 0, g: 0, b: 0, count: 0 }; bins.set(key, bin); }
+    bin.r += source[i]; bin.g += source[i + 1]; bin.b += source[i + 2]; bin.count++;
+  }
+  const colours = [...bins.values()].map(bin => ({
+    r: Math.round(bin.r / bin.count), g: Math.round(bin.g / bin.count), b: Math.round(bin.b / bin.count), count: bin.count,
+  }));
+  if (!colours.length) return [[0, 0, 0]];
+  const boxes = [colours];
+  while (boxes.length < 256) {
+    let selected = -1, selectedScore = -1, selectedChannel = 0;
+    for (let boxIndex = 0; boxIndex < boxes.length; boxIndex++) {
+      const box = boxes[boxIndex];
+      if (box.length < 2) continue;
+      let minR = 255, minG = 255, minB = 255, maxR = 0, maxG = 0, maxB = 0, count = 0;
+      for (const color of box) {
+        minR = Math.min(minR, color.r); maxR = Math.max(maxR, color.r);
+        minG = Math.min(minG, color.g); maxG = Math.max(maxG, color.g);
+        minB = Math.min(minB, color.b); maxB = Math.max(maxB, color.b); count += color.count;
+      }
+      const ranges = [maxR - minR, maxG - minG, maxB - minB];
+      const channel = ranges[1] > ranges[0] && ranges[1] >= ranges[2] ? 1 : ranges[2] > ranges[0] ? 2 : 0;
+      const score = ranges[channel] * count;
+      if (score > selectedScore) { selected = boxIndex; selectedScore = score; selectedChannel = channel; }
+    }
+    if (selected < 0) break;
+    const box = boxes[selected].slice().sort((a, b) => [a.r, a.g, a.b][selectedChannel] - [b.r, b.g, b.b][selectedChannel]);
+    const total = box.reduce((sum, color) => sum + color.count, 0);
+    let accumulated = 0, split = 1;
+    for (; split < box.length; split++) { accumulated += box[split - 1].count; if (accumulated >= total / 2) break; }
+    boxes.splice(selected, 1, box.slice(0, split), box.slice(split));
+  }
+  return boxes.map(box => {
+    let r = 0, g = 0, b = 0, count = 0;
+    for (const color of box) { r += color.r * color.count; g += color.g * color.count; b += color.b * color.count; count += color.count; }
+    return [Math.round(r / count), Math.round(g / count), Math.round(b / count)];
+  });
+}
+
+function nearestPaletteIndex(palette, r, g, b, cache) {
+  const key = (r << 16) | (g << 8) | b;
+  const cached = cache.get(key);
+  if (cached !== undefined) return cached;
+  let bestIndex = 0, bestDistance = Infinity;
+  for (let index = 0; index < palette.length; index++) {
+    const color = palette[index], dr = r - color[0], dg = g - color[1], db = b - color[2];
+    const distance = dr * dr + dg * dg + db * db;
+    if (distance < bestDistance) { bestDistance = distance; bestIndex = index; }
+  }
+  cache.set(key, bestIndex);
+  return bestIndex;
+}
+
 // Character skin BLPs in this client are usually paletted BLP2 files. Keep
-// their native layout on export: it is safer for the 3.3.5 client than turning
-// a palette atlas into a new DXT stream. A deterministic 3-3-2 palette gives
-// every recolour an index while retaining the exact BLP2 palette/mip structure.
+// their native layout, but derive a deterministic palette from the completed
+// texture so skin and fur gradients retain their local shading after export.
 function encodeBlp2Paletted(rgba, width, height, alphaDepth = 0) {
   const source = Buffer.from(rgba);
-  const sums = Array.from({ length: 256 }, () => [0, 0, 0, 0]);
-  for (let i = 0; i < width * height; i++) {
-    const off = i * 4, index = ((source[off] >> 5) << 5) | ((source[off + 1] >> 5) << 2) | (source[off + 2] >> 6);
-    sums[index][0] += source[off]; sums[index][1] += source[off + 1]; sums[index][2] += source[off + 2]; sums[index][3]++;
-  }
+  const colours = buildAdaptiveBlpPalette(source);
   const palette = Buffer.alloc(1024);
   for (let i = 0; i < 256; i++) {
-    const [r, g, b, count] = sums[i];
-    palette[i * 4] = count ? Math.round(b / count) : ((i & 3) * 85);
-    palette[i * 4 + 1] = count ? Math.round(g / count) : (((i >> 2) & 7) * 36);
-    palette[i * 4 + 2] = count ? Math.round(r / count) : (((i >> 5) & 7) * 36);
+    const [r, g, b] = colours[Math.min(i, colours.length - 1)];
+    palette[i * 4] = b;
+    palette[i * 4 + 1] = g;
+    palette[i * 4 + 2] = r;
     palette[i * 4 + 3] = 255;
   }
   const mipChunks = [];
   let mipRgba = source, w = width, h = height;
   for (let mip = 0; mip < 16; mip++) {
     const pixels = w * h, indices = Buffer.alloc(pixels);
+    const indexCache = new Map();
     for (let i = 0; i < pixels; i++) {
       const off = i * 4;
-      indices[i] = ((mipRgba[off] >> 5) << 5) | ((mipRgba[off + 1] >> 5) << 2) | (mipRgba[off + 2] >> 6);
+      indices[i] = nearestPaletteIndex(colours, mipRgba[off], mipRgba[off + 1], mipRgba[off + 2], indexCache);
     }
     let alpha = Buffer.alloc(0);
     if (alphaDepth === 8) { alpha = Buffer.alloc(pixels); for (let i = 0; i < pixels; i++) alpha[i] = mipRgba[i * 4 + 3]; }
@@ -5030,6 +5087,26 @@ ipcMain.handle('dbc:readCharSectionsTestOutput', async () => {
     return { success: true, records, blpFiles, stagedPath: filePath };
   } catch (e) {
     return { success: false, error: e.message, blpFiles: [] };
+  }
+});
+
+ipcMain.handle('dbc:exportCharSectionsCsv', async (_, rows) => {
+  try {
+    const columns = ['ID', 'RaceID', 'SexID', 'BaseSection', 'TextureName_1', 'TextureName_2', 'TextureName_3', 'Flags', 'VariationIndex', 'ColorIndex'];
+    const escape = (value) => `"${String(value ?? '').replace(/"/g, '""')}"`;
+    const csv = [columns.join(',')]
+      .concat((rows || []).map(row => [
+        row.id, row.race, row.sex, row.baseSection,
+        row.tex1, row.tex2, row.tex3,
+        row.flags, row.variationIndex, row.colorIndex,
+      ].map(escape).join(',')))
+      .join('\r\n');
+    const outputPath = path.join(__dirname, '..', 'output', 'DBFilesClient', 'CharSections.pending-insert.csv');
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, `${csv}\r\n`, 'utf8');
+    return { success: true, outputPath, count: rows?.length || 0 };
+  } catch (e) {
+    return { success: false, error: e.message };
   }
 });
 

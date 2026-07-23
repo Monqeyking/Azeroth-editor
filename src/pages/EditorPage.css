@@ -820,6 +820,26 @@
 	height: min(280px, 32vh);
 	min-height: 160px;
 }
+
+.directions-panel { max-width: 980px; }
+.directions-summary { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.directions-summary span, .directions-poi-link { font-size: 11px; color: var(--text-secondary); background: var(--bg-panel); border: 1px solid var(--border); border-radius: 4px; padding: 5px 7px; }
+.directions-warning { color: #d9ab67; }
+.directions-options { display: grid; gap: 5px; margin: 14px 0 20px; max-height: 300px; overflow: auto; }
+.directions-option { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 4px; font-size: 12px; }
+.directions-option.has-poi { border-color: rgba(200, 169, 110, .5); }
+.directions-option .mono { color: var(--text-muted); font-size: 10px; }
+.directions-poi-link { display: inline-flex; align-items: center; gap: 4px; color: var(--gold-bright); padding: 2px 5px; }
+.directions-poi-card { display: grid; gap: 7px; padding: 12px; margin: 8px 0; border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 4px; font-size: 12px; }
+.directions-poi-card > div { display: flex; align-items: center; gap: 7px; }
+.directions-poi-card > span { color: var(--text-secondary); }
+.directions-destination { justify-self: start; font-size: 11px; }
+.directions-conditions { margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
+.directions-conditions pre { max-height: 260px; overflow: auto; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-muted); }
+.directions-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }
+.directions-editor-actions { margin: 10px 0; }
+.directions-plan { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(200, 169, 110, .55); background: rgba(200, 169, 110, .08); border-radius: 4px; font-size: 12px; }
+.directions-plan pre { margin: 0; padding: 8px; overflow: auto; background: var(--bg-dark); color: var(--text-secondary); }
 .creature-display-workspace {
 	display: grid;
 	grid-template-columns: minmax(220px, 260px) minmax(420px, 1fr) minmax(300px, 360px);
@@ -968,6 +988,22 @@
 	font-size: 10px;
 	font-weight: 500;
 	color: var(--text-muted);
+}
+
+.creature-quest-relation-row {
+	display: block;
+	width: 100%;
+	text-align: left;
+	background: var(--bg-panel);
+	color: var(--text-primary);
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+	margin-bottom: 6px;
+}
+
+.creature-quest-relation-row:hover {
+	background: var(--bg-hover);
+	border-color: var(--gold-dim);
 }
 .wmv-identity {
 	display: grid;

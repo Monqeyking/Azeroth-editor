@@ -37,7 +37,7 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 | ItemSetEditorPage | `/item-sets` | `ItemSet.dbc` + custom `item_set_names`. 17 item slots, 8 bonus thresholds. |
 | VendorEditorPage | `/vendors` | `npc_vendor` per NPC. Inline edit, item lookup modal. |
 | RaceClassPage | `/races` | Race+class combinatie. Sync DB Ã¢â€ â€ `CharBaseInfo.dbc`. Wizard bij checkbox-aan. |
-| CharCustomizationPage | `/char-customization` | `CharSections.dbc` editor (skin/face/facial hair/hair/underclothing per race+gender). |
+| CharCustomizationPage | `/char-customization` | `CharSections.dbc` editor (skin/face/facial hair/hair/underclothing per race+gender). Custom-race exports must keep every `RaceID` namespace isolated; Fel Orc rows incorrectly tagged as Race 12 collided with Worgen selections and caused unstable client behavior. |
 | SpawnMapPage | `/map` | 2D kaart. BLP decoder, continent/zone tiles via MPQ. Creature + GO spawns, clustering, pan/zoom, inspector, waypoints, drag-and-drop. |
 | Editor3DPage | `/editor3d` | 3D world editor: terrain streaming via AzerothCore `.map` files (naadloos V9/V8), minimap-textures, M2 instancing + LOD, billboard-layer, spawn toggle, move/rotate gizmo's, SOAP teleport. TILE_RADIUS=4 (9Ãƒâ€”9), MAX_TILES=200. |
 | UIEditorPage | `/ui-editor` | MPQ-backed glue UI editor for login, character select, and character create. Exports to `output\Interface\GlueXML\...`. |

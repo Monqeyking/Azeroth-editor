@@ -53,6 +53,11 @@ Uses ZamModelViewer (Wowhead cloud renderer) Ã¢â‚¬â€ requires interne
 - `findFacialHairRow()`: separate lookup for the facial hair DBC format (race/sex/variation-based, no single geosetId).
 - Character preview render path: visible `.skin` texture units are emitted as individual render passes. `type=1` maps to the composited character atlas, `type=6` to the selected `CharSections.Tex1` hair BLP; M2 blend/depth metadata is parsed from the WotLK render flag block. Keep character passes `DoubleSide` in Three.js: strict culling cuts Worgen/character geometry.
 
+## Custom race CharSections safety
+- `CharSections.dbc` matching is effectively namespaced by `RaceID`; do not let records for another custom race retain the Worgen RaceID (`12`), even if their `Flags` differ. Fel Orc rows accidentally marked Race 12 collided with Worgen ColorIndex selection, causing missing textures and unstable Error #132 behavior.
+- Before exporting a Worgen color set, validate that every Race 12 texture path belongs to `Character\\Worgen\\...`; Fel Orc rows must use their real race ID (currently `50`) or be excluded from the test DBC.
+- The Worgoblin client Lua has fixed caps for 12 displayed races and 10 classes per race, but no Lua cap for skin ColorIndex. `CharHairTextures.dbc`, `CharHairGeosets.dbc`, and `CharacterFacialHairStyles.dbc` should remain aligned with the Worgoblin source.
+
 ## Creature Editor Ã¢â‚¬â€ model table inputs
 - Integer columns (Idx, CreatureDisplayID, VerifiedBuild): type="text" inputMode="numeric" + custom Ã¢â€“Â²Ã¢â€“Â¼ buttons using onMouseDown+preventDefault Ã¢â‚¬â€ exactly one step per click, no auto-repeat
 - Decimal columns (DisplayScale, Probability): type="number" step="0.01" with onWheel Ã¢â€ â€™ blur() to prevent scroll-changing values

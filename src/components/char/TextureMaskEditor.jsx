@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from 'react';
-import { X, Brush, Eraser, Save, Loader2, RotateCcw, Shield, ShieldOff, Maximize2, Minimize2, ZoomIn, ZoomOut, LocateFixed, FolderOpen } from 'lucide-react';
+import { X, Brush, Eraser, Save, Loader2, RotateCcw, Shield, ShieldOff, Maximize2, Minimize2, ZoomIn, ZoomOut, LocateFixed, FolderOpen, Pipette } from 'lucide-react';
 import './TextureMaskEditor.css';
 import { AtlasTemplateRegistry } from '../../lib/characterTextures/AtlasTemplateRegistry.js';
 import { TextureClassificationService } from '../../lib/characterTextures/TextureClassificationService.js';
@@ -12,6 +12,7 @@ const textureClassifier = new TextureClassificationService(new AtlasTemplateRegi
 const semanticMaskResolver = new SemanticMaskResolver();
 const templateCorrectionStore = new TemplateCorrectionStore();
 const componentMappingStore = new AtlasComponentMappingStore();
+const SOURCE_RACES = [[1, 'Human'], [2, 'Orc'], [3, 'Dwarf'], [4, 'Night Elf'], [5, 'Undead'], [6, 'Tauren'], [7, 'Gnome'], [8, 'Troll'], [10, 'Blood Elf'], [11, 'Draenei'], [12, 'Worgen (Custom)']];
 const templateWithPolygonOverrides = (template, overrides = {}, customPolygons = [], labelOverrides = {}) => !template ? template : ({ ...template, regions: [...template.regions.map(region => ({ ...region, ...(overrides[region.semantic] ? { polygon: overrides[region.semantic] } : {}), ...(labelOverrides[region.semantic] ? { label: labelOverrides[region.semantic] } : {}) })), ...customPolygons.map(region => ({ ...region, role: 'protected-detail' }))] });
 const pngToImageData = png => new Promise((resolve, reject) => { const image = new Image(); image.onload = () => { const canvas = document.createElement('canvas'); canvas.width = image.width; canvas.height = image.height; const context = canvas.getContext('2d'); context.drawImage(image, 0, 0); resolve(context.getImageData(0, 0, image.width, image.height)); }; image.onerror = reject; image.src = `data:image/png;base64,${png}`; });
 const pointSegmentDistance = (point, start, end) => { const dx=end[0]-start[0], dy=end[1]-start[1], length=dx*dx+dy*dy; const t=length ? Math.max(0, Math.min(1, ((point[0]-start[0])*dx+(point[1]-start[1])*dy)/length)) : 0; return Math.hypot(point[0]-(start[0]+t*dx), point[1]-(start[1]+t*dy)); };
@@ -106,12 +107,133 @@ function hexToHsl(hex) {
 
 const rgbDistance = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]);
 const hslToHex = (h, s, l) => `#${hslToRgb(h, s, l).map(value => value.toString(16).padStart(2, '0')).join('')}`;
+const hueDistance = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
 
-export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null, texturePartType = null, textureParts = [], onSelectTexturePart, initialTargetFlags = 17, race, gender, characterRecords = [], colorIndex = 0, preferOutput = false, onClose, onSaved }) {
+function buildSkinColourMap(source, edited, protectedMask = null) {
+  const bins = new Map();
+  for (let i = 0; i < source.width * source.height; i++) {
+    const o = i * 4;
+    if (source.data[o + 3] <= 12 || edited.data[o + 3] <= 12 || protectedMask?.[i]) continue;
+    const key = `${source.data[o] >> 5}:${source.data[o + 1] >> 5}:${source.data[o + 2] >> 5}`;
+    const row = bins.get(key) || { count: 0, source: [0, 0, 0], target: [0, 0, 0] };
+    row.count++;
+    for (let c = 0; c < 3; c++) { row.source[c] += source.data[o + c]; row.target[c] += edited.data[o + c]; }
+    bins.set(key, row);
+  }
+  return [...bins.values()].filter(row => row.count >= 8).map(row => ({
+    source: row.source.map(value => value / row.count), target: row.target.map(value => value / row.count), count: row.count,
+  }));
+}
+
+function applySkinColourMap(image, colourMap, protectedMask = null) {
+  const out = new Uint8ClampedArray(image.data);
+  for (let i = 0; i < image.width * image.height; i++) {
+    const o = i * 4;
+    if (image.data[o + 3] <= 12 || protectedMask?.[i]) continue;
+    let match = null, best = Infinity;
+    for (const entry of colourMap) {
+      const d = (image.data[o] - entry.source[0]) ** 2 + (image.data[o + 1] - entry.source[1]) ** 2 + (image.data[o + 2] - entry.source[2]) ** 2;
+      if (d < best) { best = d; match = entry; }
+    }
+    if (!match) continue;
+    for (let c = 0; c < 3; c++) {
+      const ratio = match.target[c] / Math.max(14, match.source[c]);
+      out[o + c] = Math.max(0, Math.min(255, Math.round(image.data[o + c] * Math.min(5, ratio))));
+    }
+  }
+  return new ImageData(out, image.width, image.height);
+}
+
+function analyseBodyPalette(image, protectedMask) {
+  const buckets = Array.from({ length: 24 }, () => []);
+  for (let y = 0; y < image.height; y += 3) for (let x = 0; x < image.width; x += 3) {
+    // The WotLK skin atlas keeps face variants in its lower-left quadrant.
+    if (x < image.width * .5 && y > image.height * .625) continue;
+    const i = y * image.width + x, o = i * 4;
+    if (image.data[o + 3] <= 12 || protectedMask?.[i]) continue;
+    const [h, s, l] = rgbToHsl(image.data[o], image.data[o + 1], image.data[o + 2]);
+    if (s < .06 || l < .04 || l > .96) continue;
+    buckets[Math.floor(h / 15)].push([h, s, l]);
+  }
+  const dominant = buckets.reduce((best, bucket) => bucket.length > best.length ? bucket : best, []);
+  if (dominant.length < 24) return null;
+  const referenceHue = dominant.reduce((sum, color) => sum + color[0], 0) / dominant.length;
+  const fur = buckets.flat().filter(([h]) => hueDistance(h, referenceHue) < 25).sort((a, b) => a[2] - b[2]);
+  if (fur.length < 24) return null;
+  // Keep a deterministic set of actual source-fur samples. The target never
+  // contributes RGB values: it only selects a lightness position in this LUT.
+  return Array.from({ length: 24 }, (_, index) => fur[Math.min(fur.length - 1, Math.round((fur.length - 1) * index / 23))]);
+}
+
+function blendPalette(palette, amount) {
+  const scaled = Math.max(0, Math.min(1, amount)) * (palette.length - 1), index = Math.min(palette.length - 2, Math.floor(scaled)), local = scaled - index;
+  return palette[index].map((value, channel) => value + (palette[index + 1][channel] - value) * local);
+}
+
+function localLuminance(image, radius = 4) {
+  const { width, height, data } = image, stride = width + 1;
+  const values = new Float32Array(width * height);
+  const integral = new Float64Array(stride * (height + 1));
+  for (let y = 0; y < height; y++) {
+    let rowTotal = 0;
+    for (let x = 0; x < width; x++) {
+      const i = y * width + x, o = i * 4;
+      const value = (data[o] * .2126 + data[o + 1] * .7152 + data[o + 2] * .0722) / 255;
+      values[i] = value;
+      rowTotal += value;
+      integral[(y + 1) * stride + x + 1] = integral[y * stride + x + 1] + rowTotal;
+    }
+  }
+  const average = new Float32Array(values.length);
+  for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+    const left = Math.max(0, x - radius), top = Math.max(0, y - radius), right = Math.min(width - 1, x + radius), bottom = Math.min(height - 1, y + radius);
+    const total = integral[(bottom + 1) * stride + right + 1] - integral[top * stride + right + 1] - integral[(bottom + 1) * stride + left] + integral[top * stride + left];
+    average[y * width + x] = total / ((right - left + 1) * (bottom - top + 1));
+  }
+  return { values, average };
+}
+
+function remapImageWithPalette(image, palette, protectedMask = null, { paletteInfluence = 1, textureDetailStrength = 1, shadowDepth = 1 } = {}) {
+  const levels = [];
+  for (let i = 0; i < image.width * image.height; i++) {
+    const o = i * 4;
+    if (image.data[o + 3] > 12 && !protectedMask?.[i]) levels.push(rgbToHsl(image.data[o], image.data[o + 1], image.data[o + 2])[2]);
+  }
+  levels.sort((a, b) => a - b);
+  const low = levels[Math.floor(Math.max(0, levels.length - 1) * .05)] ?? 0;
+  const high = levels[Math.ceil(Math.max(0, levels.length - 1) * .95)] ?? 1;
+  const range = Math.max(.01, high - low), out = new Uint8ClampedArray(image.data);
+  const sourceLuminance = localLuminance(image);
+  for (let i = 0; i < image.width * image.height; i++) {
+    const o = i * 4;
+    if (image.data[o + 3] <= 12 || protectedMask?.[i]) continue;
+    const [originalHue, originalSaturation, lightness] = rgbToHsl(image.data[o], image.data[o + 1], image.data[o + 2]);
+    // A continuous ramp is important for fur. Picking one of the 24 analysis
+    // samples made every subtle source shade collapse into visible bands.
+    const [paletteHue, paletteSaturation, paletteLightness] = blendPalette(palette, (lightness - low) / range);
+    // The palette chooses the new overall colour ramp. Keep the difference
+    // between this pixel and its local neighbourhood from the Worgen source:
+    // those tiny variations are the painted fur strands and should not turn
+    // into one flat colour on the model.
+    const hueDelta = ((paletteHue - originalHue + 540) % 360) - 180;
+    const hue = (originalHue + hueDelta * paletteInfluence + 360) % 360;
+    const saturation = originalSaturation + (paletteSaturation - originalSaturation) * paletteInfluence;
+    let textureDetail = (sourceLuminance.values[i] - sourceLuminance.average[i]) * textureDetailStrength;
+    if (textureDetail < 0) textureDetail *= shadowDepth;
+    const baseLightness = lightness + (paletteLightness - lightness) * paletteInfluence;
+    const sourceLightness = Math.max(0, Math.min(1, baseLightness + textureDetail));
+    const [r, g, b] = hslToRgb(hue, saturation, sourceLightness);
+    out[o] = r; out[o + 1] = g; out[o + 2] = b;
+  }
+  return new ImageData(out, image.width, image.height);
+}
+
+export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null, texturePartType = null, textureParts = [], onSelectTexturePart, initialTargetFlags = 17, race, gender, characterRecords = [], colorIndex = 0, preferOutput = false, sourceColorIndex = null, sourceSkinPath = null, outputSkinPath = null, sourceExtraPath = null, sourceBlpPath = null, writeSourceBlpPath = null, recoverySourceBlpPath = null, saveMode = 'create', onSaveModeChange, onClose, onSaved }) {
   const canvasRef    = useRef(null); // toont het resultaat (basis + recolor binnen masker)
   const protectionOverlayRef = useRef(null);
   const baseRef       = useRef(null); // ImageData van de ongewijzigde texture
   const originalBaseRef = useRef(null);
+  const paletteOriginalRef = useRef(null);
   const recoveryOriginalRef = useRef(null);
   const strengthRef   = useRef(null); // Float32Array(w*h), 0..1 brush-coverage per pixel
   const protectedRef  = useRef(null); // Uint8Array(w*h), 1 = nooit recoloren
@@ -121,6 +243,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const canvasWrapRef = useRef(null);
   const templateBaseRef = useRef(null);
   const skinSourceRef = useRef(null);
+  const sourcePaletteRef = useRef(null);
   const historyRef = useRef([]);
   const redoRef = useRef([]);
 
@@ -137,8 +260,18 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const [tool, setTool]             = useState('paint');
   const [targetColor, setTargetColor] = useState('#ff66cc');
   const [strength, setStrength]     = useState(1); // hoeveel van de doelkleur t.o.v. origineel (hue/sat mix)
+  const [preservePaintShading, setPreservePaintShading] = useState(true);
+  const [extraBrightnessMatch, setExtraBrightnessMatch] = useState(.38);
   const [maskRevision, setMaskRevision] = useState(0);
   const [skinTransferProfile, setSkinTransferProfile] = useState(null);
+  const [sourceRace, setSourceRace] = useState(6);
+  const [sourceGender, setSourceGender] = useState(gender);
+  const [sourceSkinId, setSourceSkinId] = useState('');
+  const [sourcePaletteInfo, setSourcePaletteInfo] = useState(null);
+  const [paletteInfluence, setPaletteInfluence] = useState(1);
+  const [textureDetailStrength, setTextureDetailStrength] = useState(1);
+  const [shadowDepth, setShadowDepth] = useState(1);
+  const [preserveExtraHair, setPreserveExtraHair] = useState(true);
   const [targetSetFlags, setTargetSetFlags] = useState(initialTargetFlags === 5 ? 5 : 17);
   const [semanticAnalysis, setSemanticAnalysis] = useState(null);
   const [semanticMasks, setSemanticMasks] = useState(null);
@@ -154,7 +287,10 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const [mappingEdit, setMappingEdit] = useState(false);
   const [activeTab, setActiveTab] = useState('canvas');
   const [previewRgba, setPreviewRgba] = useState(null);
+  const [previewExtraRgba, setPreviewExtraRgba] = useState(null);
+  const [palettePreview, setPalettePreview] = useState(null);
   const [previewTransfer, setPreviewTransfer] = useState(null);
+  const [paletteBaked, setPaletteBaked] = useState(false);
   const [committedPasses, setCommittedPasses] = useState([]);
   const [previewFaceId, setPreviewFaceId] = useState('');
   const [previewHairId, setPreviewHairId] = useState('');
@@ -179,10 +315,28 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   const previewHairs = useMemo(() => characterRecords.filter(row => row.race === race && row.sex === gender && row.baseSection === 3 && row.tex1), [characterRecords, race, gender]);
   const previewFace = previewFaces.find(row => String(row.id) === previewFaceId) || previewFaces[0] || null;
   const previewHair = previewHairs.find(row => String(row.id) === previewHairId) || previewHairs[0] || null;
+  const sourceSkins = useMemo(() => characterRecords.filter(row => row.race === sourceRace && row.sex === sourceGender && row.baseSection === 0 && row.tex1), [characterRecords, sourceRace, sourceGender]);
+  const selectedSourceSkin = sourceSkins.find(row => String(row.id) === sourceSkinId) || sourceSkins[0] || null;
 
   useEffect(() => {
     if (!previewHairId && previewHairs[0]) setPreviewHairId(String(previewHairs[0].id));
   }, [previewHairId, previewHairs]);
+  useEffect(() => { if (selectedSourceSkin && String(selectedSourceSkin.id) !== sourceSkinId) setSourceSkinId(String(selectedSourceSkin.id)); }, [selectedSourceSkin, sourceSkinId]);
+
+  useEffect(() => {
+    const original = paletteOriginalRef.current, palette = sourcePaletteRef.current?.palette;
+    if (!paletteBaked || !original || !palette || !strengthRef.current) return;
+    const protectedMask = protectedRef.current;
+    const transferProtection = new Uint8Array(protectedMask || original.width * original.height);
+    if (texturePartType === 'skin-extra' && preserveExtraHair) for (let i = 0; i < transferProtection.length; i++) {
+      const o = i * 4;
+      const [, saturation, lightness] = rgbToHsl(original.data[o], original.data[o + 1], original.data[o + 2]);
+      if (original.data[o + 3] > 12 && lightness < .16 && saturation < .45) transferProtection[i] = 1;
+    }
+    baseRef.current = remapImageWithPalette(original, palette, respectProtection ? transferProtection : null, { paletteInfluence, textureDetailStrength, shadowDepth });
+    if (texturePartType === 'skin-atlas') setPalettePreview(current => current ? { ...current, transferSettings: { paletteInfluence, textureDetailStrength, shadowDepth } } : current);
+    setMaskRevision(value => value + 1);
+  }, [paletteInfluence, textureDetailStrength, shadowDepth, paletteBaked, texturePartType, preserveExtraHair, respectProtection]);
 
   const capturePreview = useCallback(() => {
     const canvas = canvasRef.current;
@@ -195,9 +349,9 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
       }
       setPreviewRgba({ data: image.data, width: canvas.width, height: canvas.height });
       const activeMask = Uint8Array.from(strengthRef.current || [], value => Math.round(value * 255));
-      setPreviewTransfer({ passes: [...committedPasses, { mask: activeMask, targetColor, strength, mappings: componentMappings }], width: canvas.width, height: canvas.height });
+      setPreviewTransfer(paletteBaked ? null : { passes: [...committedPasses, { mask: activeMask, targetColor, strength, preserveShading: preservePaintShading, mappings: componentMappings }], width: canvas.width, height: canvas.height });
     }
-  }, [targetColor, strength, componentMappings, committedPasses]);
+  }, [targetColor, strength, preservePaintShading, componentMappings, committedPasses, paletteBaked]);
   const openPreview = () => { capturePreview(); setActiveTab('preview'); };
   useEffect(() => {
     if (activeTab !== 'preview') return;
@@ -218,7 +372,11 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     setError(null);
     setSemanticAnalysis(null);
     setSemanticMasks(null);
+    setPreviewExtraRgba(null);
+    setPalettePreview(null);
     setCommittedPasses([]);
+    setPaletteBaked(false);
+    setPalettePreview(null);
     historyRef.current = []; redoRef.current = [];
     const loadPath = importedBlpPath || blpPath;
     // In Test output mode an already exported colour set is the editable
@@ -227,8 +385,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const readTexture = importedBlpPath
       ? window.azeroth.dbc.readBlpFile(importedBlpPath)
       : preferOutput && window.azeroth.dbc.readOutputBlpTexture
-        ? window.azeroth.dbc.readOutputBlpTexture(blpPath).then(result => result?.success ? result : window.azeroth.dbc.readBlpTexture(dataPath, blpPath))
-        : window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
+        ? window.azeroth.dbc.readOutputBlpTexture(blpPath).then(result => result?.success ? result : window.azeroth.dbc.readBlpTexture(dataPath, sourceBlpPath || blpPath))
+        : window.azeroth.dbc.readBlpTexture(dataPath, sourceBlpPath || blpPath);
     readTexture.then(res => {
       if (cancelled) return;
       if (!res?.success) { setError(res?.error || 'Texture kon niet geladen worden'); setLoading(false); return; }
@@ -244,7 +402,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
         originalBaseRef.current = new ImageData(new Uint8ClampedArray(baseRef.current.data), img.width, img.height);
         recoveryOriginalRef.current = null;
         if (importedBlpPath || preferOutput) {
-          const original = await window.azeroth.dbc.readBlpTexture(dataPath, blpPath);
+          const original = await window.azeroth.dbc.readBlpTexture(dataPath, recoverySourceBlpPath || sourceBlpPath || blpPath);
           if (cancelled) return;
           if (original?.success && original.png) {
             try {
@@ -283,7 +441,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
       img.src = `data:image/png;base64,${res.png}`;
     }).catch(e => { if (!cancelled) { setError(e.message); setLoading(false); } });
     return () => { cancelled = true; };
-  }, [dataPath, blpPath, importedBlpPath, texturePartType]);
+  }, [dataPath, blpPath, sourceBlpPath, importedBlpPath, texturePartType]);
 
   const openExportedBlp = async () => {
     const filePath = await window.azeroth.dialog.openFile({ title: 'Open exported BLP', filters: [{ name: 'BLP textures', extensions: ['blp'] }] });
@@ -299,6 +457,11 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const { w, h } = dimsRef.current;
     const [th, ts, tl] = hexToHsl(targetColor);
     const out = new Uint8ClampedArray(base.data); // kopie
+    const paletteOriginal = paletteBaked && paletteOriginalRef.current?.width === w && paletteOriginalRef.current?.height === h ? paletteOriginalRef.current : null;
+    if (paletteOriginal) for (let i = 0; i < w * h; i++) if (!strengthArr[i]) {
+      const off = i * 4;
+      out[off] = paletteOriginal.data[off]; out[off + 1] = paletteOriginal.data[off + 1]; out[off + 2] = paletteOriginal.data[off + 2]; out[off + 3] = paletteOriginal.data[off + 3];
+    }
 
     for (let i = 0; i < w * h; i++) {
       const amt = respectProtection && protectedArr?.[i] ? 0 : strengthArr[i] * strength;
@@ -306,15 +469,21 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
       const off = i * 4;
       const [, , l] = rgbToHsl(out[off], out[off+1], out[off+2]);
       if (tl <= .02) {
-        // Black is colour, never an alpha operation. Blend towards a tiny
-        // near-black floor so it remains visibly black while avoiding a flat,
-        // compression-prone zero block in BLP/DXT output.
-        const black = 8;
-        out[off]   += (black - out[off]) * amt;
-        out[off+1] += (black - out[off+1]) * amt;
-        out[off+2] += (black - out[off+2]) * amt;
+        // Black is a colour, never an alpha operation. Preserve the source
+        // pixel's luminance as a very dark greyscale ramp: a muzzle then keeps
+        // its fur strands and highlights instead of becoming one flat block.
+        const blackLightness = preservePaintShading
+          ? Math.max(.012, Math.min(.32, .018 + Math.pow(l, .85) * .38))
+          : 8 / 255;
+        const [nr, ng, nb] = hslToRgb(th, 0, blackLightness);
+        out[off]   += (nr - out[off]) * amt;
+        out[off+1] += (ng - out[off+1]) * amt;
+        out[off+2] += (nb - out[off+2]) * amt;
       } else {
-        const [nr, ng, nb] = hslToRgb(th, ts, l);
+        const outputLightness = preservePaintShading
+          ? (texturePartType === 'skin-extra' ? l + (tl - l) * extraBrightnessMatch * amt : l)
+          : tl;
+        const [nr, ng, nb] = hslToRgb(th, ts, outputLightness);
         out[off]   = out[off]   + (nr - out[off])   * amt;
         out[off+1] = out[off+1] + (ng - out[off+1]) * amt;
         out[off+2] = out[off+2] + (nb - out[off+2]) * amt;
@@ -323,6 +492,11 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
 
     const ctx = canvasRef.current.getContext('2d');
     ctx.putImageData(new ImageData(out, w, h), 0, 0);
+    if (activeTab === 'preview') {
+      setPreviewRgba({ data: new Uint8ClampedArray(out), width: w, height: h });
+      const activeMask = Uint8Array.from(strengthArr, value => Math.round(value * 255));
+      setPreviewTransfer(paletteBaked ? null : { passes: [...committedPasses, { mask: activeMask, targetColor, strength, preserveShading: preservePaintShading, mappings: componentMappings }], width: w, height: h });
+    }
     const overlay = protectionOverlayRef.current;
     if (overlay) {
       overlay.width = w; overlay.height = h;
@@ -352,7 +526,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
         overlayCtx.restore();
       }
     }
-  }, [targetColor, strength, respectProtection, showProtection, showComponentMappings, componentMappings, semanticAnalysis, polygonVisibility, selectedVertex]);
+  }, [targetColor, strength, preservePaintShading, extraBrightnessMatch, texturePartType, respectProtection, showProtection, showComponentMappings, componentMappings, semanticAnalysis, polygonVisibility, selectedVertex, paletteBaked, activeTab, committedPasses]);
 
   useEffect(() => { if (!loading && !error) repaint(); }, [loading, error, repaint, maskRevision]);
 
@@ -380,6 +554,16 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const strengthArr = strengthRef.current;
     const protectedArr = protectedRef.current;
     if (!strengthArr) return;
+    // Auto-fill / learned colour maps use a full-mask baked baseline. The
+    // first manual stroke must turn that result into a normal editable base,
+    // otherwise every pixel already has strength 1 and a touch-up appears to
+    // do nothing.
+    if (paletteBaked && tool === 'paint' && canvasRef.current) {
+      baseRef.current = canvasRef.current.getContext('2d').getImageData(0, 0, w, h);
+      strengthArr.fill(0);
+      paletteOriginalRef.current = null;
+      setPaletteBaked(false);
+    }
     const r = brushSize;
     const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w - 1, Math.ceil(cx + r));
     const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(h - 1, Math.ceil(cy + r));
@@ -412,7 +596,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
       }
     }
     repaint();
-  }, [brushSize, brushSoft, tool, respectProtection, semanticAnalysis, polygonVisibility, repaint]);
+  }, [brushSize, brushSoft, tool, respectProtection, semanticAnalysis, polygonVisibility, repaint, paletteBaked]);
 
   const canvasToImageCoords = (e) => {
     const cvs = canvasRef.current;
@@ -586,8 +770,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     return true;
   };
 
-  const onPointerDown = (e) => { if (e.button === 1 || e.button === 2 || e.shiftKey) { e.preventDefault(); panDragRef.current = { x: e.clientX, y: e.clientY, pan }; return; } if (mappingPointerDown(e)) return; if (polygonEdit) { polygonPointerDown(e); return; } pushHistory(); updateBrushCursor(e); drawingRef.current = true; paintAt(...canvasToImageCoords(e)); };
-  const onPointerMove = (e) => { if (panDragRef.current) { const start = panDragRef.current; setPan({ x: start.pan.x + e.clientX - start.x, y: start.pan.y + e.clientY - start.y }); return; } if (mappingDragRef.current) { const [cx, cy] = canvasToImageCoords(e), { w, h } = dimsRef.current, drag = mappingDragRef.current; setComponentMappings(current => { const rect = current[mappingComponent]; return { ...current, [mappingComponent]: { ...rect, x: Math.max(0, Math.min(1 - rect.width, cx / w - drag.offsetX)), y: Math.max(0, Math.min(1 - rect.height, cy / h - drag.offsetY)) } }; }); return; } if (polygonEdit && polygonDragRef.current) { const [cx, cy] = canvasToImageCoords(e), { w, h } = dimsRef.current, drag = polygonDragRef.current; if (drag.polygon) { const point = [Math.max(0, Math.min(1, cx / w)), Math.max(0, Math.min(1, cy / h))]; const next = drag.index == null ? drag.startPolygon.map(([x, y]) => [Math.max(0, Math.min(1, x + point[0] - drag.origin[0])), Math.max(0, Math.min(1, y + point[1] - drag.origin[1]))]) : [...drag.polygon]; if (drag.index != null) next[drag.index] = point; drag.polygon = next; previewPolygon(drag.semantic, next); } return; } updateBrushCursor(e); if (drawingRef.current) paintAt(...canvasToImageCoords(e)); };
+  const onPointerDown = (e) => { if (e.button === 1 || e.button === 2 || e.shiftKey) { e.preventDefault(); panDragRef.current = { x: e.clientX, y: e.clientY, pan }; return; } if (mappingPointerDown(e)) return; if (polygonEdit) { polygonPointerDown(e); return; } if (tool === 'eyedropper') { pickColourAt(...canvasToImageCoords(e)); return; } pushHistory(); updateBrushCursor(e); drawingRef.current = true; paintAt(...canvasToImageCoords(e)); };
+  const onPointerMove = (e) => { if (panDragRef.current) { const start = panDragRef.current; setPan({ x: start.pan.x + e.clientX - start.x, y: start.pan.y + e.clientY - start.y }); return; } if (mappingDragRef.current) { const [cx, cy] = canvasToImageCoords(e), { w, h } = dimsRef.current, drag = mappingDragRef.current; setComponentMappings(current => { const rect = current[mappingComponent]; return { ...current, [mappingComponent]: { ...rect, x: Math.max(0, Math.min(1 - rect.width, cx / w - drag.offsetX)), y: Math.max(0, Math.min(1 - rect.height, cy / h - drag.offsetY)) } }; }); return; } if (polygonEdit && polygonDragRef.current) { const [cx, cy] = canvasToImageCoords(e), { w, h } = dimsRef.current, drag = polygonDragRef.current; if (drag.polygon) { const point = [Math.max(0, Math.min(1, cx / w)), Math.max(0, Math.min(1, cy / h))]; const next = drag.index == null ? drag.startPolygon.map(([x, y]) => [Math.max(0, Math.min(1, x + point[0] - drag.origin[0])), Math.max(0, Math.min(1, y + point[1] - drag.origin[1]))]) : [...drag.polygon]; if (drag.index != null) next[drag.index] = point; drag.polygon = next; previewPolygon(drag.semantic, next); } return; } if (tool !== 'eyedropper') updateBrushCursor(e); if (drawingRef.current) paintAt(...canvasToImageCoords(e)); };
   const onPointerUp   = () => { drawingRef.current = false; mappingDragRef.current = null; finishPolygonDrag(); panDragRef.current = null; };
   const onPointerLeave = () => { drawingRef.current = false; mappingDragRef.current = null; finishPolygonDrag(); panDragRef.current = null; setBrushCursor(null); };
   useEffect(() => {
@@ -602,6 +786,9 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     if (!strengthRef.current) return;
     strengthRef.current.fill(0);
     setCommittedPasses([]);
+    setPaletteBaked(false);
+    setPalettePreview(null);
+    paletteOriginalRef.current = null;
     if (originalBaseRef.current) baseRef.current = new ImageData(new Uint8ClampedArray(originalBaseRef.current.data), originalBaseRef.current.width, originalBaseRef.current.height);
     repaint();
   };
@@ -670,6 +857,21 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
   };
 
   const loadLinkedSkinProfile = async () => {
+    if (sourceSkinPath && outputSkinPath) {
+      const [sourceResult, outputResult] = await Promise.all([
+        window.azeroth.dbc.readBlpTexture(dataPath, sourceSkinPath),
+        window.azeroth?.dbc?.readOutputBlpTexture ? window.azeroth.dbc.readOutputBlpTexture(outputSkinPath) : window.azeroth.dbc.readBlpTexture(dataPath, outputSkinPath),
+      ]);
+      if (sourceResult?.success && sourceResult.png && outputResult?.success && outputResult.png) {
+        const [sourceImage, outputImage] = await Promise.all([pngToImageData(sourceResult.png), pngToImageData(outputResult.png)]);
+        if (sourceImage.width === outputImage.width && sourceImage.height === outputImage.height) {
+          const analysis = textureClassifier.classify({ path: outputSkinPath, width: outputImage.width, height: outputImage.height, rgba: new Uint8Array(outputImage.data), textureType: 'skin-atlas' });
+          const protectedMask = analysis.template ? semanticMaskResolver.resolve({ template: analysis.template, rgba: new Uint8Array(outputImage.data), width: outputImage.width, height: outputImage.height }).protectedMask : null;
+          const profile = deriveSkinTransferProfile(outputImage, protectedMask, sourceImage);
+          if (profile) return { ...profile, source: `Color ${sourceColorIndex} → Color ${colorIndex} delta` };
+        }
+      }
+    }
     const skinPath = textureParts.find(part => part.path !== blpPath && /skin atlas/i.test(part.label))?.path || textureParts.find(part => /skin atlas/i.test(part.label))?.path;
     if (!skinPath) return null;
     const output = preferOutput && window.azeroth?.dbc?.readOutputBlpTexture
@@ -685,7 +887,56 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     return deriveSkinTransferProfile(source.image, source.protectedMask, source.baseline);
   };
 
+  // A Skin Extra does not share the Skin atlas UV layout. Instead of copying
+  // pixels, learn the actual colour transform from the base colour set to the
+  // saved target Skin, then apply that transform to the Extra's own pixels.
+  const loadLinkedSkinColourMap = async () => {
+    if (!sourceSkinPath || !outputSkinPath) return null;
+    try {
+      const [sourceResult, outputResult] = await Promise.all([
+        window.azeroth.dbc.readBlpTexture(dataPath, sourceSkinPath),
+        window.azeroth?.dbc?.readOutputBlpTexture
+          ? window.azeroth.dbc.readOutputBlpTexture(outputSkinPath)
+          : window.azeroth.dbc.readBlpTexture(dataPath, outputSkinPath),
+      ]);
+      if (!sourceResult?.success || !sourceResult.png || !outputResult?.success || !outputResult.png) return null;
+      const [sourceImage, outputImage] = await Promise.all([pngToImageData(sourceResult.png), pngToImageData(outputResult.png)]);
+      if (sourceImage.width !== outputImage.width || sourceImage.height !== outputImage.height) return null;
+      const analysis = textureClassifier.classify({
+        path: outputSkinPath,
+        width: outputImage.width,
+        height: outputImage.height,
+        rgba: new Uint8Array(outputImage.data),
+        textureType: 'skin-atlas',
+      });
+      const protectedMask = analysis.template
+        ? semanticMaskResolver.resolve({ template: analysis.template, rgba: new Uint8Array(outputImage.data), width: outputImage.width, height: outputImage.height }).protectedMask
+        : null;
+      const map = buildSkinColourMap(sourceImage, outputImage, protectedMask);
+      return map.length >= 12 ? map : null;
+    } catch {
+      return null;
+    }
+  };
+
   const applySkinColourTransfer = async () => {
+    const colourMap = await loadLinkedSkinColourMap();
+    if (colourMap && baseRef.current && strengthRef.current) {
+      pushHistory();
+      const base = baseRef.current;
+      const protectedMask = respectProtection ? protectedRef.current : null;
+      paletteOriginalRef.current = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height);
+      baseRef.current = applySkinColourMap(base, colourMap, protectedMask);
+      for (let i = 0; i < strengthRef.current.length; i++) {
+        strengthRef.current[i] = base.data[i * 4 + 3] > 12 && !protectedMask?.[i] ? 1 : 0;
+      }
+      setStrength(0);
+      setPaletteBaked(true);
+      setSkinTransferProfile({ source: `Colour ${sourceColorIndex} → Colour ${colorIndex} pixel map`, samples: colourMap.reduce((total, entry) => total + entry.count, 0) });
+      setMaskRevision(value => value + 1);
+      setTemplateSaveMsg(`Applied the learned Colour ${sourceColorIndex} → ${colorIndex} transform to Skin Extra (${colourMap.length} colour clusters).`);
+      return;
+    }
     const source = skinSourceRef.current;
     const profile = skinTransferProfile || deriveSkinTransferProfile(source?.image, source?.protectedMask, source?.baseline) || await loadLinkedSkinProfile();
     if (!profile || !baseRef.current || !strengthRef.current) {
@@ -703,16 +954,69 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     setMaskRevision(value => value + 1);
   };
 
+  const applySourceBodyPalette = async () => {
+    if (!selectedSourceSkin?.tex1 || !baseRef.current || !strengthRef.current) return;
+    setTemplateSaveMsg(null);
+    const output = preferOutput && window.azeroth?.dbc?.readOutputBlpTexture
+      ? await window.azeroth.dbc.readOutputBlpTexture(selectedSourceSkin.tex1)
+      : null;
+    const result = output?.success ? output : await window.azeroth.dbc.readBlpTexture(dataPath, selectedSourceSkin.tex1);
+    if (!result?.success || !result.png) { setTemplateSaveMsg('Could not load the selected source Skin BLP.'); return; }
+    const source = await pngToImageData(result.png);
+    const sourceAnalysis = textureClassifier.classify({ path: selectedSourceSkin.tex1, width: source.width, height: source.height, rgba: new Uint8Array(source.data), textureType: 'skin-atlas' });
+    const sourceMask = sourceAnalysis.template ? semanticMaskResolver.resolve({ template: sourceAnalysis.template, rgba: new Uint8Array(source.data), width: source.width, height: source.height }).protectedMask : null;
+    const palette = analyseBodyPalette(source, sourceMask);
+    if (!palette) { setTemplateSaveMsg('The selected Skin did not contain a reliable dominant body palette.'); return; }
+    pushHistory();
+    const base = baseRef.current, protectedMask = protectedRef.current;
+    const transferProtection = new Uint8Array(protectedMask || base.width * base.height);
+    if (texturePartType === 'skin-extra' && preserveExtraHair) for (let i = 0; i < transferProtection.length; i++) {
+      const o = i * 4;
+      const [, saturation, lightness] = rgbToHsl(base.data[o], base.data[o + 1], base.data[o + 2]);
+      if (base.data[o + 3] > 12 && lightness < .16 && saturation < .45) transferProtection[i] = 1;
+    }
+    paletteOriginalRef.current = new ImageData(new Uint8ClampedArray(base.data), base.width, base.height);
+    const transferSettings = { paletteInfluence, textureDetailStrength, shadowDepth };
+    const remapped = remapImageWithPalette(base, palette, respectProtection ? transferProtection : null, transferSettings);
+    for (let i = 0; i < strengthRef.current.length; i++) strengthRef.current[i] = base.data[i * 4 + 3] > 12 && !(respectProtection && transferProtection[i]) ? 1 : 0;
+    baseRef.current = remapped;
+    setStrength(0); // The palette is baked into the temporary canvas base; the mask remains exportable.
+    setPaletteBaked(true);
+    sourcePaletteRef.current = { sourceId: selectedSourceSkin.id, palette };
+    if (texturePartType === 'skin-atlas') setPalettePreview({ palette, protectedMask: Uint8Array.from(protectedMask || []), width: base.width, height: base.height, mappings: componentMappings, transferSettings });
+    setSourcePaletteInfo(palette.map(([h, s, l]) => hslToHex(h, s, l)));
+    setMaskRevision(value => value + 1);
+    setTemplateSaveMsg(`Applied ${SOURCE_RACES.find(([id]) => id === sourceRace)?.[1] || 'source'} body palette to editable body pixels.`);
+  };
+
   const changeTargetColor = nextColor => {
     if (nextColor === targetColor || !canvasRef.current || !baseRef.current || !strengthRef.current) { setTargetColor(nextColor); return; }
     // Flatten the current colour pass into the temporary working base before a
     // new colour starts. Source BLPs remain untouched until explicit export.
     const { w, h } = dimsRef.current;
     const mask = Uint8Array.from(strengthRef.current, value => Math.round(value * 255));
-    if (mask.some(value => value)) setCommittedPasses(current => [...current, { mask, targetColor, strength, mappings: componentMappings }]);
+    if (mask.some(value => value)) setCommittedPasses(current => [...current, { mask, targetColor, strength, preserveShading: preservePaintShading, mappings: componentMappings }]);
     baseRef.current = canvasRef.current.getContext('2d').getImageData(0, 0, w, h);
     strengthRef.current.fill(0);
+    // Palette auto-fill is already baked into `baseRef`. Once the user starts
+    // a new colour pass, make that baked result the new working baseline so
+    // repaint cannot restore the pre-palette BLP underneath it.
+    if (paletteBaked) {
+      paletteOriginalRef.current = null;
+      setPaletteBaked(false);
+    }
     setTargetColor(nextColor);
+  };
+
+  const pickColourAt = (cx, cy) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const x = Math.max(0, Math.min(canvas.width - 1, Math.floor(cx)));
+    const y = Math.max(0, Math.min(canvas.height - 1, Math.floor(cy)));
+    const [red, green, blue, alpha] = canvas.getContext('2d').getImageData(x, y, 1, 1).data;
+    if (alpha <= 12) return;
+    changeTargetColor(`#${[red, green, blue].map(value => value.toString(16).padStart(2, '0')).join('')}`);
+    setTool('paint');
   };
 
   const useSemanticMask = () => {
@@ -728,7 +1032,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const strengthArr = strengthRef.current;
     const recoveryOriginal = recoveryOriginalRef.current;
     const hasRecovery = recoveryOriginal?.width === w && recoveryOriginal?.height === h;
-    if (!strengthArr || (strengthArr.every(v => v === 0) && !hasRecovery)) {
+    const hasCommittedPass = committedPasses.some(pass => pass.mask?.some(value => value > 0));
+    if (!strengthArr || (strengthArr.every(v => v === 0) && !hasCommittedPass && !hasRecovery)) {
       setSaveError('Paint an area first — there are no changes to save.');
       return;
     }
@@ -738,7 +1043,17 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const ctx = canvasRef.current.getContext('2d');
     const finalRgba = ctx.getImageData(0, 0, w, h).data; // Uint8ClampedArray, bevat al de preview-recolor
     const maskBytes = new Uint8Array(w * h);
-    for (let i = 0; i < w * h; i++) maskBytes[i] = hasRecovery ? (finalRgba[i * 4 + 3] > 12 ? 255 : 0) : Math.round(strengthArr[i] * 255);
+    // Earlier colours are flattened into the canvas when the target changes.
+    // Export the union so every visible paint pass reaches the BLP encoder.
+    for (const pass of committedPasses) {
+      const passMask = pass.mask;
+      if (!passMask || passMask.length !== maskBytes.length) continue;
+      for (let i = 0; i < maskBytes.length; i++) if (passMask[i]) maskBytes[i] = passMask[i];
+    }
+    for (let i = 0; i < w * h; i++) {
+      const active = Math.round(strengthArr[i] * 255);
+      maskBytes[i] = hasRecovery ? (finalRgba[i * 4 + 3] > 12 ? 255 : 0) : Math.max(maskBytes[i], active);
+    }
 
     const toBase64 = (bytes) => {
       let binary = '';
@@ -757,7 +1072,9 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
     const outRelPath = outputPath || ((dirName ? dirName + '\\' : '') + `${baseName}_custom${Date.now()}.blp`);
 
     try {
-      const res = await window.azeroth.dbc.writeBlpTextureEdit(dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, true);
+      // Derived colour sets are loaded from their staged BLP, but encoding
+      // still needs the original client BLP header/compression source.
+      const res = await window.azeroth.dbc.writeBlpTextureEdit(dataPath, writeSourceBlpPath || sourceBlpPath || blpPath, editedRgbaBase64, maskBase64, outRelPath, true);
       if (res?.success) {
         if (saveAsTemplateCorrection && semanticAnalysis?.template && protectedRef.current) {
           templateCorrectionStore.save({
@@ -775,7 +1092,8 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
           width: w,
           height: h,
         } : null;
-        onSaved?.({ path: res.path, targetSetFlags, targetColor, strength, sourceMaskBase64: maskBase64, sourceWidth: w, sourceHeight: h, componentMappings, componentPasses: [...committedPasses, activePass], recoveryTransfer });
+        const registration = await onSaved?.({ path: res.path, saveMode, targetSetFlags, targetColor, strength, sourceMaskBase64: maskBase64, sourceWidth: w, sourceHeight: h, componentMappings, componentPasses: [...committedPasses, activePass], recoveryTransfer });
+        if (registration?.success === false) setSaveError(`BLP staged, but the new colour set was not registered: ${registration.error}`);
       }
       else setSaveError(res?.error || 'Save failed');
     } catch (e) {
@@ -821,6 +1139,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 </select>
                 <span className="tme-part-hint">Atlas components are projected from Skin. Independent BLPs open on their own canvas.</span>
               </label>}
+              {texturePartType === 'skin-extra' && sourceColorIndex != null && <div className="tme-analysis"><strong>Linked colour transform</strong><span>Base Color {sourceColorIndex} → Color {colorIndex}</span><span>Editing original Extra, exporting to the linked output set.</span></div>}
               {semanticAnalysis && <>
                 <div className="tme-analysis"><strong>Semantic analysis: {semanticAnalysis.status === 'ready' ? 'ready' : semanticAnalysis.status === 'review' ? 'review' : 'manual'}</strong><span>{Math.round((semanticAnalysis.confidence?.total ?? 0) * 100)}% · {semanticAnalysis.template?.id || 'no template'}</span>{reusedCorrection && <span>Saved correction applied</span>}</div>
                 {semanticAnalysis?.template?.match?.textureType === 'skin-atlas' && <details className="tme-collapsible"><summary>Component mappings</summary><select value={mappingComponent} onChange={e => setMappingComponent(e.target.value)}>{Object.keys(componentMappings).map(name => <option key={name}>{name}</option>)}</select>{['x','y','width','height'].map(key => <label className="tme-field" key={key}>{key}<input type="number" min="0" max="1" step="0.005" value={componentMappings[mappingComponent]?.[key] ?? 0} onChange={e => setComponentMappings(current => ({ ...current, [mappingComponent]: { ...current[mappingComponent], [key]: Math.max(0, Math.min(1, Number(e.target.value) || 0)) } }))} /></label>)}<button className="tme-tool-btn" onClick={() => { componentMappingStore.save(semanticAnalysis.template.id, componentMappings); setTemplateSaveMsg('Component mappings saved for this atlas layout.'); }}>Save component mappings</button></details>}
@@ -830,7 +1149,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 {templateSaveMsg && <div className="tme-template-ok">{templateSaveMsg}</div>}
             </aside>
             <div ref={canvasWrapRef} className="tme-canvas-wrap">
-              <div className={`tme-canvas-stack ${polygonEdit ? 'polygon-editing' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><canvas ref={canvasRef} className="tme-canvas" onContextMenu={e => e.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} /><canvas ref={protectionOverlayRef} className="tme-protection-overlay" />{brushCursor && !polygonEdit && <div className={`tme-brush-cursor ${tool}${brushSoft ? ' soft' : ''}`} style={{ left: `${brushCursor.left}%`, top: `${brushCursor.top}%`, width: `${brushCursor.width}%`, height: `${brushCursor.height}%` }} />}</div><div className="tme-canvas-status"><span>{tool}</span><span>{targetColor}</span><span>{brushSize}px</span>{textureSize && <span>{textureSize.width} × {textureSize.height}px</span>}{mappingEdit && <span>Moving {mappingComponent}</span>}</div>
+              <div className={`tme-canvas-stack ${polygonEdit ? 'polygon-editing' : ''}`} style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})` }}><canvas ref={canvasRef} className={`tme-canvas ${tool === 'eyedropper' ? 'tme-canvas-eyedropper' : ''}`} onContextMenu={e => e.preventDefault()} onPointerDown={onPointerDown} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerLeave={onPointerLeave} /><canvas ref={protectionOverlayRef} className="tme-protection-overlay" />{brushCursor && !polygonEdit && tool !== 'eyedropper' && <div className={`tme-brush-cursor ${tool}${brushSoft ? ' soft' : ''}`} style={{ left: `${brushCursor.left}%`, top: `${brushCursor.top}%`, width: `${brushCursor.width}%`, height: `${brushCursor.height}%` }} />}</div><div className="tme-canvas-status"><span>{tool}</span><span>{targetColor}</span><span>{brushSize}px</span>{textureSize && <span>{textureSize.width} × {textureSize.height}px</span>}{mappingEdit && <span>Moving {mappingComponent}</span>}</div>
             </div>
 
             <div className="tme-controls">
@@ -863,6 +1182,9 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 <button className={`tme-tool-btn ${tool === 'erase' ? 'active' : ''}`} onClick={() => setTool('erase')}>
                   <Eraser size={14} /> Erase
                 </button>
+                <button className={`tme-tool-btn ${tool === 'eyedropper' ? 'active' : ''}`} onClick={() => setTool('eyedropper')} title="Pick a pixel colour from the canvas">
+                  <Pipette size={14} /> Eyedropper
+                </button>
                 <button className="tme-tool-btn" onClick={fillMask} title="Fill all editable, non-protected pixels with the target colour">Fill</button>
                 {semanticAnalysis?.template?.match?.textureType === 'skin-atlas' && <button className={`tme-tool-btn ${mappingEdit ? 'active' : ''}`} onClick={() => { setShowComponentMappings(true); setMappingEdit(value => !value); }} title="Drag the selected component rectangle on the canvas">Mappings</button>}
                 <button className="tme-tool-btn" onClick={resetMask} title="Masker volledig wissen">
@@ -870,11 +1192,26 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 </button>
               </div>
 
-              {texturePartType === 'skin-extra' && <button className="tme-tool-btn" onClick={applySkinColourTransfer} title="Load the linked saved Skin atlas, analyse its colour, and apply it to Skin Extra while preserving Skin Extra shading">
+              {texturePartType === 'skin-atlas' && <details className="tme-collapsible">
+                <summary>Source body palette</summary>
+                <label className="tme-field">Source race<select value={sourceRace} onChange={e => { setSourceRace(Number(e.target.value)); setSourceSkinId(''); }}>{SOURCE_RACES.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
+                <label className="tme-field">Source gender<select value={sourceGender} onChange={e => { setSourceGender(Number(e.target.value)); setSourceSkinId(''); }}><option value={0}>Male</option><option value={1}>Female</option></select></label>
+                <label className="tme-field">Source colour set<select value={sourceSkinId} onChange={e => setSourceSkinId(e.target.value)} disabled={!sourceSkins.length}>{sourceSkins.map(row => <option key={row.id} value={row.id}>Colour {row.colorIndex} · Flags {row.flags}</option>)}</select></label>
+                <button className="tme-tool-btn" onClick={applySourceBodyPalette} disabled={!selectedSourceSkin} title="Analyse dominant source fur colours and fill only editable body pixels">Analyse & auto fill body</button>
+                <label className="tme-field">Palette influence: {Math.round(paletteInfluence * 100)}%<input type="range" min="0" max="1" step="0.05" value={paletteInfluence} onChange={e => setPaletteInfluence(Number(e.target.value))} /></label>
+                <label className="tme-field">Texture detail: {Math.round(textureDetailStrength * 100)}%<input type="range" min="0" max="2" step="0.05" value={textureDetailStrength} onChange={e => setTextureDetailStrength(Number(e.target.value))} /></label>
+                <label className="tme-field">Shadow depth: {Math.round(shadowDepth * 100)}%<input type="range" min="0" max="2" step="0.05" value={shadowDepth} onChange={e => setShadowDepth(Number(e.target.value))} /></label>
+                {sourcePaletteInfo && <div className="tme-source-swatches" aria-label="Source fur palette">
+                  {sourcePaletteInfo.map((colour, index) => <button key={`${colour}-${index}`} type="button" className={colour.toLowerCase() === targetColor.toLowerCase() ? 'active' : ''} style={{ backgroundColor: colour }} onClick={() => changeTargetColor(colour)} title={`Use ${colour} as target colour`} aria-label={`Use palette colour ${colour} as target colour`} />)}
+                  <span>Choose a sampled colour as Target colour</span>
+                </div>}
+              </details>}
+
+              {texturePartType === 'skin-extra' && <button className="tme-tool-btn" onClick={applySkinColourTransfer} title="Analyse the linked saved Skin and apply its colour profile to Skin Extra">
                 Analyse & apply Skin colour
               </button>}
               {texturePartType === 'skin-extra' && skinTransferProfile && <span className="tme-viewport-hint">Profile: {skinTransferProfile.source}{skinTransferProfile.samples ? ` (${skinTransferProfile.samples} pixels)` : ''}</span>}
-              {texturePartType === 'skin-extra' && !skinTransferProfile && skinSourceRef.current && <span className="tme-viewport-hint">No reliable Skin colour was found yet. You can still run the analysis.</span>}
+              {texturePartType === 'skin-extra' && <label className="tme-field">Match Skin brightness: {Math.round(extraBrightnessMatch * 100)}%<input type="range" min="0" max="1" step="0.05" value={extraBrightnessMatch} onChange={e => setExtraBrightnessMatch(Number(e.target.value))} /></label>}
 
               <div className="tme-tool-row">
                 <button className="tme-tool-btn" onClick={() => setZoom(value => Math.max(.5, Number((value - .25).toFixed(2))))}><ZoomOut size={14} /> Uitzoomen</button>
@@ -891,6 +1228,11 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
               <label className="tme-field tme-checkbox">
                 <input type="checkbox" checked={brushSoft} onChange={e => setBrushSoft(e.target.checked)} />
                 Soft edge (falloff)
+              </label>
+
+              <label className="tme-field tme-checkbox" title="Keep the original texture's light and dark detail while applying the selected colour.">
+                <input type="checkbox" checked={preservePaintShading} onChange={e => setPreservePaintShading(e.target.checked)} />
+                Preserve texture shading
               </label>
 
               {semanticAnalysis?.template && <label className="tme-field tme-checkbox">
@@ -920,6 +1262,15 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
               </label>
 
               <label className="tme-field">
+                Save behaviour
+                <select value={saveMode} onChange={e => onSaveModeChange?.(e.target.value)}>
+                  <option value="create">Create new colour set</option>
+                  {sourceColorIndex != null && <option value="update">Update Color {colorIndex}</option>}
+                </select>
+              </label>
+              <span className="tme-viewport-hint">{saveMode === 'update' ? `Updates the staged Color ${colorIndex} BLPs; the client originals stay untouched.` : 'Creates a new ColorIndex and leaves this colour set unchanged.'}</span>
+
+              <label className="tme-field">
                 Colour intensity: {Math.round(strength * 100)}%
                 <input type="range" min={0} max={100} value={strength * 100} onChange={e => setStrength(Number(e.target.value) / 100)} />
               </label>
@@ -937,7 +1288,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
               </button>
             </div>
           </div>
-          {activeTab === 'preview' && <div className="tme-model-preview"><div className="tme-preview-controls">{previewFaces.length > 0 && <label>Face<select value={previewFaceId} onChange={e => setPreviewFaceId(e.target.value)}>{previewFaces.map(row => <option key={row.id} value={row.id}>Face {row.variationIndex}</option>)}</select></label>}{previewHairs.length > 0 && <label>Hair<select value={previewHairId} onChange={e => setPreviewHairId(e.target.value)}><option value="">None</option>{previewHairs.map(row => <option key={row.id} value={row.id}>Style {row.variationIndex} / colour {row.colorIndex}</option>)}</select></label>}</div>{previewRgba ? <CharM2Viewer race={race} gender={gender} skinBlp={previewSkin?.tex1 || blpPath} skinExtraBlp={previewSkin?.tex2 || null} skinRgba={texturePartType === 'skin-atlas' ? previewRgba : null} skinExtraRgba={texturePartType === 'skin-extra' ? previewRgba : null} componentTransfer={texturePartType === 'skin-atlas' ? previewTransfer : null} appearance={{ face: previewFace?.variationIndex || 0, hairStyle: previewHair?.variationIndex || 0, hairColor: previewHair?.colorIndex || 0 }} textureLayers={[...(previewFace ? [{ path: previewFace.tex1, region: 'face-lower' }, { path: previewFace.tex2, region: 'face-upper' }] : []), ...(previewHair ? [{ path: previewHair.tex1, region: 'hair-primary' }] : [])]} preferOutput={preferOutput} active={!!dataPath} /> : <span>Open the preview after the texture has loaded.</span>}</div>}
+          {activeTab === 'preview' && <div className="tme-model-preview"><div className="tme-preview-controls">{previewFaces.length > 0 && <label>Face<select value={previewFaceId} onChange={e => setPreviewFaceId(e.target.value)}>{previewFaces.map(row => <option key={row.id} value={row.id}>Face {row.variationIndex}</option>)}</select></label>}{previewHairs.length > 0 && <label>Hair<select value={previewHairId} onChange={e => setPreviewHairId(e.target.value)}><option value="">None</option>{previewHairs.map(row => <option key={row.id} value={row.id}>Style {row.variationIndex} / colour {row.colorIndex}</option>)}</select></label>}</div>{previewRgba ? <CharM2Viewer race={race} gender={gender} skinBlp={previewSkin?.tex1 || blpPath} skinExtraBlp={previewSkin?.tex2 || null} skinRgba={texturePartType === 'skin-atlas' ? previewRgba : null} skinExtraRgba={texturePartType === 'skin-extra' ? previewRgba : null} componentTransfer={texturePartType === 'skin-atlas' ? previewTransfer : null} componentPalette={texturePartType === 'skin-atlas' ? palettePreview : null} appearance={{ face: previewFace?.variationIndex || 0, hairStyle: previewHair?.variationIndex || 0, hairColor: previewHair?.colorIndex || 0 }} textureLayers={[...(previewFace ? [{ path: previewFace.tex1, region: 'face-lower' }, { path: previewFace.tex2, region: 'face-upper' }] : []), ...(previewHair ? [{ path: previewHair.tex1, region: 'hair-primary' }] : [])]} preferOutput={preferOutput} active={!!dataPath} /> : <span>Open the preview after the texture has loaded.</span>}</div>}
         </div>
       </div>
     </div>
