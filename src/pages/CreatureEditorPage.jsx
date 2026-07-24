@@ -35,7 +35,7 @@ const SUB_TABS = [
   { id: 'trainer', label: 'Trainer Settings', role: 'trainer' },
   { id: 'vendor', label: 'Vendor Items', role: 'vendor' },
   { id: 'spawns', label: 'World Spawns', role: 'spawn' },
-  { id: 'directions', label: 'Directions' },
+  { id: 'directions', label: 'Directions', role: 'directions' },
   { id: 'quests', label: 'Quests' },
 ];
 
@@ -275,7 +275,7 @@ function toEnemyMeta(row) {
 }
 
 export default function CreatureEditorPage() {
-  const { query, soapCommand, soapConfig, findNextId, idRanges } = useConnection();
+  const { query, soapCommand, soapConfig, findNextId, idRanges, runAtomicWrite } = useConnection();
   const navigate = useNavigate();
   const location = useLocation();
   const [search, setSearch] = useState('');
@@ -324,13 +324,28 @@ export default function CreatureEditorPage() {
   const [refSelectedModelIdx, setRefSelectedModelIdx] = useState(0);
   const [refRoles, setRefRoles] = useState({ trainer: false, vendor: false, spawn: false });
   const [questRelations, setQuestRelations] = useState({ starters: [], enders: [] });
-  const [directions, setDirections] = useState({ loading: false, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null });
+  const [directions, setDirections] = useState({ loading: false, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null, routes: [] });
   const [directionTargetEntry, setDirectionTargetEntry] = useState('4000002');
+  const [directionSpeech, setDirectionSpeech] = useState('');
   const [directionTarget, setDirectionTarget] = useState(null);
   const [directionTargetSpawns, setDirectionTargetSpawns] = useState([]);
   const [directionSpawnGuid, setDirectionSpawnGuid] = useState('');
   const [directionPlan, setDirectionPlan] = useState(null);
   const [directionSaving, setDirectionSaving] = useState(false);
+  const [editingDirectionSpeech, setEditingDirectionSpeech] = useState(false);
+  const [savedDirectionSpeech, setSavedDirectionSpeech] = useState('');
+  const [editingPoi, setEditingPoi] = useState(null);
+  const [poiSaving, setPoiSaving] = useState(false);
+  const [editingRouteOption, setEditingRouteOption] = useState(false);
+  const [routeOptionDraft, setRouteOptionDraft] = useState(null);
+  const [newRouteParentMenu, setNewRouteParentMenu] = useState('');
+  const [newRouteLabel, setNewRouteLabel] = useState('');
+  const [newRoutePoiLabel, setNewRoutePoiLabel] = useState('');
+  const [newRouteSpeech, setNewRouteSpeech] = useState('');
+  const [newRoutePlan, setNewRoutePlan] = useState(null);
+  const [editingCustomRoute, setEditingCustomRoute] = useState(null);
+  const [editingAnyRoute, setEditingAnyRoute] = useState(null);
+  const [editingRouteSpeech, setEditingRouteSpeech] = useState(null);
   const [questRelationTab, setQuestRelationTab] = useState('starters');
   const [enemyMeta, setEnemyMeta] = useState(DEFAULT_ENEMY_META);
   const [refEnemyMeta, setRefEnemyMeta] = useState(DEFAULT_ENEMY_META);
@@ -428,7 +443,7 @@ export default function CreatureEditorPage() {
   const loadDirections = useCallback(async (entry) => {
     setDirections({ loading: true, error: '', menus: [], pois: [], conditions: [], guardSpawns: [] });
     try {
-      const [treeRes, guardSpawnRes, metaRes] = await Promise.all([
+      const [treeRes, guardSpawnRes, metaRes, routesRes] = await Promise.all([
         query(`
           WITH RECURSIVE menu_tree AS (
             SELECT gossip_menu_id AS MenuID, 0 AS depth, CAST(gossip_menu_id AS CHAR(2000)) AS path
@@ -447,6 +462,7 @@ export default function CreatureEditorPage() {
           ORDER BY mt.depth, mt.MenuID, gmo.OptionID`, [entry]),
         query('SELECT guid, map, zoneId, areaId, position_x, position_y, position_z FROM creature WHERE id1 = ? ORDER BY map, guid', [entry]),
         query('SELECT * FROM guard_directions_editor_meta WHERE guard_entry = ? LIMIT 1', [entry]).catch(() => ({ data: [] })),
+        query('SELECT * FROM guard_directions_editor_route WHERE guard_entry = ?', [entry]).catch(() => ({ data: [] })),
       ]);
       const menus = treeRes.data || [];
       const poiIds = [...new Set(menus.map(row => Number(row.ActionPoiID)).filter(Boolean))];
@@ -454,7 +470,8 @@ export default function CreatureEditorPage() {
       const optionIds = [...new Set(menus.map(row => Number(row.OptionID)).filter(Number.isFinite))];
       const [poiRes, conditionRes] = await Promise.all([
         poiIds.length
-          ? query(`SELECT poi.*, ct.entry AS destinationEntry, ct.name AS destinationName, ct.subname AS destinationSubname,
+          ? query(`SELECT poi.*, (SELECT COUNT(*) FROM gossip_menu_option linked WHERE linked.ActionPoiID = poi.ID) AS referenceCount,
+                    ct.entry AS destinationEntry, ct.name AS destinationName, ct.subname AS destinationSubname,
                     c.guid AS destinationGuid, c.map AS destinationMap, c.position_x, c.position_y, c.position_z
                    FROM points_of_interest poi
                    LEFT JOIN creature_template ct ON ct.name = poi.Name
@@ -477,9 +494,11 @@ export default function CreatureEditorPage() {
         if (row.destinationEntry) out[key].destinations.push({ entry: row.destinationEntry, name: row.destinationName, subname: row.destinationSubname, guid: row.destinationGuid, map: row.destinationMap, x: row.position_x, y: row.position_y, z: row.position_z });
         return out;
       }, {}));
-      setDirections({ loading: false, error: '', menus, pois: poiGroups, conditions: conditionRes.data || [], guardSpawns: guardSpawnRes.data || [], meta: metaRes.data?.[0] || null });
+      setDirections({ loading: false, error: '', menus, pois: poiGroups, conditions: conditionRes.data || [], guardSpawns: guardSpawnRes.data || [], meta: metaRes.data?.[0] || null, routes: routesRes.data || [] });
+      return menus.some(row => Number(row.ActionPoiID) || ['Class Trainer', 'A class trainer', 'Profession Trainer', 'A profession trainer'].includes(row.OptionText));
     } catch (err) {
-      setDirections({ loading: false, error: err?.message || 'Could not inspect directions.', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null });
+      setDirections({ loading: false, error: err?.message || 'Could not inspect directions.', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null, routes: [] });
+      return false;
     }
   }, [query]);
 
@@ -502,7 +521,7 @@ export default function CreatureEditorPage() {
     const spawn = directionTargetSpawns.find(row => String(row.guid) === String(directionSpawnGuid));
     if (!rootMenuId || !classMenuId) { setMsg({ type: 'error', text: 'This guard needs an existing Class Trainer direction branch first.' }); return; }
     if (!directionTarget || !spawn) { setMsg({ type: 'error', text: 'Select a destination template and one of its live spawns.' }); return; }
-    const [rootMenuRes, classMenuRes, rootOptionsRes, classOptionsRes, leafRes, usedMenusRes, usedPoiRes, classRefsRes] = await Promise.all([
+    const [rootMenuRes, classMenuRes, rootOptionsRes, classOptionsRes, leafRes, usedMenusRes, usedPoiRes, usedTextRes, classRefsRes] = await Promise.all([
       query('SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1', [rootMenuId]),
       query('SELECT TextID FROM gossip_menu WHERE MenuID = ? LIMIT 1', [classMenuId]),
       query('SELECT * FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID', [rootMenuId]),
@@ -510,6 +529,7 @@ export default function CreatureEditorPage() {
       query('SELECT TextID FROM gossip_menu WHERE MenuID = 1909 LIMIT 1'),
       query('SELECT MenuID FROM gossip_menu WHERE MenuID >= 4000000 ORDER BY MenuID'),
       query('SELECT ID FROM points_of_interest WHERE ID >= 4000000 ORDER BY ID'),
+      query('SELECT ID FROM npc_text WHERE ID >= 4000000 ORDER BY ID'),
       query('SELECT MenuID, OptionID FROM gossip_menu_option WHERE ActionMenuID = ?', [classMenuId]),
     ]);
     const nextFree = (rows, field) => { const used = new Set((rows.data || []).map(row => Number(row[field]))); let id = 4000000; while (used.has(id)) id++; return id; };
@@ -519,13 +539,15 @@ export default function CreatureEditorPage() {
     const usedMenus = new Set((usedMenusRes.data || []).map(row => Number(row.MenuID)));
     let newLeaf = 4000000; while (usedMenus.has(newLeaf)) newLeaf++;
     const newPoi = nextFree(usedPoiRes, 'ID');
+    const newText = nextFree(usedTextRes, 'ID');
     const rootOptions = rootOptionsRes.data || [];
     const classOptions = classOptionsRes.data || [];
     const shaman = classOptions.find(row => row.OptionText === 'Shaman');
     if (shaman) { setMsg({ type: 'error', text: 'This city already has a Shaman option. Inspect it instead of overwriting it.' }); return; }
     const shamanOptionId = Math.max(-1, ...classOptions.map(row => Number(row.OptionID))) + 1;
-    setDirectionPlan({ mode: 'shared', rootMenuId, classMenuId, newLeaf, newPoi, rootTextId: rootMenuRes.data?.[0]?.TextID, classTextId: classMenuRes.data?.[0]?.TextID, leafTextId: leafRes.data?.[0]?.TextID || 2562, rootOptions, classOptions, classRootOptionId: Number(classRoot.OptionID), shamanOptionId, spawn, target: directionTarget });
-  }, [directions.menus, directionSpawnGuid, directionTarget, directionTargetSpawns, form.gossip_menu_id, query]);
+    const speech = directionSpeech.trim() || `You can find ${directionTarget.name} nearby.`;
+    setDirectionPlan({ mode: 'shared', rootMenuId, classMenuId, newLeaf, newPoi, newText, rootTextId: rootMenuRes.data?.[0]?.TextID, classTextId: classMenuRes.data?.[0]?.TextID, leafTextId: newText, speech, rootOptions, classOptions, classRootOptionId: Number(classRoot.OptionID), shamanOptionId, spawn, target: directionTarget });
+  }, [directions.menus, directionSpawnGuid, directionSpeech, directionTarget, directionTargetSpawns, form.gossip_menu_id, query]);
 
   const saveDirectionPlan = useCallback(async () => {
     if (!directionPlan || !selected) return;
@@ -539,24 +561,26 @@ export default function CreatureEditorPage() {
       await run(`CREATE TABLE IF NOT EXISTS guard_directions_editor_meta (
         guard_entry INT UNSIGNED NOT NULL PRIMARY KEY, root_menu_id INT UNSIGNED NOT NULL, class_menu_id INT UNSIGNED NOT NULL,
         leaf_menu_id INT UNSIGNED NOT NULL, poi_id INT UNSIGNED NOT NULL, previous_root_menu_id INT UNSIGNED NOT NULL,
-        destination_entry INT UNSIGNED NOT NULL, destination_guid INT UNSIGNED NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        destination_entry INT UNSIGNED NOT NULL, destination_guid INT UNSIGNED NOT NULL, npc_text_id INT UNSIGNED NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`);
       const modeColumn = await query("SHOW COLUMNS FROM guard_directions_editor_meta LIKE 'mode'");
       if (!modeColumn.data?.length) await run("ALTER TABLE guard_directions_editor_meta ADD COLUMN mode VARCHAR(16) NOT NULL DEFAULT 'clone', ADD COLUMN shaman_option_id SMALLINT UNSIGNED NULL");
-      await run('START TRANSACTION');
-      await run('INSERT INTO gossip_menu (MenuID, TextID) VALUES (?,?)', [p.newLeaf, p.leafTextId]);
-      await run(optionSql, [p.classMenuId, p.shamanOptionId, 0, 'Shaman', 45410, 1, 1, p.newLeaf, p.newPoi, 0, 0, '', 0, null]);
-      await run('INSERT INTO points_of_interest (ID, PositionX, PositionY, Icon, Flags, Importance, Name) VALUES (?,?,?,?,?,?,?)', [p.newPoi, p.spawn.position_x, p.spawn.position_y, 7, 99, 0, p.target.name]);
-      await run('INSERT INTO guard_directions_editor_meta (guard_entry, root_menu_id, class_menu_id, leaf_menu_id, poi_id, previous_root_menu_id, destination_entry, destination_guid, mode, shaman_option_id) VALUES (?,?,?,?,?,?,?,?,?,?)', [selected.entry, p.rootMenuId, p.classMenuId, p.newLeaf, p.newPoi, p.rootMenuId, p.target.entry, p.spawn.guid, 'shared', p.shamanOptionId]);
-      await run('COMMIT');
+      const textColumn = await query("SHOW COLUMNS FROM guard_directions_editor_meta LIKE 'npc_text_id'");
+      if (!textColumn.data?.length) await run('ALTER TABLE guard_directions_editor_meta ADD COLUMN npc_text_id INT UNSIGNED NULL');
+      await runAtomicWrite([], async () => {
+        await run('INSERT INTO npc_text (ID, text0_0, text0_1, BroadcastTextID0, lang0, Probability0) VALUES (?,?,?,?,?,?)', [p.newText, p.speech, '', 0, 0, 1]);
+        await run('INSERT INTO gossip_menu (MenuID, TextID) VALUES (?,?)', [p.newLeaf, p.leafTextId]);
+        await run(optionSql, [p.classMenuId, p.shamanOptionId, 0, 'Shaman', 45410, 1, 1, p.newLeaf, p.newPoi, 0, 0, '', 0, null]);
+        await run('INSERT INTO points_of_interest (ID, PositionX, PositionY, Icon, Flags, Importance, Name) VALUES (?,?,?,?,?,?,?)', [p.newPoi, p.spawn.position_x, p.spawn.position_y, 7, 99, 0, p.target.name]);
+        await run('INSERT INTO guard_directions_editor_meta (guard_entry, root_menu_id, class_menu_id, leaf_menu_id, poi_id, previous_root_menu_id, destination_entry, destination_guid, npc_text_id, mode, shaman_option_id) VALUES (?,?,?,?,?,?,?,?,?,?,?)', [selected.entry, p.rootMenuId, p.classMenuId, p.newLeaf, p.newPoi, p.rootMenuId, p.target.entry, p.spawn.guid, p.newText, 'shared', p.shamanOptionId]);
+      });
       setMsg({ type: 'success', text: `Added shared city Shaman directions to ${p.target.name} at spawn #${p.spawn.guid}.` });
       setDirectionPlan(null);
       await selectCreature(selected.entry);
     } catch (err) {
-      try { await query('ROLLBACK'); } catch { /* noop */ }
       setMsg({ type: 'error', text: err.message || 'Could not create directions.' });
     } finally { setDirectionSaving(false); }
-  }, [directionPlan, query, selected]);
+  }, [directionPlan, query, runAtomicWrite, selected]);
 
   const removeDirectionPlan = useCallback(async () => {
     const meta = directions.meta;
@@ -564,25 +588,274 @@ export default function CreatureEditorPage() {
     const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
     setDirectionSaving(true);
     try {
-      await run('START TRANSACTION');
-      if (meta.mode === 'shared') {
-        await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [meta.class_menu_id, meta.shaman_option_id]);
-        await run('DELETE FROM gossip_menu WHERE MenuID = ?', [meta.leaf_menu_id]);
-      } else {
-        await run('UPDATE creature_template SET gossip_menu_id = ? WHERE entry = ?', [meta.previous_root_menu_id, selected.entry]);
-        await run('DELETE FROM gossip_menu_option WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
-        await run('DELETE FROM gossip_menu WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
-      }
-      await run('DELETE FROM points_of_interest WHERE ID = ?', [meta.poi_id]);
-      await run('DELETE FROM guard_directions_editor_meta WHERE guard_entry = ?', [selected.entry]);
-      await run('COMMIT');
+      await runAtomicWrite([], async () => {
+        if (meta.mode === 'shared') {
+          await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [meta.class_menu_id, meta.shaman_option_id]);
+          await run('DELETE FROM gossip_menu WHERE MenuID = ?', [meta.leaf_menu_id]);
+        } else {
+          await run('UPDATE creature_template SET gossip_menu_id = ? WHERE entry = ?', [meta.previous_root_menu_id, selected.entry]);
+          await run('DELETE FROM gossip_menu_option WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
+          await run('DELETE FROM gossip_menu WHERE MenuID IN (?,?,?)', [meta.root_menu_id, meta.class_menu_id, meta.leaf_menu_id]);
+        }
+        await run('DELETE FROM points_of_interest WHERE ID = ?', [meta.poi_id]);
+        if (meta.npc_text_id) await run('DELETE FROM npc_text WHERE ID = ?', [meta.npc_text_id]);
+        await run('DELETE FROM guard_directions_editor_meta WHERE guard_entry = ?', [selected.entry]);
+      });
       setMsg({ type: 'success', text: 'Removed only the directions route created by this editor.' });
       await selectCreature(selected.entry);
     } catch (err) {
-      try { await query('ROLLBACK'); } catch { /* noop */ }
       setMsg({ type: 'error', text: err.message || 'Could not remove directions.' });
     } finally { setDirectionSaving(false); }
-  }, [directions.meta, query, selected]);
+  }, [directions.meta, query, runAtomicWrite, selected]);
+
+  const beginEditDirectionSpeech = useCallback(async () => {
+    if (!directions.meta) return;
+    const res = await query('SELECT nt.text0_0 FROM gossip_menu gm LEFT JOIN npc_text nt ON nt.ID = gm.TextID WHERE gm.MenuID = ? LIMIT 1', [directions.meta.leaf_menu_id]);
+    setSavedDirectionSpeech(res.data?.[0]?.text0_0 || '');
+    setEditingDirectionSpeech(true);
+  }, [directions.meta, query]);
+
+  const saveDirectionSpeech = useCallback(async () => {
+    const meta = directions.meta;
+    const speech = savedDirectionSpeech.trim();
+    if (!meta || !speech) { setMsg({ type: 'error', text: 'Direction speech cannot be empty.' }); return; }
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    setDirectionSaving(true);
+    try {
+      const textColumn = await query("SHOW COLUMNS FROM guard_directions_editor_meta LIKE 'npc_text_id'");
+      if (!textColumn.data?.length) await run('ALTER TABLE guard_directions_editor_meta ADD COLUMN npc_text_id INT UNSIGNED NULL');
+      let textId = Number(meta.npc_text_id) || 0;
+      if (!textId) {
+        const used = await query('SELECT ID FROM npc_text WHERE ID >= 4000000 ORDER BY ID');
+        const ids = new Set((used.data || []).map(row => Number(row.ID)));
+        textId = 4000000; while (ids.has(textId)) textId++;
+      }
+      await runAtomicWrite([], async () => {
+        if (meta.npc_text_id) await run('UPDATE npc_text SET text0_0 = ?, text0_1 = \'\', BroadcastTextID0 = 0, lang0 = 0, Probability0 = 1 WHERE ID = ?', [speech, textId]);
+        else await run('INSERT INTO npc_text (ID, text0_0, text0_1, BroadcastTextID0, lang0, Probability0) VALUES (?,?,?,?,?,?)', [textId, speech, '', 0, 0, 1]);
+        await run('UPDATE gossip_menu SET TextID = ? WHERE MenuID = ?', [textId, meta.leaf_menu_id]);
+        await run('UPDATE guard_directions_editor_meta SET npc_text_id = ? WHERE guard_entry = ?', [textId, selected.entry]);
+      });
+      setEditingDirectionSpeech(false);
+      setMsg({ type: 'success', text: 'Direction speech updated.' });
+      await selectCreature(selected.entry);
+    } catch (err) {
+      setMsg({ type: 'error', text: err.message || 'Could not update direction speech.' });
+    } finally { setDirectionSaving(false); }
+  }, [directions.meta, query, runAtomicWrite, savedDirectionSpeech, selected]);
+
+  const savePoi = useCallback(async () => {
+    if (!editingPoi) return;
+    const name = editingPoi.Name.trim();
+    const x = Number(editingPoi.PositionX), y = Number(editingPoi.PositionY);
+    if (!name || !Number.isFinite(x) || !Number.isFinite(y)) { setMsg({ type: 'error', text: 'POI name, X, and Y are required.' }); return; }
+    if (!window.confirm(`Update POI #${editingPoi.ID}${editingPoi.referenceCount > 1 ? `? It is linked by ${editingPoi.referenceCount} gossip options.` : '?'}`)) return;
+    setPoiSaving(true);
+    try {
+      const res = await query('UPDATE points_of_interest SET Name = ?, PositionX = ?, PositionY = ? WHERE ID = ?', [name, x, y, editingPoi.ID]);
+      if (!res.success) throw new Error(res.error || 'Could not update POI');
+      setEditingPoi(null);
+      setMsg({ type: 'success', text: `Updated POI #${editingPoi.ID}.` });
+      await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not update POI.' }); }
+    finally { setPoiSaving(false); }
+  }, [editingPoi, loadDirections, query, selected]);
+
+  const beginEditRouteOption = useCallback(async () => {
+    const meta = directions.meta;
+    if (!meta || meta.mode !== 'shared' || meta.shaman_option_id == null) return;
+    const res = await query('SELECT OptionText, OptionBroadcastTextID FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ? LIMIT 1', [meta.class_menu_id, meta.shaman_option_id]);
+    if (!res.data?.[0]) { setMsg({ type: 'error', text: 'The editor-owned Shaman option could not be found.' }); return; }
+    setRouteOptionDraft(res.data[0]);
+    setEditingRouteOption(true);
+  }, [directions.meta, query]);
+
+  const saveRouteOption = useCallback(async () => {
+    const meta = directions.meta;
+    const label = routeOptionDraft?.OptionText?.trim();
+    const broadcastId = Number(routeOptionDraft?.OptionBroadcastTextID);
+    if (!meta || !label || !Number.isInteger(broadcastId) || broadcastId < 0) { setMsg({ type: 'error', text: 'A label and a non-negative Broadcast Text ID are required.' }); return; }
+    if (!window.confirm(`Update the editor-owned gossip label to “${label}”?`)) return;
+    const res = await query('UPDATE gossip_menu_option SET OptionText = ?, OptionBroadcastTextID = ? WHERE MenuID = ? AND OptionID = ?', [label, broadcastId, meta.class_menu_id, meta.shaman_option_id]);
+    if (!res.success) { setMsg({ type: 'error', text: res.error || 'Could not update gossip option.' }); return; }
+    setEditingRouteOption(false);
+    setMsg({ type: 'success', text: 'Gossip option label updated.' });
+    await loadDirections(selected.entry);
+  }, [directions.meta, loadDirections, query, routeOptionDraft, selected]);
+
+  const buildNewRoutePlan = useCallback(async () => {
+    const rootMenuId = Number(form.gossip_menu_id);
+    const parentMenuId = Number(newRouteParentMenu);
+    const parentOption = directions.menus.find(row => Number(row.MenuID) === rootMenuId && Number(row.ActionMenuID) === parentMenuId);
+    const spawn = directionTargetSpawns.find(row => String(row.guid) === String(directionSpawnGuid));
+    const label = newRouteLabel.trim();
+    if (!parentOption || !spawn || !directionTarget || !label) { setMsg({ type: 'error', text: 'Choose a category, label, destination template, and spawn.' }); return; }
+    const [optionRes, refsRes, menusRes, poiRes, textRes, leafTextRes] = await Promise.all([
+      query('SELECT OptionID FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID', [parentMenuId]),
+      query('SELECT MenuID, OptionID FROM gossip_menu_option WHERE ActionMenuID = ?', [parentMenuId]),
+      query('SELECT MenuID FROM gossip_menu WHERE MenuID >= 4000000 ORDER BY MenuID'),
+      query('SELECT ID FROM points_of_interest WHERE ID >= 4000000 ORDER BY ID'),
+      query('SELECT ID FROM npc_text WHERE ID >= 4000000 ORDER BY ID'),
+      query('SELECT TextID FROM gossip_menu WHERE MenuID = 1909 LIMIT 1'),
+    ]);
+    const refs = refsRes.data || [];
+    if (refs.length !== 1 || Number(refs[0].MenuID) !== rootMenuId || Number(refs[0].OptionID) !== Number(parentOption.OptionID)) { setMsg({ type: 'error', text: 'This category submenu is shared outside this city root, so the editor will not modify it.' }); return; }
+    const free = (rows, field) => { const used = new Set((rows.data || []).map(row => Number(row[field]))); let id = 4000000; while (used.has(id)) id++; return id; };
+    const optionId = Math.max(-1, ...(optionRes.data || []).map(row => Number(row.OptionID))) + 1;
+    const poiLabel = newRoutePoiLabel.trim() || directionTarget.name;
+    const speech = newRouteSpeech.trim() || `You can find ${directionTarget.name} nearby.`;
+    setNewRoutePlan({ parentMenuId, parentLabel: parentOption.OptionText, optionId, leafMenuId: free(menusRes, 'MenuID'), poiId: free(poiRes, 'ID'), textId: free(textRes, 'ID'), leafTextFallback: leafTextRes.data?.[0]?.TextID || 2562, label, poiLabel, speech, target: directionTarget, spawn });
+  }, [directionSpawnGuid, directionTarget, directionTargetSpawns, directions.menus, form.gossip_menu_id, newRouteLabel, newRouteParentMenu, newRoutePoiLabel, newRouteSpeech, query]);
+
+  const saveNewRoutePlan = useCallback(async () => {
+    const p = newRoutePlan;
+    if (!p || !selected || !window.confirm(`Add “${p.label}” under ${p.parentLabel}?`)) return;
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    setDirectionSaving(true);
+    try {
+      await run(`CREATE TABLE IF NOT EXISTS guard_directions_editor_route (
+        guard_entry INT UNSIGNED NOT NULL, parent_menu_id INT UNSIGNED NOT NULL, option_id SMALLINT UNSIGNED NOT NULL,
+        leaf_menu_id INT UNSIGNED NOT NULL, poi_id INT UNSIGNED NOT NULL, npc_text_id INT UNSIGNED NOT NULL,
+        destination_entry INT UNSIGNED NOT NULL, destination_guid INT UNSIGNED NOT NULL,
+        PRIMARY KEY (guard_entry, parent_menu_id, option_id)
+      )`);
+      await runAtomicWrite([], async () => {
+        await run('INSERT INTO npc_text (ID, text0_0, text0_1, BroadcastTextID0, lang0, Probability0) VALUES (?,?,?,?,?,?)', [p.textId, p.speech, '', 0, 0, 1]);
+        await run('INSERT INTO gossip_menu (MenuID, TextID) VALUES (?,?)', [p.leafMenuId, p.textId]);
+        await run('INSERT INTO points_of_interest (ID, PositionX, PositionY, Icon, Flags, Importance, Name) VALUES (?,?,?,?,?,?,?)', [p.poiId, p.spawn.position_x, p.spawn.position_y, 7, 99, 0, p.poiLabel]);
+        await run('INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [p.parentMenuId, p.optionId, 0, p.label, 0, 1, 1, p.leafMenuId, p.poiId, 0, 0, '', 0, null]);
+        await run('INSERT INTO guard_directions_editor_route (guard_entry, parent_menu_id, option_id, leaf_menu_id, poi_id, npc_text_id, destination_entry, destination_guid) VALUES (?,?,?,?,?,?,?,?)', [selected.entry, p.parentMenuId, p.optionId, p.leafMenuId, p.poiId, p.textId, p.target.entry, p.spawn.guid]);
+      });
+      setNewRoutePlan(null); setNewRouteLabel(''); setNewRoutePoiLabel(''); setNewRouteSpeech('');
+      setMsg({ type: 'success', text: `Added ${p.label} under ${p.parentLabel}.` });
+      await selectCreature(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not add direction.' }); }
+    finally { setDirectionSaving(false); }
+  }, [newRoutePlan, query, runAtomicWrite, selected]);
+
+  const saveCustomRoute = useCallback(async () => {
+    const edit = editingCustomRoute;
+    if (!edit || !edit.label.trim() || !edit.parentMenuId) return;
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    try {
+      let nextOptionId = Number(edit.optionId);
+      if (Number(edit.parentMenuId) !== Number(edit.originalParentMenuId)) {
+        const [options, refs] = await Promise.all([query('SELECT OptionID FROM gossip_menu_option WHERE MenuID = ?', [edit.parentMenuId]), query('SELECT MenuID FROM gossip_menu_option WHERE ActionMenuID = ?', [edit.parentMenuId])]);
+        if ((refs.data || []).length !== 1 || Number(refs.data[0].MenuID) !== Number(form.gossip_menu_id)) throw new Error('The selected category submenu is shared outside this city root.');
+        nextOptionId = Math.max(-1, ...(options.data || []).map(row => Number(row.OptionID))) + 1;
+      }
+      await runAtomicWrite([], async () => {
+        if (Number(edit.parentMenuId) !== Number(edit.originalParentMenuId)) {
+          await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [edit.originalParentMenuId, edit.optionId]);
+          await run('INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [edit.parentMenuId, nextOptionId, 0, edit.label.trim(), 0, 1, 1, edit.leafMenuId, edit.poiId, 0, 0, '', 0, null]);
+          if (edit.legacy) await run('UPDATE guard_directions_editor_meta SET class_menu_id = ?, shaman_option_id = ? WHERE guard_entry = ?', [edit.parentMenuId, nextOptionId, selected.entry]);
+          else {
+            await run('DELETE FROM guard_directions_editor_route WHERE guard_entry = ? AND parent_menu_id = ? AND option_id = ?', [selected.entry, edit.originalParentMenuId, edit.optionId]);
+            await run('INSERT INTO guard_directions_editor_route (guard_entry, parent_menu_id, option_id, leaf_menu_id, poi_id, npc_text_id, destination_entry, destination_guid) VALUES (?,?,?,?,?,?,?,?)', [selected.entry, edit.parentMenuId, nextOptionId, edit.leafMenuId, edit.poiId, edit.npcTextId, edit.destinationEntry, edit.destinationGuid]);
+          }
+        } else await run('UPDATE gossip_menu_option SET OptionText = ?, OptionBroadcastTextID = 0 WHERE MenuID = ? AND OptionID = ?', [edit.label.trim(), edit.parentMenuId, edit.optionId]);
+      });
+      setEditingCustomRoute(null); setMsg({ type: 'success', text: 'Custom route updated.' }); await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not update custom route.' }); }
+  }, [editingCustomRoute, form.gossip_menu_id, loadDirections, query, runAtomicWrite, selected]);
+
+  const beginEditAnyRoute = useCallback(async (menuId, optionId) => {
+    const res = await query('SELECT * FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ? LIMIT 1', [menuId, optionId]);
+    if (!res.data?.[0]) return;
+    setEditingAnyRoute({ source: res.data[0], originalMenuId: Number(menuId), originalOptionId: Number(optionId), parentMenuId: String(menuId), label: res.data[0].OptionText || '', broadcastId: res.data[0].OptionBroadcastTextID ?? 0 });
+  }, [query]);
+
+  const saveAnyRoute = useCallback(async () => {
+    const edit = editingAnyRoute;
+    if (!edit?.label.trim()) return;
+    const newMenuId = Number(edit.parentMenuId);
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    if (!window.confirm(`Update this route${newMenuId !== edit.originalMenuId ? ' and move it to a different category' : ''}? Shared city guards may also use it.`)) return;
+    try {
+      let newOptionId = edit.originalOptionId;
+      if (newMenuId !== edit.originalMenuId) {
+        const options = await query('SELECT OptionID FROM gossip_menu_option WHERE MenuID = ?', [newMenuId]);
+        newOptionId = Math.max(-1, ...(options.data || []).map(row => Number(row.OptionID))) + 1;
+      }
+      await runAtomicWrite([], async () => {
+        if (newMenuId === edit.originalMenuId) await run('UPDATE gossip_menu_option SET OptionText = ?, OptionBroadcastTextID = ? WHERE MenuID = ? AND OptionID = ?', [edit.label.trim(), Number(edit.broadcastId) || 0, edit.originalMenuId, edit.originalOptionId]);
+        else {
+          const s = edit.source;
+          await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [edit.originalMenuId, edit.originalOptionId]);
+          await run('INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [newMenuId, newOptionId, s.OptionIcon, edit.label.trim(), Number(edit.broadcastId) || 0, s.OptionType, s.OptionNpcFlag, s.ActionMenuID, s.ActionPoiID, s.BoxCoded, s.BoxMoney, s.BoxText, s.BoxBroadcastTextID, s.VerifiedBuild]);
+        }
+      });
+      setEditingAnyRoute(null); setMsg({ type: 'success', text: 'Route updated.' }); await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not update route.' }); }
+  }, [editingAnyRoute, loadDirections, query, runAtomicWrite, selected]);
+
+  const beginEditRouteSpeech = useCallback(async (route) => {
+    const res = await query(`SELECT gm.TextID, nt.text0_0, (SELECT COUNT(*) FROM gossip_menu_option r WHERE r.ActionMenuID = gm.MenuID) AS routeCount
+      FROM gossip_menu gm LEFT JOIN npc_text nt ON nt.ID = gm.TextID WHERE gm.MenuID = ? LIMIT 1`, [route.ActionMenuID]);
+    const row = res.data?.[0];
+    if (!row) return;
+    if (Number(row.routeCount) !== 1) { setMsg({ type: 'error', text: 'This result menu is shared by multiple routes. Duplicate it before changing its speech.' }); return; }
+    setEditingRouteSpeech({ menuId: route.ActionMenuID, textId: row.TextID, text: row.text0_0 || '' });
+  }, [query]);
+
+  const saveRouteSpeech = useCallback(async () => {
+    const edit = editingRouteSpeech;
+    if (!edit?.text.trim()) return;
+    const res = await query('UPDATE npc_text SET text0_0 = ? WHERE ID = ?', [edit.text.trim(), edit.textId]);
+    if (!res.success) { setMsg({ type: 'error', text: res.error || 'Could not update route speech.' }); return; }
+    setEditingRouteSpeech(null); setMsg({ type: 'success', text: 'Route speech updated.' });
+  }, [editingRouteSpeech, query]);
+
+  const removeOwnedRoute = useCallback(async (route) => {
+    if (!route || !selected || !window.confirm('Remove this editor-created direction, its POI, result menu, and speech?')) return;
+    if (route.legacy) { await removeDirectionPlan(); return; }
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    try {
+      await runAtomicWrite([], async () => {
+        await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [route.parent_menu_id, route.option_id]);
+        await run('DELETE FROM gossip_menu WHERE MenuID = ?', [route.leaf_menu_id]);
+        await run('DELETE FROM points_of_interest WHERE ID = ?', [route.poi_id]);
+        await run('DELETE FROM npc_text WHERE ID = ?', [route.npc_text_id]);
+        await run('DELETE FROM guard_directions_editor_route WHERE guard_entry = ? AND parent_menu_id = ? AND option_id = ?', [selected.entry, route.parent_menu_id, route.option_id]);
+      });
+      setMsg({ type: 'success', text: 'Custom direction removed.' }); await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not remove route.' }); }
+  }, [loadDirections, query, removeDirectionPlan, runAtomicWrite, selected]);
+
+  const removeAnyRoute = useCallback(async (route, ownedRoute) => {
+    if (ownedRoute) { await removeOwnedRoute(ownedRoute); return; }
+    if (!selected || !window.confirm(`Remove the “${route.OptionText}” gossip route? Its shared POI and result menu will be kept.`)) return;
+    const conditionRes = await query(`SELECT COUNT(*) AS cnt FROM conditions
+      WHERE SourceGroup = ? OR SourceEntry = ? OR SourceId = ?`, [route.MenuID, route.OptionID, route.OptionID]);
+    if (Number(conditionRes.data?.[0]?.cnt) > 0) {
+      setMsg({ type: 'error', text: `Route not removed: ${conditionRes.data[0].cnt} related condition record(s) need review first.` });
+      return;
+    }
+    const res = await query('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [route.MenuID, route.OptionID]);
+    if (!res.success) { setMsg({ type: 'error', text: res.error || 'Could not remove route.' }); return; }
+    setMsg({ type: 'success', text: `Removed the ${route.OptionText} gossip route.` });
+    await loadDirections(selected.entry);
+  }, [loadDirections, query, removeOwnedRoute, selected]);
+
+  const changeOwnedDestination = useCallback(async (route) => {
+    const entry = Number(window.prompt('Destination creature entry', route.destination_entry || ''));
+    if (!entry) return;
+    const [templateRes, spawnRes] = await Promise.all([query('SELECT entry, name FROM creature_template WHERE entry = ? LIMIT 1', [entry]), query('SELECT guid, map, position_x, position_y FROM creature WHERE id1 = ? ORDER BY map, guid', [entry])]);
+    const template = templateRes.data?.[0], spawns = spawnRes.data || [];
+    if (!template || !spawns.length) { setMsg({ type: 'error', text: 'Destination template or live spawn was not found.' }); return; }
+    const guid = Number(window.prompt(`Spawn GUID for ${template.name}: ${spawns.map(s => `#${s.guid} map ${s.map}`).join(', ')}`, spawns[0].guid));
+    const spawn = spawns.find(s => Number(s.guid) === guid);
+    if (!spawn || !window.confirm(`Move this direction to ${template.name}, spawn #${spawn.guid}?`)) return;
+    const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+    try {
+      await runAtomicWrite([], async () => {
+        await run('UPDATE points_of_interest SET Name = ?, PositionX = ?, PositionY = ? WHERE ID = ?', [template.name, spawn.position_x, spawn.position_y, route.poi_id]);
+        if (route.legacy) await run('UPDATE guard_directions_editor_meta SET destination_entry = ?, destination_guid = ? WHERE guard_entry = ?', [entry, guid, selected.entry]);
+        else await run('UPDATE guard_directions_editor_route SET destination_entry = ?, destination_guid = ? WHERE guard_entry = ? AND parent_menu_id = ? AND option_id = ?', [entry, guid, selected.entry, route.parent_menu_id, route.option_id]);
+      });
+      setMsg({ type: 'success', text: `Destination changed to ${template.name}, spawn #${spawn.guid}.` }); await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not change destination.' }); }
+  }, [loadDirections, query, runAtomicWrite, selected]);
 
   const loadRelatedData = useCallback(async (entry) => {
     const [trainerRes, vendorRes, spawnRes, addonRes, modelRes, equipRes, trainerDefRes, starterRes, enderRes] = await Promise.all([
@@ -682,7 +955,8 @@ export default function CreatureEditorPage() {
     setTrainerDef(related.trainerDef);
     setTrainerSpellSummary(related.trainerSpellSummary);
     setQuestRelations(related.questRelations);
-    loadDirections(entry);
+    const hasDirections = await loadDirections(entry);
+    setRoles({ ...roleFlags, spawn: !!related.spawn, directions: hasDirections });
     setTrainerDefMode(null);
     setVendorItems(related.vendorItems.length ? related.vendorItems : [EMPTY_VENDOR_ROW()]);
     setSpawnData(related.spawn ? { ...related.spawn, zoneId: 0 } : EMPTY_SPAWN());
@@ -1427,6 +1701,18 @@ export default function CreatureEditorPage() {
     if (directions.error) return <div className="creature-section-block"><p className="field-hint" style={{ color: 'var(--danger, #ee7070)' }}>{directions.error}</p></div>;
     const optionRows = directions.menus.filter(row => row.OptionID != null);
     const poiIds = new Set(directions.pois.map(poi => Number(poi.ID)));
+    const routeForOption = (option) => {
+      const labels = [option.OptionText].filter(Boolean);
+      let menuId = Number(option.MenuID), guard = 0;
+      while (menuId && guard++ < 8) {
+        const parent = optionRows.find(row => Number(row.ActionMenuID) === menuId);
+        if (!parent) break;
+        if (parent.OptionText) labels.unshift(parent.OptionText);
+        menuId = Number(parent.MenuID);
+      }
+      return labels.join(' → ');
+    };
+    const routesForPoi = (poiId) => [...new Set(optionRows.filter(row => Number(row.ActionPoiID) === Number(poiId)).map(routeForOption))];
     return (
       <div className="creature-section-block directions-panel">
         <div className="creature-section-head"><h4 className="field-section-title">Guard Directions Inspector</h4></div>
@@ -1453,27 +1739,42 @@ export default function CreatureEditorPage() {
           ))}
         </div>
         <h5 className="field-subsection-title">Linked points of interest</h5>
-        {directions.pois.length === 0 ? <p className="field-hint">No points of interest are linked from this gossip tree.</p> : directions.pois.map(poi => (
-          <div className="directions-poi-card" key={poi.ID}>
-            <div><MapPin size={15} /><strong>#{poi.ID} — {poi.Name}</strong></div>
+        {directions.pois.length === 0 ? <p className="field-hint">No points of interest are linked from this gossip tree.</p> : directions.pois.map(poi => {
+          const ownedRoute = directions.routes.find(route => Number(route.poi_id) === Number(poi.ID)) || (directions.meta && Number(directions.meta.poi_id) === Number(poi.ID) ? { ...directions.meta, parent_menu_id: directions.meta.class_menu_id, option_id: directions.meta.shaman_option_id, leaf_menu_id: directions.meta.leaf_menu_id, npc_text_id: directions.meta.npc_text_id, destination_entry: directions.meta.destination_entry, destination_guid: directions.meta.destination_guid, legacy: true } : null);
+          const poiOptions = optionRows.filter(row => Number(row.ActionPoiID) === Number(poi.ID));
+          return <div className="directions-poi-card" key={poi.ID}>
+            <div className="directions-poi-title"><span><MapPin size={15} /><strong>#{poi.ID} — {poi.Name}</strong></span><span className="directions-route-actions">{poiOptions.map(route => <button type="button" className="btn-danger directions-destination" key={`remove-${route.MenuID}-${route.OptionID}`} onClick={() => removeAnyRoute(route, ownedRoute && Number(ownedRoute.parent_menu_id) === Number(route.MenuID) && Number(ownedRoute.option_id) === Number(route.OptionID) ? ownedRoute : null)}>Remove: {route.OptionText}</button>)}</span></div>
             <span>X {Number(poi.PositionX).toFixed(3)} · Y {Number(poi.PositionY).toFixed(3)} · icon {poi.Icon} · flags {poi.Flags}</span>
+            {routesForPoi(poi.ID).map(route => <span className="directions-route" key={route}>Route: {route}</span>)}
+            <span className="field-hint">Referenced by {poi.referenceCount || 0} gossip option{Number(poi.referenceCount) === 1 ? '' : 's'}.</span>
+            <button type="button" className="btn-ghost directions-destination" onClick={() => setEditingPoi({ ID: poi.ID, Name: poi.Name || '', PositionX: poi.PositionX, PositionY: poi.PositionY, referenceCount: Number(poi.referenceCount) || 0 })}>Edit POI</button>
+            {poiOptions.map(route => <button type="button" className="btn-ghost directions-destination" key={`any-${route.MenuID}-${route.OptionID}`} onClick={() => beginEditAnyRoute(route.MenuID, route.OptionID)}>Edit route: {route.OptionText}</button>)}
+            {ownedRoute && <button type="button" className="btn-ghost directions-destination" onClick={() => changeOwnedDestination(ownedRoute)}>Change destination</button>}
+            {poiOptions.map(route => <button type="button" className="btn-ghost directions-destination" key={`speech-${route.MenuID}-${route.OptionID}`} onClick={() => beginEditRouteSpeech(route)}>Edit speech: {route.OptionText}</button>)}
+            {editingRouteSpeech && poiOptions.some(route => Number(route.ActionMenuID) === Number(editingRouteSpeech.menuId)) && <div className="directions-edit-speech"><textarea value={editingRouteSpeech.text} onChange={e => setEditingRouteSpeech(current => ({ ...current, text: e.target.value }))} /><button type="button" className="btn-primary" onClick={saveRouteSpeech}>Save speech</button><button type="button" className="btn-ghost" onClick={() => setEditingRouteSpeech(null)}>Cancel</button></div>}
+            {editingAnyRoute && poiOptions.some(route => Number(route.MenuID) === editingAnyRoute.originalMenuId && Number(route.OptionID) === editingAnyRoute.originalOptionId) && <div className="directions-route-edit"><label>Parent category<select value={editingAnyRoute.parentMenuId} onChange={e => setEditingAnyRoute(current => ({ ...current, parentMenuId: e.target.value }))}>{optionRows.filter(row => Number(row.MenuID) === Number(form.gossip_menu_id) && Number(row.ActionMenuID)).map(row => <option key={row.OptionID} value={row.ActionMenuID}>{row.OptionText}</option>)}</select></label><label>Route label<input value={editingAnyRoute.label} onChange={e => setEditingAnyRoute(current => ({ ...current, label: e.target.value }))} /></label><label>Broadcast ID<input type="number" min="0" value={editingAnyRoute.broadcastId} onChange={e => setEditingAnyRoute(current => ({ ...current, broadcastId: e.target.value }))} /></label><button type="button" className="btn-primary" onClick={saveAnyRoute}>Save route</button><button type="button" className="btn-ghost" onClick={() => setEditingAnyRoute(null)}>Cancel</button></div>}
+            {ownedRoute && editingCustomRoute?.poiId === ownedRoute.poi_id && <div className="directions-route-edit"><label>Parent category<select value={editingCustomRoute.parentMenuId} onChange={e => setEditingCustomRoute(current => ({ ...current, parentMenuId: e.target.value }))}>{optionRows.filter(row => Number(row.MenuID) === Number(form.gossip_menu_id) && Number(row.ActionMenuID)).map(row => <option key={row.OptionID} value={row.ActionMenuID}>{row.OptionText}</option>)}</select></label><label>Route label<input value={editingCustomRoute.label} onChange={e => setEditingCustomRoute(current => ({ ...current, label: e.target.value }))} /></label><button type="button" className="btn-primary" onClick={saveCustomRoute}>Save route</button><button type="button" className="btn-ghost" onClick={() => setEditingCustomRoute(null)}>Cancel</button></div>}
+            {editingPoi?.ID === poi.ID && <div className="directions-poi-edit"><label>Name<input value={editingPoi.Name} onChange={e => setEditingPoi(current => ({ ...current, Name: e.target.value }))} /></label><label>X<input type="number" step="0.001" value={editingPoi.PositionX} onChange={e => setEditingPoi(current => ({ ...current, PositionX: e.target.value }))} /></label><label>Y<input type="number" step="0.001" value={editingPoi.PositionY} onChange={e => setEditingPoi(current => ({ ...current, PositionY: e.target.value }))} /></label><button type="button" className="btn-primary" onClick={savePoi} disabled={poiSaving}>{poiSaving ? 'Saving…' : 'Save POI'}</button><button type="button" className="btn-ghost" onClick={() => setEditingPoi(null)}>Cancel</button></div>}
             {poi.destinations.length ? poi.destinations.map(dest => (
               <button type="button" className="btn-ghost directions-destination" key={`${dest.entry}-${dest.guid ?? 'template'}`} onClick={() => navigate(`/creatures?entry=${dest.entry}`)}>
                 Destination name match: {dest.name} #{dest.entry}{dest.guid ? ` · spawn #${dest.guid} map ${dest.map}` : ' · no spawn'}
               </button>
             )) : <p className="field-hint directions-warning">No creature template could be resolved by the POI name. The database schema has no explicit POI → creature-entry relation.</p>}
-          </div>
-        ))}
+          </div>;
+        })}
         {directions.conditions.length > 0 && <details className="directions-conditions"><summary>Related conditions ({directions.conditions.length})</summary><pre>{JSON.stringify(directions.conditions, null, 2)}</pre></details>}
-        <h5 className="field-subsection-title">Add or replace Shaman direction</h5>
-        {directions.meta && <p className="field-hint directions-warning">This guard has an editor-owned route to creature #{directions.meta.destination_entry}, spawn #{directions.meta.destination_guid}. <button type="button" className="btn-danger" onClick={removeDirectionPlan} disabled={directionSaving}>Remove this direction</button></p>}
-        <p className="field-hint">Adds to the verified city Class Trainer menu when it is used only by this guard root. No menu tree is cloned.</p>
+        <h5 className="field-subsection-title">Add custom direction</h5>
+        <p className="field-hint">Add a route below an existing city category such as Class Trainer or Profession Trainer. Custom labels use Broadcast Text ID 0.</p>
         <div className="directions-editor-grid">
+          <div className="field-group"><label>Parent category</label><select value={newRouteParentMenu} onChange={e => setNewRouteParentMenu(e.target.value)}><option value="">Select category…</option>{optionRows.filter(row => Number(row.MenuID) === Number(form.gossip_menu_id) && Number(row.ActionMenuID)).map(row => <option key={row.OptionID} value={row.ActionMenuID}>{row.OptionText}</option>)}</select></div>
+          <div className="field-group"><label>New direction label</label><input value={newRouteLabel} onChange={e => setNewRouteLabel(e.target.value)} placeholder="Custom Profession" /></div>
           <div className="field-group"><label>Destination creature entry</label><input type="text" inputMode="numeric" value={directionTargetEntry} onChange={e => setDirectionTargetEntry(e.target.value)} onBlur={() => loadDirectionTarget(directionTargetEntry)} /><span className="field-hint">{directionTarget ? `${directionTarget.name} #${directionTarget.entry}` : 'Load a creature template first'}</span></div>
           <div className="field-group"><label>Live destination spawn</label><select value={directionSpawnGuid} onChange={e => setDirectionSpawnGuid(e.target.value)} disabled={!directionTargetSpawns.length}><option value="">Select spawn…</option>{directionTargetSpawns.map(spawn => <option key={spawn.guid} value={spawn.guid}>#{spawn.guid} · map {spawn.map} · {Number(spawn.position_x).toFixed(2)}, {Number(spawn.position_y).toFixed(2)}</option>)}</select></div>
+          <div className="field-group directions-speech"><label>POI marker name</label><input value={newRoutePoiLabel} onChange={e => setNewRoutePoiLabel(e.target.value)} placeholder={directionTarget?.name || 'Destination name'} /></div>
+          <div className="field-group directions-speech"><label>Final direction speech</label><textarea value={newRouteSpeech} onChange={e => setNewRouteSpeech(e.target.value)} placeholder={directionTarget ? `You can find ${directionTarget.name} nearby.` : 'Load a destination first'} /></div>
         </div>
-        <div className="directions-editor-actions"><button type="button" className="btn-ghost" onClick={buildDirectionPlan} disabled={!!directions.meta || !directionTarget || !directionSpawnGuid}>Preview changes</button></div>
-        {directionPlan && <div className="directions-plan"><strong>Planned shared city route</strong><span>Guard root #{directionPlan.rootMenuId} → Class Trainer menu #{directionPlan.classMenuId} → new Shaman option #{directionPlan.shamanOptionId} → result menu #{directionPlan.newLeaf} → POI #{directionPlan.newPoi}</span><span>POI: {directionPlan.target.name}, map {directionPlan.spawn.map}, X {Number(directionPlan.spawn.position_x).toFixed(3)}, Y {Number(directionPlan.spawn.position_y).toFixed(3)}</span><pre>{`INSERT gossip_menu: ${directionPlan.newLeaf}\nINSERT Shaman option into menu ${directionPlan.classMenuId}\nINSERT points_of_interest: ${directionPlan.newPoi}\nNo creature_template update`}</pre><button type="button" className="btn-primary" onClick={saveDirectionPlan} disabled={directionSaving}>{directionSaving ? 'Saving…' : 'Confirm & save Shaman direction'}</button></div>}
+        <div className="directions-editor-actions"><button type="button" className="btn-ghost" onClick={buildNewRoutePlan} disabled={!newRouteParentMenu || !newRouteLabel || !directionTarget || !directionSpawnGuid}>Preview custom direction</button></div>
+        {newRoutePlan && <div className="directions-plan"><strong>Planned route</strong><span>{newRoutePlan.parentLabel} → {newRoutePlan.label} → {newRoutePlan.poiLabel}</span><span>POI: map {newRoutePlan.spawn.map}, X {Number(newRoutePlan.spawn.position_x).toFixed(3)}, Y {Number(newRoutePlan.spawn.position_y).toFixed(3)}</span><pre>{`INSERT custom npc_text #${newRoutePlan.textId}\nINSERT result menu #${newRoutePlan.leafMenuId}\nINSERT POI #${newRoutePlan.poiId}\nINSERT ${newRoutePlan.label} into menu #${newRoutePlan.parentMenuId}`}</pre><button type="button" className="btn-primary" onClick={saveNewRoutePlan} disabled={directionSaving}>{directionSaving ? 'Saving…' : 'Confirm & save direction'}</button></div>}
       </div>
     );
   };

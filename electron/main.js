@@ -520,7 +520,7 @@ ipcMain.handle('db:connect', async (_, config) => {
 ipcMain.handle('db:query', async (_, sql, params = []) => {
   if (!dbConnection) return { success: false, error: 'Not connected' };
   try {
-    const [rows] = await dbConnection.execute(sql, params);
+    const [rows] = params.length ? await dbConnection.execute(sql, params) : await dbConnection.query(sql);
     return { success: true, data: rows };
   } catch (err) {
     return { success: false, error: err.message };

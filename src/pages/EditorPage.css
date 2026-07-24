@@ -832,11 +832,24 @@
 .directions-poi-link { display: inline-flex; align-items: center; gap: 4px; color: var(--gold-bright); padding: 2px 5px; }
 .directions-poi-card { display: grid; gap: 7px; padding: 12px; margin: 8px 0; border: 1px solid var(--border); border-left: 3px solid var(--gold); border-radius: 4px; font-size: 12px; }
 .directions-poi-card > div { display: flex; align-items: center; gap: 7px; }
+.directions-poi-title { justify-content: space-between; }
+.directions-poi-title > span { display: inline-flex; align-items: center; gap: 7px; }
+.directions-route-actions { flex-wrap: wrap; justify-content: flex-end; }
 .directions-poi-card > span { color: var(--text-secondary); }
 .directions-destination { justify-self: start; font-size: 11px; }
+.directions-route { color: var(--gold-bright); font-size: 12px; }
+.directions-poi-edit { display: grid; grid-template-columns: minmax(180px, 1fr) repeat(2, 120px) auto auto; gap: 8px; align-items: end; padding-top: 6px; border-top: 1px solid var(--border); }
+.directions-poi-edit label { display: grid; gap: 4px; font-size: 10px; color: var(--text-secondary); text-transform: uppercase; }
 .directions-conditions { margin-top: 16px; font-size: 12px; color: var(--text-secondary); }
 .directions-conditions pre { max-height: 260px; overflow: auto; padding: 10px; background: var(--bg-panel); border: 1px solid var(--border); color: var(--text-muted); }
 .directions-editor-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin: 10px 0; }
+.directions-speech { grid-column: 1 / -1; }
+.directions-speech textarea { min-height: 68px; resize: vertical; }
+.directions-edit-speech { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; margin-top: 8px; align-items: end; }
+.directions-edit-speech textarea { min-height: 64px; resize: vertical; }
+.directions-route-edit { display: grid; grid-template-columns: minmax(180px, 1fr) 130px auto auto; gap: 8px; margin-top: 8px; align-items: end; }
+.directions-route-edit label { display: grid; gap: 4px; font-size: 10px; text-transform: uppercase; color: var(--text-secondary); }
+.directions-route-edit span { grid-column: 1 / -1; color: var(--text-muted); }
 .directions-editor-actions { margin: 10px 0; }
 .directions-plan { display: grid; gap: 8px; padding: 12px; border: 1px solid rgba(200, 169, 110, .55); background: rgba(200, 169, 110, .08); border-radius: 4px; font-size: 12px; }
 .directions-plan pre { margin: 0; padding: 8px; overflow: auto; background: var(--bg-dark); color: var(--text-secondary); }
