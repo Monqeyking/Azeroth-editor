@@ -7,6 +7,7 @@ import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
 const SPELL_CLASS_SET = { 0:'Generic',3:'Mage',4:'Warrior',5:'Warlock',6:'Priest',7:'Druid',8:'Rogue',9:'Hunter',10:'Paladin',11:'Shaman',13:'Potion',14:'Death Knight',16:'Pet' };
+const PLAYER_CLASS_NAMES = { 1:'Warrior',2:'Paladin',3:'Hunter',4:'Rogue',5:'Priest',6:'Death Knight',7:'Shaman',8:'Mage',9:'Warlock',11:'Druid' };
 const SCHOOL_MASK_BITS = { 1:'Physical',2:'Holy',4:'Fire',8:'Nature',16:'Frost',32:'Shadow',64:'Arcane' };
 const SPELL_EFFECTS = {
   0:'None',1:'Instant Kill',2:'School Damage',3:'Dummy',4:'Portal Teleport',5:'Teleport Units',
@@ -336,28 +337,72 @@ const SPELL_AURAS = {
   316:'Periodic Haste',
 };
 const ATTRIBUTES_FLAGS = {
-  0:'UNK0',1:'Req Ammo',2:'On Next Swing',3:'Is Replenishment',4:'Ability',
-  5:'Trade Spell',6:'Passive',7:'Hidden Client Side',8:'Hidden Spell Book',
-  9:'UNK9 (Ignore Damage Reduction?)',10:'Targets Dead',11:'Outdoors Only',
-  12:'Daytime Only',13:'Night Only',14:'Indoors Only',15:'Outdoors Only',
-  16:'Not Usable While Shapeshifted',17:'Only Usable in Stealth',18:"Don't Affect Sheath State",
-  19:'Scale with Caster Level',20:'Stop Attacking After Cast',21:'Prevent Physical Avoidance',
-  22:'Auto-face Target During Cast',23:'Castable While Dead',24:'Castable While Mounted',
-  25:'Cooldown Starts on Expiry',26:'Negative Spell',27:'Castable While Sitting',
-  28:'Cannot Use in Combat',29:'Pierce Invulnerability',30:'Periodic Resistance Checks',
-  31:'Aura Cannot Be Cancelled',
+  0:'PROC_FAILURE_BURNS_CHARGE — Consumes a charge even when the effect fails.',
+  1:'USES_RANGED_SLOT — Uses ammo, ranged range modifiers and ranged haste.',
+  2:'ON_NEXT_SWING_NO_DAMAGE — Queues on the next swing.',
+  3:'DO_NOT_LOG_IMMUNE_MISSES — Suppresses immune-miss combat-log entries.',
+  4:'IS_ABILITY — Client labels this as Ability; ignores cast speed and reflection.',
+  5:'IS_TRADESKILL — Displays as a recipe/tradeskill.',
+  6:'PASSIVE — Automatically cast on self by the core.',
+  7:'DO_NOT_DISPLAY_SPELLBOOK_AURA_ICON_COMBAT_LOG — Client-hidden spell/aura.',
+  8:'DO_NOT_LOG — Suppresses combat-log activity.',
+  9:'HELD_ITEM_ONLY — Client selects the main-hand item as target.',
+  10:'ON_NEXT_SWING — Queues on the next swing.',
+  11:'WEARER_CASTS_PROC_TRIGGER — Marker for aura-triggered spells.',
+  12:'SERVER_ONLY — Intended for server-side handling.',
+  13:'ALLOW_ITEM_SPELL_IN_PVP — Allows item spell use in PvP.',
+  14:'INDOORS_ONLY — Only usable indoors.',
+  15:'OUTDOORS_ONLY — Only usable outdoors.',
+  16:'NOT_SHAPESHIFTED — Cannot be used while conditionally shapeshifted.',
+  17:'ONLY_STEALTHED — Requires stealth.',
+  18:'DO_NOT_SHEATH — Keeps weapons sheathed during the animation.',
+  19:'SCALES_WITH_CREATURE_LEVEL — Scales impact and cost with caster level.',
+  20:'CANCELS_AUTO_ATTACK_COMBAT — Cancels auto-attack when cast.',
+  21:'NO_ACTIVE_DEFENSE — Cannot be dodged, parried or blocked.',
+  22:'TRACK_TARGET_IN_CAST_PLAYER_ONLY — Faces target automatically while casting.',
+  23:'ALLOW_CAST_WHILE_DEAD — Castable while dead or as a ghost.',
+  24:'ALLOW_WHILE_MOUNTED — Castable while mounted.',
+  25:'COOLDOWN_ON_EVENT — Cooldown begins after the related event ends.',
+  26:'AURA_IS_DEBUFF — Treats the aura as negative.',
+  27:'ALLOW_WHILE_SITTING — Castable while sitting.',
+  28:'NOT_IN_COMBAT_ONLY_PEACEFUL — Cannot be used in combat.',
+  29:'NO_IMMUNITIES — Pierces invulnerability.',
+  30:'HEARTBEAT_RESIST — Periodically re-rolls resistance.',
+  31:'NO_AURA_CANCEL — Aura cannot be cancelled by the player.',
 };
 const ATTRIBUTES_EX_FLAGS = {
-  0:'Dismiss Pet on Cast',1:'Drain All Power',2:'Channeled (type 1)',
-  3:'Ignore Redirection (Grounding Totem)',4:'UNK4',5:'Does Not Break Stealth',
-  6:'Channeled (type 2)',7:'Ignore Reflection Effects',8:'Target Cannot Be in Combat',
-  9:'Starts Auto-attack',10:'No Threat / No Aggro',11:"Aura Won't Refresh Duration on Recast",
-  12:'Pickpocket',13:'Farsight Aura',14:'Track Target While Channeling',
-  15:'Immunity Cancels Preapplied Auras',16:'Unaffected by School Immunities',
-  17:'Cannot Be Autocast by Pet',18:'Prevents Anim (NYI)',19:'Cannot Be Self-cast',
-  20:'Req Combo Points (type 1)',21:'UNK21',22:'Req Combo Points (type 2)',23:'UNK23',
-  24:'Fishing',25:'UNK25',26:'Require All Targets',27:'UNK27 (Melee spell?)',
-  28:'Hide in Aura Bar',29:'Show Spell Name During Channel',30:'Enable at Dodge',31:'UNK31',
+  0:'DISMISS_PET_FIRST — Allows summoning even when the caster already has a pet.',
+  1:'USE_ALL_MANA — Drains the entire power pool instead of the listed cost.',
+  2:'IS_CHANNELED — Spell is channeled by client and server.',
+  3:'NO_REDIRECTION — Ignores Spell Magnet / target redirection.',
+  4:'NO_SKILL_INCREASE — Does not award a skill-up point.',
+  5:'ALLOW_WHILE_STEALTHED — Does not break stealth.',
+  6:'IS_SELF_CHANNELLED — Spell is self-channeled by client and server.',
+  7:'NO_REFLECTION — Bypasses reflection effects.',
+  8:'ONLY_PEACEFUL_TARGETS — Can only target units out of combat.',
+  9:'INITIATES_COMBAT_ENABLES_AUTO_ATTACK — Starts melee combat after casting.',
+  10:'NO_THREAT — Does not generate threat or initiate combat.',
+  11:'AURA_UNIQUE — Recasting does not refresh the aura duration.',
+  12:'FAILURE_BREAKS_STEALTH — Failure breaks stealth.',
+  13:'TOGGLE_FAR_SIGHT — Client removes Farsight when the aura ends.',
+  14:'TRACK_TARGET_IN_CHANNEL — Faces target automatically while channeling.',
+  15:'IMMUNITY_PURGES_EFFECT — Removes auras made immune by this spell.',
+  16:'IMMUNITY_TO_HOSTILE_AND_FRIENDLY_EFFECTS — Makes harmful and helpful effects immune.',
+  17:'NO_AUTOCAST_AI — Cannot be auto-cast by pets or similar AI.',
+  18:'PREVENTS_ANIM — Applies the prevent-emotes unit flag.',
+  19:'EXCLUDE_CASTER — Excludes caster from effects even if targeted.',
+  20:'FINISHING_MOVE_DAMAGE — Combo-point finishing move damage.',
+  21:'THREAT_ONLY_ON_MISS — Generates threat only on a miss.',
+  22:'FINISHING_MOVE_DURATION — Combo-point finishing move duration.',
+  23:'IGNORE_OWNERS_DEATH — Unaffected by owner death.',
+  24:'SPECIAL_SKILLUP — Used only by Fishing spells.',
+  25:'AURA_STAYS_AFTER_COMBAT — Aura persists after combat.',
+  26:'REQUIRE_ALL_TARGETS — Requires all targets.',
+  27:'DISCOUNT_POWER_ON_MISS — Discounts power cost on a miss.',
+  28:'NO_AURA_ICON — Hides the spell from the aura bar.',
+  29:'NAME_IN_CHANNEL_BAR — Shows spell name instead of Channeling.',
+  30:'DISPEL_ALL_STACKS — Dispels all stacks at once.',
+  31:'CAST_WHEN_LEARNED — Casts automatically when learned.',
 };
 
 const SKILL_LINE_OPTIONS = {
@@ -367,7 +412,7 @@ const SKILL_LINE_OPTIONS = {
   4:  [{ id: 253, label: 'General' }, { id: 182, label: 'Assassination' }, { id: 181, label: 'Combat' }, { id: 183, label: 'Subtlety' }],
   5:  [{ id: 56,  label: 'General' }, { id: 78,  label: 'Discipline' }, { id: 613, label: 'Holy' }, { id: 236, label: 'Shadow' }],
   6:  [{ id: 770, label: 'General' }, { id: 398, label: 'Blood' }, { id: 399, label: 'Frost' }, { id: 400, label: 'Unholy' }],
-  7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Elemental' }, { id: 374, label: 'Enhancement' }, { id: 375, label: 'Restoration' }],
+  7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Enhancement' }, { id: 374, label: 'Restoration' }, { id: 375, label: 'Elemental' }],
   8:  [{ id: 6,   label: 'General' }, { id: 237, label: 'Arcane' }, { id: 8,   label: 'Fire' }, { id: 454, label: 'Frost' }],
   9:  [{ id: 593, label: 'General' }, { id: 355, label: 'Affliction' }, { id: 354, label: 'Demonology' }, { id: 356, label: 'Destruction' }],
   11: [{ id: 574, label: 'General' }, { id: 134, label: 'Balance' }, { id: 573, label: 'Feral Combat' }, { id: 572, label: 'Restoration' }],
@@ -459,12 +504,24 @@ export default function SpellEditorPage() {
   const [castTimes, setCastTimes] = useState({});
   const [durations, setDurations] = useState({});
   const [ranges, setRanges] = useState({});
+  const [animationInfo, setAnimationInfo] = useState(null);
+  const [animationDraft, setAnimationDraft] = useState('');
+  const [visualDraft, setVisualDraft] = useState({});
+  const [castKitDraft, setCastKitDraft] = useState({});
+  const [animationSaving, setAnimationSaving] = useState(false);
+  const [spellSubTab, setSpellSubTab] = useState('details');
+  const [iconPath, setIconPath] = useState('');
+  const [iconSaving, setIconSaving] = useState(false);
+  const [newSlaTarget, setNewSlaTarget] = useState('7:261');
   const [trainerOnly, setTrainerOnly] = useState(false);
   const [classFilter, setClassFilter] = useState('');
   const [schoolFilter, setSchoolFilter] = useState('');
   const [idMin, setIdMin] = useState('');
   const [idMax, setIdMax] = useState('');
   const [duplicatesOnly, setDuplicatesOnly] = useState(false);
+  const [spellTypeFilter, setSpellTypeFilter] = useState('');
+  const [customOnly, setCustomOnly] = useState(false);
+  const [talentOnly, setTalentOnly] = useState(false);
   const [activeView, setActiveView] = useState('spells'); // 'spells' | 'compare'
   const [compareDbcPath, setCompareDbcPath] = useState(null);
   const [compareResults, setCompareResults] = useState([]);
@@ -510,6 +567,12 @@ export default function SpellEditorPage() {
     if (idMin !== '') options.idMin = idMin;
     if (idMax !== '') options.idMax = idMax;
     if (duplicatesOnly) options.duplicatesOnly = true;
+    if (spellTypeFilter) options.spellTypeFilter = spellTypeFilter;
+    if (talentOnly) options.talentOnly = true;
+    if (customOnly) {
+      options.customOnly = true;
+      options.customMin = idRanges.spell;
+    }
     const result = await searchSpellsDbc(term, options);
     setSpells(result.data || []);
     setLoading(false);
@@ -522,9 +585,9 @@ export default function SpellEditorPage() {
     } else {
       setCompareResults([]);
     }
-  }, [searchSpellsDbc, trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, compareDbcPath]);
+  }, [searchSpellsDbc, trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, spellTypeFilter, customOnly, talentOnly, idRanges.spell, compareDbcPath]);
 
-  useEffect(() => { searchSpells(search); }, [trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, compareDbcPath]);
+  useEffect(() => { searchSpells(search); }, [trainerOnly, classFilter, schoolFilter, idMin, idMax, duplicatesOnly, spellTypeFilter, customOnly, talentOnly, compareDbcPath]);
 
   const handlePickCompareFile = async () => {
     const filePath = await window.azeroth.dialog.openFile({
@@ -625,6 +688,24 @@ export default function SpellEditorPage() {
     readRanges().then(r => { if (r.success) setRanges(r.data); });
   }, []);
 
+  useEffect(() => {
+    if (!selected?.ID) { setAnimationInfo(null); return; }
+    window.azeroth.dbc.getSpellAnimation(dbcPath, selected.ID).then(result => {
+      if (!result.success) return setAnimationInfo({ error: result.error });
+      setAnimationInfo(result.data);
+      setAnimationDraft(String(result.data.animationId));
+      setVisualDraft(result.data.visual || {});
+      setCastKitDraft(result.data.castKit || {});
+    });
+  }, [dbcPath, selected?.ID]);
+
+  useEffect(() => {
+    if (!selected?.SpellIconID) return setIconPath('');
+    window.azeroth.dbc.readSpellIcons(dbcPath, [selected.SpellIconID]).then(result => {
+      if (result.success) setIconPath(result.data?.[selected.SpellIconID] || '');
+    });
+  }, [dbcPath, selected?.SpellIconID]);
+
   useEffect(() => { searchRef.current?.focus(); }, []);
 
   const selectSpell = async (ID) => {
@@ -646,6 +727,65 @@ export default function SpellEditorPage() {
     setDirty(true);
   };
 
+  const handleSaveAnimation = async () => {
+    if (!selected || !animationInfo || Number(animationDraft) === animationInfo.animationId) return;
+    setAnimationSaving(true);
+    setMsg(null);
+    try {
+      const result = await window.azeroth.dbc.cloneSpellCastAnimation(dbcPath, selected.ID, Number(animationDraft), { visual: visualDraft, castKit: castKitDraft, idStart: idRanges.spell });
+      if (!result.success) throw new Error(result.error);
+      const updated = { ...selected, SpellVisualID_1: result.data.visualId };
+      setSelected(updated);
+      setForm(f => ({ ...f, SpellVisualID_1: result.data.visualId }));
+      setDirty(false);
+      setMsg({ type: 'success', text: `✓ Created visual #${result.data.visualId} and cast kit #${result.data.castKitId} for this spell only` });
+    } catch (e) {
+      setMsg({ type: 'error', text: `✗ Animation update failed: ${e.message}` });
+    }
+    setAnimationSaving(false);
+  };
+
+  const handleAddIcon = async () => {
+    if (!selected || !iconPath.trim()) return;
+    setIconSaving(true);
+    try {
+      const iconResult = await window.azeroth.dbc.addSpellIcon(dbcPath, iconPath, idRanges.spell);
+      if (!iconResult.success) throw new Error(iconResult.error);
+      const saveResult = await writeSpellFull({ ID: selected.ID, SpellIconID: iconResult.data.id });
+      if (!saveResult.success) throw new Error(saveResult.error);
+      const updated = { ...selected, SpellIconID: iconResult.data.id };
+      setSelected(updated); setForm(f => ({ ...f, SpellIconID: iconResult.data.id })); setDirty(false);
+      setMsg({ type: 'success', text: `✓ Icon #${iconResult.data.id} assigned to this spell` });
+    } catch (e) { setMsg({ type: 'error', text: `✗ Icon update failed: ${e.message}` }); }
+    setIconSaving(false);
+  };
+
+  const handleAddSkillLineAbility = async () => {
+    if (!selected) return;
+    const [classId, skillLine] = newSlaTarget.split(':').map(Number);
+    const result = await addSkillLineAbility({
+      ID: 0,
+      SkillLine: skillLine,
+      Spell: selected.ID,
+      RaceMask: 0,
+      ClassMask: 1 << (classId - 1),
+      SupercededBySpell: 0,
+      AcquireMethod: 0,
+      TrivialSkillLineRankLow: 0,
+    });
+    if (result.success) {
+      setSlaData({ ID: result.id, SkillLine: skillLine, Spell: selected.ID, RaceMask: 0, ClassMask: 1 << (classId - 1), SupercededBySpell: 0, AcquireMethod: 0, TrivialSkillLineRankLow: 0 });
+      setMsg({ type: 'success', text: '✓ SkillLineAbility record created' });
+    } else setMsg({ type: 'error', text: `✗ Could not create SkillLineAbility: ${result.error}` });
+  };
+
+  const handleSaveSkillLineAbility = async () => {
+    if (!slaData) return;
+    const result = await addSkillLineAbility(slaData);
+    if (result.success) setMsg({ type: 'success', text: '✓ SkillLineAbility saved' });
+    else setMsg({ type: 'error', text: `✗ Could not save SkillLineAbility: ${result.error}` });
+  };
+
   const handleCopy = async () => {
     if (!selected) return;
     setCopying(true);
@@ -660,9 +800,9 @@ export default function SpellEditorPage() {
       if (!nameResult.success) throw new Error(nameResult.error);
       await searchSpells(search);
       await selectSpell(newId);
-      setMsg({ type: 'success', text: `✓ Gekloond naar ID #${newId}` });
+      setMsg({ type: 'success', text: `✓ Cloned to ID #${newId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `✗ Clone failed: ${e.message}` });
     }
     setCopying(false);
   };
@@ -714,7 +854,7 @@ export default function SpellEditorPage() {
         setTrainerList(res.data || []);
       }
     } catch (e) {
-      setMsg({ type: 'error', text: `✗ Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `✗ Clone failed: ${e.message}` });
     }
     setCopying(false);
   };
@@ -723,11 +863,11 @@ export default function SpellEditorPage() {
   const handleSaveCloneTrainer = async () => {
     if (!clonePanel) return;
     const { newId, sourceId, spellLevel, trainerId, npcEntry, reqLevel, moneyCost, basePoints, dieSides, realPPL, baseLevel, maxLevel, skillLine, srcSla } = clonePanel;
-    if (!trainerId && !npcEntry) { setMsg({ type: 'error', text: 'Vul minimaal TrainerId of NPC Entry in' }); return; }
+    if (!trainerId && !npcEntry) { setMsg({ type: 'error', text: 'Enter at least a Trainer ID or NPC Entry' }); return; }
     setCloneSaving(true);
     setMsg(null);
     try {
-      // 1. Spell velden wegschrijven
+      // 1. Write spell fields
       await writeSpellFull({
         ID: newId,
         SpellLevel: Number(spellLevel),
@@ -738,25 +878,24 @@ export default function SpellEditorPage() {
         EffectRealPointsPerLevel_1: Number(realPPL),
       });
 
-      // 2. SLA entry toevoegen
+      // 2. Add the SkillLineAbility entry
       const slaNewRead = await readSkillLineAbility(newId);
       if (slaNewRead.success && slaNewRead.data.length === 0) {
-        const newSlaId = srcSla ? srcSla.ID + newId : newId;
         await addSkillLineAbility({
-          ID: newSlaId,
+          ID: 0,
           SkillLine: Number(skillLine) || (srcSla ? srcSla.SkillLine : 184),
           Spell: newId,
           RaceMask: 0,
           ClassMask: srcSla ? srcSla.ClassMask : 2,
           SupercededBySpell: 0,
-          AcquireMethod: 1,
+          AcquireMethod: 0,
           TrivialSkillLineRankLow: 0,
         });
       }
 
       const results = [];
 
-      // 3. trainer_spell INSERT (nieuw systeem)
+      // 3. trainer_spell INSERT (new system)
       if (trainerId) {
         await query(
           'INSERT INTO trainer_spell (TrainerId, SpellId, MoneyCost, ReqSkillLine, ReqSkillRank, ReqAbility1, ReqAbility2, ReqAbility3, ReqLevel) VALUES (?, ?, ?, 0, 0, 0, 0, 0, ?) ON DUPLICATE KEY UPDATE MoneyCost=VALUES(MoneyCost), ReqLevel=VALUES(ReqLevel)',
@@ -765,7 +904,7 @@ export default function SpellEditorPage() {
         results.push(`trainer_spell (TrainerId ${trainerId})`);
       }
 
-      // 4. npc_trainer INSERT (oud systeem)
+      // 4. npc_trainer INSERT (legacy system)
       if (npcEntry) {
         await query(
           'INSERT INTO npc_trainer (ID, SpellID, MoneyCost, ReqSkillLine, ReqSkillRank, ReqLevel, ReqSpell) VALUES (?, ?, ?, 0, 0, ?, 0) ON DUPLICATE KEY UPDATE MoneyCost=VALUES(MoneyCost), ReqLevel=VALUES(ReqLevel)',
@@ -775,7 +914,7 @@ export default function SpellEditorPage() {
       }
 
       setClonePanel(null);
-      setMsg({ type: 'success', text: `✓ Spell #${newId} gekloned + ingevoerd in ${results.join(' & ')}` });
+      setMsg({ type: 'success', text: `✓ Spell #${newId} cloned and added to ${results.join(' & ')}` });
     } catch (e) {
       setMsg({ type: 'error', text: `✗ ${e.message}` });
     }
@@ -790,7 +929,7 @@ export default function SpellEditorPage() {
       if (result.success) {
         setSelected(form);
         setDirty(false);
-        setMsg({ type: 'success', text: `✓ Spell ${form.ID} opgeslagen in Spell.dbc` });
+        setMsg({ type: 'success', text: `✓ Spell ${form.ID} saved to Spell.dbc` });
         searchSpells(search);
       } else {
         setMsg({ type: 'error', text: result.error });
@@ -936,6 +1075,28 @@ export default function SpellEditorPage() {
                 <input type="checkbox" checked={duplicatesOnly} onChange={e => setDuplicatesOnly(e.target.checked)} />
                 Duplicate names only
               </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }} title={`Spell ID ${idRanges.spell || 4000000} and higher`}>
+                <input type="checkbox" checked={customOnly} onChange={e => setCustomOnly(e.target.checked)} />
+                Custom spells
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', cursor: 'pointer', whiteSpace: 'nowrap' }} title="Exact SpellRank reference in Talent.dbc">
+                <input type="checkbox" checked={talentOnly} onChange={e => setTalentOnly(e.target.checked)} />
+                Talents only
+              </label>
+              <select
+                value={spellTypeFilter}
+                onChange={e => setSpellTypeFilter(e.target.value)}
+                style={{ fontSize: '11px' }}
+                title="Detected from Spell.dbc fields"
+              >
+                <option value="">All spell types</option>
+                <option value="active">Active ability</option>
+                <option value="passive">Passive</option>
+                <option value="proc">Proc / triggered</option>
+                <option value="aura">Aura / buff</option>
+                <option value="hidden">Hidden / internal</option>
+                <option value="profession">Profession / tradeskill</option>
+              </select>
               <select
                 value={classFilter}
                 onChange={e => setClassFilter(e.target.value)}
@@ -1022,7 +1183,7 @@ export default function SpellEditorPage() {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0, borderRight: '1px solid var(--border)' }}>
                 <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
                   <span>Local</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Verberg spells die ook in het compare-bestand voorkomen (op naam)">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Hide spells also present in the comparison file (by name)">
                     <input
                       type="checkbox"
                       checked={hideCompareMatches}
@@ -1054,7 +1215,7 @@ export default function SpellEditorPage() {
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
                 <div style={{ fontSize: '10px', fontWeight: 600, color: 'var(--text-muted)', padding: '4px 8px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '6px' }}>
                   <span>Compare file ({compareDbcPath?.split(/[\\/]/).pop()})</span>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Verberg spells die ook in je lokale Spell.dbc voorkomen (op naam)">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '4px', fontWeight: 400, textTransform: 'none', cursor: 'pointer', fontSize: '10px' }} title="Hide spells also present in your local Spell.dbc (by name)">
                     <input
                       type="checkbox"
                       checked={hideCompareMatches}
@@ -1129,7 +1290,7 @@ export default function SpellEditorPage() {
               {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
               {localMatch && (
                 <div className="editor-msg info" style={{ fontSize: '11px' }}>
-                  Vergeleken met lokale #{localMatch.ID} ({localMatch.Name_Lang_enUS}) — afwijkende velden zijn <span style={{ color: 'var(--gold)', fontWeight: 600 }}>geel</span> gemarkeerd, lokale waarde staat erbij.
+                  Compared with local #{localMatch.ID} ({localMatch.Name_Lang_enUS}) — differing fields are highlighted in <span style={{ color: 'var(--gold)', fontWeight: 600 }}>yellow</span>, with the local value shown below.
                 </div>
               )}
               <div className="form-fields">
@@ -1178,10 +1339,10 @@ export default function SpellEditorPage() {
                 </div>
                 <div className="header-actions">
                   {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setDirty(false); }}><RotateCcw size={13}/> Reset</button>}
-                  <button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Kloon naar nieuw ID">
-                    <Copy size={13}/> {copying ? 'Klonen...' : 'Copy'}
+                  <button className="btn-ghost" onClick={handleCopy} disabled={copying} title="Clone to a new ID">
+                    <Copy size={13}/> {copying ? 'Cloning...' : 'Copy'}
                   </button>
-                  <button className="btn-ghost" onClick={handleCloneAsTrainer} disabled={copying} title="Kloon naar custom range + voeg toe aan trainer_spell">
+                  <button className="btn-ghost" onClick={handleCloneAsTrainer} disabled={copying} title="Clone to the custom range and add to trainer_spell">
                     <Wand2 size={13}/> Clone → Trainer
                   </button>
                   <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
@@ -1190,10 +1351,16 @@ export default function SpellEditorPage() {
                 </div>
               </div>
               {msg && <div className={`editor-msg ${msg.type}`}>{msg.text}</div>}
+              <div style={{ display: 'flex', gap: '4px', padding: '6px 20px', borderBottom: '1px solid var(--border)' }}>
+                <button type="button" className="btn-ghost" onClick={() => setSpellSubTab('details')} style={{ fontSize: '11px', padding: '3px 8px', fontWeight: spellSubTab === 'details' ? 600 : 400, borderBottom: spellSubTab === 'details' ? '2px solid var(--accent)' : '2px solid transparent' }}>Details</button>
+                <button type="button" className="btn-ghost" onClick={() => setSpellSubTab('animation')} style={{ fontSize: '11px', padding: '3px 8px', fontWeight: spellSubTab === 'animation' ? 600 : 400, borderBottom: spellSubTab === 'animation' ? '2px solid var(--accent)' : '2px solid transparent' }}>Animation</button>
+                <button type="button" className="btn-ghost" onClick={() => setSpellSubTab('icon')} style={{ fontSize: '11px', padding: '3px 8px', fontWeight: spellSubTab === 'icon' ? 600 : 400, borderBottom: spellSubTab === 'icon' ? '2px solid var(--accent)' : '2px solid transparent' }}>Icon</button>
+              </div>
+              <div style={{ display: spellSubTab === 'details' ? 'block' : 'none' }}>
               {clonePanel && (
                 <div className="editor-msg info" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <strong>Gekloned naar #{clonePanel.newId} — voeg toe aan trainer_spell</strong>
+                    <strong>Cloned to #{clonePanel.newId} — add to trainer_spell</strong>
                     <button className="btn-ghost" onClick={() => setClonePanel(null)} style={{ padding: '2px 6px' }}><X size={12}/></button>
                   </div>
                   <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
@@ -1245,9 +1412,9 @@ export default function SpellEditorPage() {
                       TrainerId <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(trainer_spell)</span>
                       <select value={clonePanel.trainerId} style={{ minWidth: '220px' }}
                         onChange={e => setClonePanel(p => ({ ...p, trainerId: e.target.value }))}>
-                        <option value=''>— geen —</option>
+                        <option value=''>— none —</option>
                         {trainerList.map(t => {
-                          const friendly = TRAINER_LABELS[t.Id] || t.TrainerType || '(geen naam)';
+                          const friendly = TRAINER_LABELS[t.Id] || t.TrainerType || '(unnamed)';
                           return (
                             <option key={t.Id} value={t.Id}>
                               {friendly} (ID {t.Id})
@@ -1258,7 +1425,7 @@ export default function SpellEditorPage() {
                     </label>
                     <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
                       NPC Entry <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(npc_trainer)</span>
-                      <input type="number" value={clonePanel.npcEntry} style={{ width: '100px' }} placeholder="bv. 4000001"
+                      <input type="number" value={clonePanel.npcEntry} style={{ width: '100px' }} placeholder="e.g. 4000001"
                         onChange={e => setClonePanel(p => ({ ...p, npcEntry: e.target.value }))} />
                     </label>
                     {(() => {
@@ -1278,16 +1445,83 @@ export default function SpellEditorPage() {
                       );
                     })()}
                     <button className="btn-primary" onClick={handleSaveCloneTrainer} disabled={cloneSaving}>
-                      <Save size={13}/> {cloneSaving ? 'Opslaan...' : 'Opslaan'}
+                      <Save size={13}/> {cloneSaving ? 'Saving...' : 'Save'}
                     </button>
                   </div>
                 </div>
               )}
+              </div>
+              {spellSubTab === 'animation' && (
+              <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-darker)' }}>
+                <h4 className="field-section-title" style={{ marginBottom: '8px' }}>Visuals & Animation</h4>
+                {animationInfo?.error ? (
+                  <span style={{ fontSize: '12px', color: 'var(--danger)' }}>Could not load animation: {animationInfo.error}</span>
+                ) : !animationInfo ? (
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Loading visual data...</span>
+                ) : (
+                  <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Visual #{animationInfo.visualId || '—'} · Cast kit #{animationInfo.castKitId || '—'}</span>
+                    <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                      Cast animation
+                      <select value={animationDraft} onChange={e => setAnimationDraft(e.target.value)} style={{ minWidth: '250px' }}>
+                        <option value="-1">None / client default</option>
+                        {animationInfo.animations.map(animation => (
+                          <option key={animation.id} value={String(animation.id)}>
+                            #{animation.id} — {animation.name || 'Unnamed'}{animation.fallback ? ` (fallback #${animation.fallback})` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '8px', marginTop: '4px' }}>
+                      {[
+                        ['Precast kit', 'precastKit'], ['Impact kit', 'impactKit'], ['State kit', 'stateKit'], ['State done kit', 'stateDoneKit'], ['Channel kit', 'channelKit'],
+                        ['Caster impact kit', 'casterImpactKit'], ['Target impact kit', 'targetImpactKit'], ['Missile model', 'missileModel'], ['Missile path type', 'missilePathType'], ['Missile destination attachment', 'missileDestinationAttachment'], ['Missile sound', 'missileSound'], ['Missile attachment', 'missileAttachment'], ['Visual flags', 'flags'], ['Missile cast offset X', 'missileCastOffsetX'], ['Missile cast offset Y', 'missileCastOffsetY'], ['Missile cast offset Z', 'missileCastOffsetZ'], ['Missile impact offset X', 'missileImpactOffsetX'], ['Missile impact offset Y', 'missileImpactOffsetY'], ['Missile impact offset Z', 'missileImpactOffsetZ'],
+                      ].map(([label, key]) => <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px' }}>{label}<input type="number" value={visualDraft[key] ?? 0} onChange={e => setVisualDraft(d => ({ ...d, [key]: e.target.value }))} /></label>)}
+                    </div>
+                    <div style={{ width: '100%', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(145px, 1fr))', gap: '8px', marginTop: '4px', paddingTop: '8px', borderTop: '1px solid var(--border)' }}>
+                      {[
+                        ['Start animation', 'startAnimId'], ['Sound ID', 'soundId'], ['Camera shake ID', 'shakeId'], ['Head effect', 'headEffect'], ['Chest effect', 'chestEffect'], ['Base effect', 'baseEffect'], ['Left hand effect', 'leftHandEffect'], ['Right hand effect', 'rightHandEffect'], ['Left weapon effect', 'leftWeaponEffect'], ['Right weapon effect', 'rightWeaponEffect'],
+                      ].map(([label, key]) => <label key={key} style={{ display: 'flex', flexDirection: 'column', gap: '3px', fontSize: '11px' }}>{label}<input type="number" value={castKitDraft[key] ?? 0} onChange={e => setCastKitDraft(d => ({ ...d, [key]: e.target.value }))} /></label>)}
+                    </div>
+                    <button className="btn-primary" onClick={handleSaveAnimation} disabled={animationSaving} title="Safely clones the visual and cast kit before changing this spell">
+                      <Save size={13}/> {animationSaving ? 'Applying...' : 'Clone & apply'}
+                    </button>
+                    <span style={{ width: '100%', fontSize: '11px', color: 'var(--text-muted)' }}>Changing this creates dedicated SpellVisual and SpellVisualKit records, so other spells using the current visual are not changed.</span>
+                  </div>
+                )}
+              </div>
+              )}
+              {spellSubTab === 'icon' && (
+                <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-darker)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <h4 className="field-section-title">Spell Icon</h4>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Current SpellIcon ID: #{selected.SpellIconID || 0}</span>
+                  <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', maxWidth: '460px' }}>
+                    Client icon path
+                    <input value={iconPath} onChange={e => setIconPath(e.target.value)} placeholder="Interface\Icons\Spell_Shaman_PrimalStrike" />
+                  </label>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Use the MPQ path without the .blp extension. The icon file must already exist in your client patch.</span>
+                  <button className="btn-primary" style={{ alignSelf: 'flex-start' }} onClick={handleAddIcon} disabled={iconSaving || !iconPath.trim()}>
+                    <Save size={13}/> {iconSaving ? 'Assigning...' : 'Create / assign icon'}
+                  </button>
+                </div>
+              )}
+              <div style={{ display: spellSubTab === 'details' ? 'block' : 'none' }}>
               {slaData !== undefined && (
                 <div style={{ padding: '10px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-darker)' }}>
                   <h4 className="field-section-title" style={{ marginBottom: '8px' }}>SkillLineAbility.dbc</h4>
                   {slaData === null ? (
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Geen entry gevonden voor dit spell</span>
+                    <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>No entry found for this spell.</span>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+                        Add to SkillLine
+                        <select value={newSlaTarget} onChange={e => setNewSlaTarget(e.target.value)} style={{ minWidth: '200px' }}>
+                          {Object.entries(SKILL_LINE_OPTIONS).flatMap(([classId, options]) => options.map(option => (
+                            <option key={`${classId}:${option.id}`} value={`${classId}:${option.id}`}>{PLAYER_CLASS_NAMES[classId]} — {option.label}</option>
+                          )))}
+                        </select>
+                      </label>
+                      <button className="btn-primary" onClick={handleAddSkillLineAbility}>Add SkillLineAbility</button>
+                    </div>
                   ) : (
                     <div style={{ display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
@@ -1317,12 +1551,30 @@ export default function SpellEditorPage() {
                         })()}
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
-                        ClassMask
-                        <input type="number" value={slaData.ClassMask} style={{ width: '90px' }}
+                        Class
+                        <select value={String(slaData.ClassMask ?? 0)} style={{ minWidth: '150px' }}
                           onChange={async e => {
                             const newSla = { ...slaData, ClassMask: Number(e.target.value) };
                             const r = await addSkillLineAbility(newSla);
                             if (r.success) setSlaData(newSla);
+                          }}>
+                          {!Object.keys(PLAYER_CLASS_NAMES).some(id => (1 << (Number(id) - 1)) === Number(slaData.ClassMask)) && Number(slaData.ClassMask) !== 0 && (
+                            <option value={String(slaData.ClassMask)}>Multiple / custom mask ({slaData.ClassMask})</option>
+                          )}
+                          <option value="0">All classes</option>
+                          {Object.entries(PLAYER_CLASS_NAMES).map(([id, name]) => (
+                            <option key={id} value={String(1 << (Number(id) - 1))}>{name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }} title="When the player learns this spell, it is replaced in the spellbook by this spell">
+                        Superseded By Spell
+                        <input type="number" value={slaData.SupercededBySpell ?? 0} style={{ width: '110px' }}
+                          onChange={async e => {
+                            const newSla = { ...slaData, SupercededBySpell: Number(e.target.value) || 0 };
+                            const r = await addSkillLineAbility(newSla);
+                            if (r.success) setSlaData(newSla);
+                            else setMsg({ type: 'error', text: `✗ Superseded By Spell: ${r.error}` });
                           }} />
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
@@ -1334,12 +1586,13 @@ export default function SpellEditorPage() {
                             if (r.success) setSlaData(newSla);
                           }}
                           style={{ width: '130px' }}>
-                          <option value="1">1 — Trainer</option>
-                          <option value="0">0 — Overig</option>
+                          <option value="0">0 — Learn by trainer</option>
+                          <option value="1">1 — Learn when skill is obtained</option>
+                          <option value="2">2 — Racial skill spell</option>
                         </select>
                       </label>
                       <label style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
-                        Trivial (0=zichtbaar)
+                        Trainer Visibility
                         <select value={String(slaData.TrivialSkillLineRankLow ?? 0)}
                           onChange={async e => {
                             const newSla = { ...slaData, TrivialSkillLineRankLow: Number(e.target.value) };
@@ -1347,10 +1600,13 @@ export default function SpellEditorPage() {
                             if (r.success) setSlaData(newSla);
                           }}
                           style={{ width: '150px' }}>
-                          <option value="0">0 — Toonbaar bij trainer</option>
-                          <option value="2">2 — Talent/niet-traineerbaar</option>
+                          <option value="0">0 — Visible at trainer</option>
+                          <option value="2">2 — Talent / not trainable</option>
                         </select>
                       </label>
+                      <button className="btn-primary" onClick={handleSaveSkillLineAbility}>
+                        <Save size={13}/> Save SkillLineAbility
+                      </button>
                     </div>
                   )}
                 </div>
@@ -1405,13 +1661,20 @@ export default function SpellEditorPage() {
                                 flags {expandedFlags[f.key] ? '▲' : '▼'}
                               </button>
                               {expandedFlags[f.key] && (
-                                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 10, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', maxWidth: '300px', lineHeight: '1.8', marginTop: '4px', whiteSpace: 'nowrap' }}>
-                                  {Object.entries(f.options).filter(([bit]) => ((Number(form[f.key]) || 0) & (1 << Number(bit))) !== 0).map(([bit, name]) => (
-                                    <div key={bit} style={{ color: 'var(--gold)' }}>bit {bit} — {name}</div>
-                                  ))}
-                                  {Object.entries(f.options).every(([bit]) => ((Number(form[f.key]) || 0) & (1 << Number(bit))) === 0) && (
-                                    <div style={{ color: 'var(--text-muted)' }}>(geen flags gezet)</div>
-                                  )}
+                                <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 10, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', fontSize: '11px', width: '440px', maxHeight: '360px', overflowY: 'auto', lineHeight: '1.35', marginTop: '4px' }}>
+                                  {Object.entries(f.options).map(([bit, name]) => {
+                                    const mask = 2 ** Number(bit);
+                                    const checked = (((Number(form[f.key]) || 0) >>> 0) & mask) !== 0;
+                                    return (
+                                      <label key={bit} style={{ display: 'flex', gap: '7px', alignItems: 'flex-start', padding: '4px 2px', color: checked ? 'var(--gold)' : 'var(--text-muted)', cursor: 'pointer' }}>
+                                        <input type="checkbox" checked={checked} onChange={() => {
+                                          const currentValue = (Number(form[f.key]) || 0) >>> 0;
+                                          handleChange(f.key, (currentValue ^ mask) >>> 0);
+                                        }} />
+                                        <span>bit {bit} (0x{mask.toString(16).toUpperCase().padStart(8, '0')}) — {name}</span>
+                                      </label>
+                                    );
+                                  })}
                                 </div>
                               )}
                             </div>
@@ -1431,6 +1694,7 @@ export default function SpellEditorPage() {
                     })}
                   </div>
                 ))}
+              </div>
               </div>
             </>
           )}

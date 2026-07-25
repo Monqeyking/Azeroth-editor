@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, Plus, Trash2, ArrowRight, Database } from 'lucide-react';
+import { Search, Save, Plus, Trash2, ArrowRight, Database, Box, Palette, ExternalLink } from 'lucide-react';
 import './ItemSetEditorPage.css';
 
 const EMPTY_SET = () => ({
@@ -59,12 +59,12 @@ function ItemSearchModal({ onSelect, onClose, query }) {
       <div className="ise-modal" onClick={e => e.stopPropagation()}>
         <div className="ise-modal-search">
           <Search size={13} />
-          <input ref={inputRef} placeholder="Naam of item ID..." value={term}
+          <input ref={inputRef} placeholder="Item name or ID..." value={term}
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => e.key === 'Escape' && onClose()} />
         </div>
         <div className="ise-modal-results">
-          {!results.length && term && <div className="ise-modal-empty">Geen resultaten</div>}
+          {!results.length && term && <div className="ise-modal-empty">No results found</div>}
           {results.map(r => (
             <div key={r.entry} className="ise-modal-row" onClick={() => onSelect(r.entry, r.name)}>
               <span className="ise-id">{r.entry}</span><span>{r.name}</span>
@@ -82,6 +82,9 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
+  const [armorFilter, setArmorFilter] = useState('');
+  const [classFilter, setClassFilter] = useState('');
+  const [levelFilter, setLevelFilter] = useState('');
 
   const search = useCallback(async (val) => {
     setLoading(true);
@@ -107,7 +110,25 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
         setStatus(prev => prev || `DBC niet leesbaar: ${dbcRes.error}`);
       }
 
-      setResults(mergeSetResults(dbcRes.data || [], dbRows));
+      const merged = mergeSetResults(dbcRes.data || [], dbRows);
+      const ids = merged.map(row => Number(row.entry)).filter(Boolean);
+      let details = [];
+      if (ids.length) {
+        const placeholders = ids.map(() => '?').join(',');
+        const detailRes = await query(`SELECT ItemSet, class, subclass, RequiredLevel, AllowableClass FROM item_template WHERE ItemSet IN (${placeholders})`, ids);
+        details = detailRes.data || [];
+      }
+      const bySet = new Map();
+      details.forEach(row => {
+        const id = Number(row.ItemSet); if (!bySet.has(id)) bySet.set(id, []); bySet.get(id).push(row);
+      });
+      setResults(merged.map(row => {
+        const items = bySet.get(Number(row.entry)) || [];
+        const armor = [...new Set(items.filter(item => Number(item.class) === 4).map(item => ARMOR_SUBCLASSES[item.subclass] || `Subclass ${item.subclass}`))];
+        const levels = items.map(item => Number(item.RequiredLevel)).filter(Boolean);
+        const masks = items.map(item => Number(item.AllowableClass)).filter(Boolean);
+        return { ...row, itemCount: items.length, armor, minLevel: levels.length ? Math.min(...levels) : 0, maxLevel: levels.length ? Math.max(...levels) : 0, classMask: masks.reduce((mask, value) => mask | value, 0) };
+      }));
     } finally {
       setLoading(false);
     }
@@ -118,32 +139,52 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
     return () => clearTimeout(t);
   }, [term, search]);
 
+  const filtered = results.filter(row => {
+    if (armorFilter && !row.armor?.includes(armorFilter)) return false;
+    if (classFilter && !(Number(row.classMask) & Number(classFilter))) return false;
+    if (levelFilter === '1-30' && Number(row.maxLevel) > 30) return false;
+    if (levelFilter === '31-50' && (Number(row.maxLevel) < 31 || Number(row.maxLevel) > 50)) return false;
+    if (levelFilter === '51-60' && (Number(row.maxLevel) < 51 || Number(row.maxLevel) > 60)) return false;
+    if (levelFilter === '61+' && Number(row.maxLevel) < 61) return false;
+    return true;
+  });
+
   return (
     <div className="ise-browser">
       <div className="ise-browser-top">
         <div className="ise-browser-search">
           <Search size={13} className="ise-search-icon" />
-        <input className="ise-search-input" placeholder="Zoek op naam of ID…"
+        <input className="ise-search-input" placeholder="Search by name or ID…"
             value={term} onChange={e => setTerm(e.target.value)} />
         </div>
-        <button className="ise-btn" onClick={onCreate}><Plus size={14} /> Nieuwe custom set</button>
+        <button className="ise-btn" onClick={onCreate}><Plus size={14} /> New custom set</button>
       </div>
-      {loading && <div className="ise-help">Zoeken...</div>}
+      <div className="ise-filter-row">
+        <label>Armor<select value={armorFilter} onChange={e => setArmorFilter(e.target.value)}><option value="">All armor</option><option>Cloth</option><option>Leather</option><option>Mail</option><option>Plate</option></select></label>
+        <label>Class<select value={classFilter} onChange={e => setClassFilter(e.target.value)}><option value="">All classes</option>{CLASS_NAMES.map((name, index) => <option key={name} value={1 << index}>{name}</option>)}</select></label>
+        <label>Level<select value={levelFilter} onChange={e => setLevelFilter(e.target.value)}><option value="">All levels</option><option value="1-30">1–30</option><option value="31-50">31–50</option><option value="51-60">51–60</option><option value="61+">61+</option></select></label>
+        {(armorFilter || classFilter || levelFilter) && <button className="ise-filter-clear" onClick={() => { setArmorFilter(''); setClassFilter(''); setLevelFilter(''); }}>Clear filters</button>}
+      </div>
+      {loading && <div className="ise-help">Searching...</div>}
       {status && <div className="ise-warning">{status}</div>}
       <table className="ise-table ise-browser-table">
-        <thead><tr><th>ID</th><th>Naam</th><th>Bron</th><th>Patch</th><th></th></tr></thead>
+        <thead><tr><th>ID</th><th>Name</th><th>Armor</th><th>Level</th><th>Classes</th><th>Pieces</th><th>Source</th><th>Patch</th><th></th></tr></thead>
         <tbody>
-          {!loading && results.length === 0 && (
-            <tr><td colSpan={5} className="ise-empty">Geen sets gevonden</td></tr>
+          {!loading && filtered.length === 0 && (
+            <tr><td colSpan={9} className="ise-empty">No sets found</td></tr>
           )}
-          {results.map(r => (
+          {filtered.map(r => (
             <tr key={r.entry} className="ise-clickable-row" onClick={() => onEdit(r.entry)} title="Open in editor">
               <td className="ise-id">{r.entry}</td>
               <td>{r.name}</td>
+              <td>{r.armor?.join(' / ') || <span className="ise-muted">—</span>}</td>
+              <td>{r.maxLevel ? (r.minLevel && r.minLevel !== r.maxLevel ? `${r.minLevel}–${r.maxLevel}` : r.maxLevel) : <span className="ise-muted">—</span>}</td>
+              <td className="ise-browser-classes" title={classMaskLabel(r.classMask)}>{classMaskLabel(r.classMask)}</td>
+              <td>{r.itemCount || <span className="ise-muted">—</span>}</td>
               <td className="ise-muted ise-source-cell"><Database size={11} /> {r.source}</td>
               <td className="ise-muted">{r.patch}</td>
               <td>
-                <button className="ise-icon-btn" title="Bewerken" onClick={(e) => { e.stopPropagation(); onEdit(r.entry); }}>
+                <button className="ise-icon-btn" title="Edit" onClick={(e) => { e.stopPropagation(); onEdit(r.entry); }}>
                   <ArrowRight size={13} />
                 </button>
               </td>
@@ -156,12 +197,81 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
 }
 
 // ── Tab 2: Set Editor ──────────────────────────────────────────────────────────
-function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNextItemSetId, initialId, createNonce, onSaved }) {
+const ITEM_CLASSES = { 0: 'Consumable', 1: 'Container', 2: 'Weapon', 3: 'Gem', 4: 'Armor', 5: 'Reagent', 6: 'Projectile', 7: 'Trade Goods', 9: 'Recipe', 11: 'Quiver', 12: 'Quest', 15: 'Miscellaneous', 16: 'Glyph' };
+const ARMOR_SUBCLASSES = { 0: 'Miscellaneous', 1: 'Cloth', 2: 'Leather', 3: 'Mail', 4: 'Plate', 5: 'Cosmetic', 6: 'Shield', 7: 'Libram', 8: 'Idol', 9: 'Totem', 10: 'Sigil' };
+const QUALITY_NAMES = ['Poor', 'Common', 'Uncommon', 'Rare', 'Epic', 'Legendary', 'Artifact', 'Heirloom'];
+const INVENTORY_SLOTS = { 1: 'Head', 2: 'Neck', 3: 'Shoulder', 5: 'Chest', 6: 'Waist', 7: 'Legs', 8: 'Feet', 9: 'Wrist', 10: 'Hands', 11: 'Finger', 12: 'Trinket', 13: 'One-Hand', 14: 'Off-Hand', 15: 'Ranged', 16: 'Back', 17: 'Two-Hand', 18: 'Bag', 19: 'Tabard', 20: 'Chest', 21: 'Main Hand', 22: 'Off Hand', 23: 'Held In Off-hand', 28: 'Relic' };
+const CLASS_NAMES = ['Warrior', 'Paladin', 'Hunter', 'Rogue', 'Priest', 'Death Knight', 'Shaman', 'Mage', 'Warlock', 'Monk', 'Druid'];
+const classMaskLabel = mask => !Number(mask) || Number(mask) === -1 ? 'All classes' : CLASS_NAMES.filter((name, index) => Number(mask) & (1 << index)).join(', ') || `Mask ${mask}`;
+const ITEM_STAT_NAMES = { 0: 'Mana', 1: 'Health', 3: 'Agility', 4: 'Strength', 5: 'Intellect', 6: 'Spirit', 7: 'Stamina', 12: 'Defense Rating', 13: 'Dodge Rating', 14: 'Parry Rating', 15: 'Block Rating', 16: 'Melee Hit Rating', 17: 'Ranged Hit Rating', 18: 'Spell Hit Rating', 19: 'Melee Crit Rating', 20: 'Ranged Crit Rating', 21: 'Spell Crit Rating', 22: 'Melee Hit Avoidance', 23: 'Ranged Hit Avoidance', 24: 'Spell Hit Avoidance', 25: 'Melee Crit Avoidance', 26: 'Ranged Crit Avoidance', 27: 'Spell Crit Avoidance', 28: 'Melee Haste Rating', 29: 'Ranged Haste Rating', 30: 'Spell Haste Rating', 31: 'Hit Rating', 32: 'Crit Rating', 33: 'Hit Avoidance', 34: 'Crit Avoidance', 35: 'Resilience Rating', 36: 'Haste Rating', 37: 'Expertise Rating', 38: 'Attack Power', 39: 'Ranged Attack Power', 40: 'Feral Attack Power', 41: 'Spell Healing', 42: 'Spell Damage', 43: 'Mana per 5 sec.', 44: 'Armor Penetration', 45: 'Spell Power', 46: 'Health per 5 sec.', 47: 'Spell Penetration', 48: 'Block Value' };
+
+function ItemInspector({ itemId, setId, slot, query, readItemIcons, getIcon, readItemDisplayInfos, worldmapMpqPath, onOpenItem }) {
+  const [item, setItem] = useState(null);
+  const [iconUrl, setIconUrl] = useState('');
+  const [display, setDisplay] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setItem(null); setIconUrl(''); setDisplay(null);
+    if (!itemId) return undefined;
+    (async () => {
+      const result = await query('SELECT entry, name, displayid, class, subclass, Quality, ItemLevel, RequiredLevel, AllowableClass, InventoryType, ItemSet, armor, dmg_min1, dmg_max1, delay, stat_type1, stat_value1, stat_type2, stat_value2, stat_type3, stat_value3 FROM item_template WHERE entry = ? LIMIT 1', [itemId]);
+      const row = result.data?.[0] || null;
+      if (cancelled || !row) return;
+      setItem(row);
+      const [icons, displays] = await Promise.all([
+        readItemIcons([itemId]),
+        row.displayid && worldmapMpqPath ? readItemDisplayInfos(worldmapMpqPath, [row.displayid]) : Promise.resolve({ data: {} }),
+      ]);
+      if (cancelled) return;
+      setDisplay(displays.data?.[row.displayid] || null);
+      const iconName = icons.data?.[itemId] || displays.data?.[row.displayid]?.icon1 || displays.data?.[row.displayid]?.icon2;
+      if (iconName) {
+        const image = await getIcon(iconName);
+        if (!cancelled && typeof image === 'string') setIconUrl(image);
+      }
+    })().catch(() => {});
+    return () => { cancelled = true; };
+  }, [itemId, query, readItemIcons, getIcon, readItemDisplayInfos, worldmapMpqPath]);
+
+  if (!itemId) return <aside className="ise-inspector"><h2>Inspector</h2><div className="ise-inspector-empty">Select an item slot to inspect its stats, display assets, texture paths, and geosets.</div></aside>;
+  if (!item) return <aside className="ise-inspector"><h2>Inspector</h2><div className="ise-inspector-empty">Loading item #{itemId}…</div></aside>;
+  const stats = [1, 2, 3].map(index => ({ type: item[`stat_type${index}`], value: item[`stat_value${index}`] })).filter(row => Number(row.value));
+  const texturePaths = [display?.texture1Path, display?.texture2Path, ...Object.values(display?.componentTexturePaths || {})].filter(Boolean);
+  return <aside className="ise-inspector">
+    <div className="ise-inspector-title"><h2>Item Inspector</h2><span>Set slot {slot + 1}</span></div>
+    <div className="ise-item-heading">
+      <div className="ise-item-icon">{iconUrl ? <img src={iconUrl} alt="" /> : <Box size={25} />}</div>
+      <div><strong>{item.name}</strong><small>Item #{item.entry} · Display #{item.displayid || '—'}</small></div>
+    </div>
+    <button className="ise-inspector-link" onClick={() => onOpenItem(item.entry)}><ExternalLink size={13}/> Open full Item Editor</button>
+    <section><h3>Stats & requirements</h3><dl className="ise-inspector-grid">
+      <div><dt>Type</dt><dd>{ITEM_CLASSES[item.class] || `Class ${item.class}`}{Number(item.class) === 4 ? ` · ${ARMOR_SUBCLASSES[item.subclass] || item.subclass}` : ''}</dd></div>
+      <div><dt>Quality / iLvl</dt><dd>{QUALITY_NAMES[item.Quality] || item.Quality} / {item.ItemLevel}</dd></div>
+      <div><dt>Required level</dt><dd>{item.RequiredLevel || '—'}</dd></div>
+      <div><dt>Inventory slot</dt><dd>{INVENTORY_SLOTS[item.InventoryType] || item.InventoryType || '—'}</dd></div>
+      <div><dt>Class restriction</dt><dd title={classMaskLabel(item.AllowableClass)}>{classMaskLabel(item.AllowableClass)}</dd></div>
+      <div><dt>Item set</dt><dd>{item.ItemSet ? `#${item.ItemSet}${Number(item.ItemSet) === Number(setId) ? ' · current set' : ''}` : 'Not assigned'}</dd></div>
+    </dl>{stats.length ? <div className="ise-stat-list">{stats.map((stat, index) => <span key={index}>{ITEM_STAT_NAMES[stat.type] || `Stat ${stat.type}`}: <b>{stat.value}</b></span>)}</div> : null}{Number(item.armor) ? <div className="ise-stat-list"><span>Armor: <b>{item.armor}</b></span></div> : null}{Number(item.dmg_max1) ? <div className="ise-stat-list"><span>Damage: <b>{item.dmg_min1}–{item.dmg_max1}</b></span><span>Speed: <b>{(Number(item.delay) / 1000).toFixed(2)}</b></span></div> : null}</section>
+    <section><h3>Appearance</h3>
+      {!display ? <small className="ise-muted">No ItemDisplayInfo assets resolved. Configure client Data to inspect them.</small> : <>
+        <div className="ise-asset-line"><b>Models</b><span title={display.model1Path || display.model1 || ''}>{display.model1Path || display.model1 || '—'}{display.model2Path || display.model2 ? ` · ${display.model2Path || display.model2}` : ''}</span></div>
+        <div className="ise-asset-line"><b>Textures</b><span>{texturePaths.length ? `${texturePaths.length} resolved BLP asset${texturePaths.length === 1 ? '' : 's'}` : 'No BLP assets'}</span></div>
+        {texturePaths.length ? <div className="ise-texture-paths">{texturePaths.map(texture => <code key={texture} title={texture}>{texture}</code>)}</div> : null}
+        <div className="ise-geosets"><b>Character geoset groups</b>{[0, 1, 2].map(index => { const value = Number(display.geosets?.[index]) || 0; return <span key={index} title={value ? `ItemDisplayInfo GeosetGroup_${index + 1}: ${value}` : `ItemDisplayInfo GeosetGroup_${index + 1}: no override`}>Group {index + 1}: {value || 'base / no override'}</span>; })}</div>
+        <div className="ise-inspector-note"><Palette size={13}/> Helm and shoulders commonly use M2 models; chest, legs, and similar armor normally use component textures plus these character geoset groups. Editing remains read-only until the display-clone workflow is added.</div>
+      </>}
+    </section>
+  </aside>;
+}
+
+function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNextItemSetId, initialId, createNonce, onSaved, readItemIcons, getIcon, readItemDisplayInfos, worldmapMpqPath, onOpenItem }) {
   const [set, setSet] = useState(EMPTY_SET());
   const [itemNames, setItemNames] = useState({});
   const [spellNames, setSpellNames] = useState({});
   const [modal, setModal] = useState(null);
   const [status, setStatus] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState(null);
 
   const resolveItemName = useCallback(async (id) => {
     if (!id || itemNames[id] !== undefined) return;
@@ -172,8 +282,9 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
   const resolveSpellName = useCallback(async (id) => {
     if (!id || spellNames[id] !== undefined) return;
     const res = await searchSpellsDbc(String(id));
-    const match = res.data?.find(s => s.id === id);
-    setSpellNames(prev => ({ ...prev, [id]: match?.name || '?' }));
+    const match = res.data?.find(s => Number(s.ID) === Number(id));
+    const label = match?.Name_Lang_enUS ? `${match.Name_Lang_enUS}${match.NameSubtext_Lang_enUS ? ` (${match.NameSubtext_Lang_enUS})` : ''}` : '?';
+    setSpellNames(prev => ({ ...prev, [id]: label }));
   }, [searchSpellsDbc, spellNames]);
 
   useEffect(() => {
@@ -202,7 +313,7 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
       requiredSkill: dbc?.requiredSkill || 0,
       requiredSkillRank: dbc?.requiredSkillRank || 0,
     });
-    setStatus(!dbcRes.success ? `⚠ Geen DBC record voor ID ${id}` : '');
+    setStatus(!dbcRes.success ? `⚠ No DBC record for set ID ${id}` : '');
   }, [query, readItemSet]);
 
   useEffect(() => { if (initialId) loadSet(initialId); }, [initialId, loadSet]);
@@ -218,19 +329,19 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
   useEffect(() => { if (createNonce) handleNew(); }, [createNonce]);
 
   const handleSave = async () => {
-    setStatus('Opslaan…');
+    setStatus('Saving…');
     try {
-      if (!set.id) { setStatus('Kies eerst een geldige Set ID.'); return; }
-      if (!set.name.trim()) { setStatus('Naam is verplicht.'); return; }
+      if (!set.id) { setStatus('Choose a valid set ID first.'); return; }
+      if (!set.name.trim()) { setStatus('A set name is required.'); return; }
       await ensureItemSetNamesTable(query);
       await query('DELETE FROM item_set_names WHERE entry = ?', [set.id]);
       await query('INSERT INTO item_set_names (entry, name, patch) VALUES (?, ?, ?)', [set.id, set.name, set.patch]);
       const dbcRes = await writeItemSet(set);
-      if (!dbcRes.success) { setStatus(`Fout DBC: ${dbcRes.error}`); return; }
-      setStatus('Opgeslagen!');
+      if (!dbcRes.success) { setStatus(`DBC error: ${dbcRes.error}`); return; }
+      setStatus('Saved.');
       onSaved?.();
     } catch (e) {
-      setStatus(`Fout: ${e.message}`);
+      setStatus(`Error: ${e.message}`);
     }
   };
 
@@ -244,16 +355,17 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
   };
 
   return (
+    <div className="ise-workbench">
     <div className="ise-editor">
       <div className="ise-toolbar">
-        <button className="ise-btn" onClick={handleNew}><Plus size={14} /> Nieuw</button>
-        <button className="ise-btn primary" onClick={handleSave}><Save size={14} /> Opslaan</button>
+        <button className="ise-btn" onClick={handleNew}><Plus size={14} /> New set</button>
+        <button className="ise-btn primary" onClick={handleSave}><Save size={14} /> Save set</button>
         {status && <span className="ise-status">{status}</span>}
       </div>
 
       <div className="ise-form">
         <label>Set ID<input readOnly value={set.id} className="ise-input readonly" /></label>
-        <label>Naam<input value={set.name} onChange={e => setSet(s => ({ ...s, name: e.target.value }))} className="ise-input" /></label>
+        <label>Name<input value={set.name} onChange={e => setSet(s => ({ ...s, name: e.target.value }))} className="ise-input" /></label>
         <label>Patch<input type="text" inputMode="numeric" value={set.patch} onChange={e => setSet(s => ({ ...s, patch: Number(e.target.value) || 0 }))} className="ise-input short" /></label>
         <label>Req. Skill<input type="text" inputMode="numeric" value={set.requiredSkill} onChange={e => setSet(s => ({ ...s, requiredSkill: Number(e.target.value) || 0 }))} className="ise-input short" /></label>
         <label>Req. Rank<input type="text" inputMode="numeric" value={set.requiredSkillRank} onChange={e => setSet(s => ({ ...s, requiredSkillRank: Number(e.target.value) || 0 }))} className="ise-input short" /></label>
@@ -261,12 +373,12 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
 
       <div className="ise-sections">
         <section className="ise-section">
-          <h2 className="ise-section-title">Items <span className="ise-muted">(17 slots)</span></h2>
+          <h2 className="ise-section-title">Set Items <span className="ise-muted">(17 slots)</span></h2>
           <table className="ise-table">
-            <thead><tr><th>#</th><th>Item ID</th><th>Naam</th><th></th></tr></thead>
+            <thead><tr><th>#</th><th>Item ID</th><th>Name</th><th></th></tr></thead>
             <tbody>
               {set.items.map((itemId, i) => (
-                <tr key={i}>
+                <tr key={i} className={selectedSlot === i ? 'ise-selected-slot' : ''} onClick={() => setSelectedSlot(i)}>
                   <td className="ise-muted">{i + 1}</td>
                   <td>
                     <input type="text" inputMode="numeric" className="ise-cell-input"
@@ -286,9 +398,9 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
         </section>
 
         <section className="ise-section">
-          <h2 className="ise-section-title">Set Bonussen <span className="ise-muted">(8 max)</span></h2>
+          <h2 className="ise-section-title">Set Bonuses <span className="ise-muted">(8 max)</span></h2>
           <table className="ise-table">
-            <thead><tr><th>Threshold</th><th>Spell ID</th><th>Spell naam</th></tr></thead>
+            <thead><tr><th>Pieces</th><th>Spell ID</th><th>Spell name</th></tr></thead>
             <tbody>
               {set.spells.map((spellId, i) => (
                 <tr key={i}>
@@ -318,12 +430,14 @@ function SetEditor({ query, searchSpellsDbc, readItemSet, writeItemSet, findNext
           onClose={() => setModal(null)} />
       )}
     </div>
+    <ItemInspector itemId={selectedSlot === null ? 0 : set.items[selectedSlot]} setId={set.id} slot={selectedSlot ?? 0} query={query} readItemIcons={readItemIcons} getIcon={getIcon} readItemDisplayInfos={readItemDisplayInfos} worldmapMpqPath={worldmapMpqPath} onOpenItem={onOpenItem} />
+    </div>
   );
 }
 
 // ── Page ───────────────────────────────────────────────────────────────────────
 export default function ItemSetEditorPage() {
-  const { query, searchSpellsDbc, readItemSet, searchItemSets, writeItemSet, findNextItemSetId } = useConnection();
+  const { query, searchSpellsDbc, readItemSet, searchItemSets, writeItemSet, findNextItemSetId, readItemIcons, getIcon, readItemDisplayInfos, worldmapMpqPath } = useConnection();
   const [tab, setTab] = useState('browse');
   const [editId, setEditId] = useState(null);
   const [browserKey, setBrowserKey] = useState(0);
@@ -348,8 +462,8 @@ export default function ItemSetEditorPage() {
       </div>
 
       <div className="ise-tabs">
-        <button className={`ise-tab ${tab === 'browse' ? 'active' : ''}`} onClick={() => setTab('browse')}>Zoeken / nieuw</button>
-        <button className={`ise-tab ${tab === 'editor' ? 'active' : ''}`} onClick={() => setTab('editor')}>Bewerken</button>
+        <button className={`ise-tab ${tab === 'browse' ? 'active' : ''}`} onClick={() => setTab('browse')}>Browse / New</button>
+        <button className={`ise-tab ${tab === 'editor' ? 'active' : ''}`} onClick={() => setTab('editor')}>Edit Set</button>
       </div>
 
       {tab === 'browse' && (
@@ -371,6 +485,11 @@ export default function ItemSetEditorPage() {
           initialId={editId}
           createNonce={createNonce}
           onSaved={() => setBrowserKey(k => k + 1)}
+          readItemIcons={readItemIcons}
+          getIcon={getIcon}
+          readItemDisplayInfos={readItemDisplayInfos}
+          worldmapMpqPath={worldmapMpqPath}
+          onOpenItem={() => { window.location.hash = '#/items'; }}
         />
       )}
     </div>
