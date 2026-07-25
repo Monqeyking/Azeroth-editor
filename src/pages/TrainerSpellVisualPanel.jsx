@@ -40,7 +40,7 @@ const SKILL_LINE_OPTIONS = {
   4:  [{ id: 253, label: 'General' }, { id: 182, label: 'Assassination' }, { id: 181, label: 'Combat' }, { id: 183, label: 'Subtlety' }],
   5:  [{ id: 56,  label: 'General' }, { id: 78, label: 'Discipline' }, { id: 613, label: 'Holy' }, { id: 236, label: 'Shadow' }],
   6:  [{ id: 770, label: 'General' }, { id: 398, label: 'Blood' }, { id: 399, label: 'Frost' }, { id: 400, label: 'Unholy' }],
-  7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Elemental' }, { id: 374, label: 'Enhancement' }, { id: 375, label: 'Restoration' }],
+  7:  [{ id: 261, label: 'General' }, { id: 373, label: 'Enhancement' }, { id: 374, label: 'Restoration' }, { id: 375, label: 'Elemental' }],
   8:  [{ id: 6,   label: 'General' }, { id: 237, label: 'Arcane' }, { id: 8,   label: 'Fire' }, { id: 454, label: 'Frost' }],
   9:  [{ id: 593, label: 'General' }, { id: 355, label: 'Affliction' }, { id: 354, label: 'Demonology' }, { id: 593, label: 'Destruction' }],
   11: [{ id: 574, label: 'General' }, { id: 134, label: 'Balance' }, { id: 134, label: 'Feral Combat' }, { id: 573, label: 'Restoration' }],
@@ -622,7 +622,8 @@ export default function TrainerSpellVisualPanel() {
       const tooLow = playerLevel < row.minLevel;
       const classOk = selectedClassId === 0 ? true : (!classMask || (classMask & classBit) !== 0);
       const trainableAttr = (attr & 0x10000) !== 0 && (attr & 0x80000) === 0;
-      const slaOk = selectedClassId === 0 ? true : (!!sla && Number(sla.AcquireMethod || 0) === 1 && Number(sla.TrivialSkillLineRankLow || 0) === 0);
+      const slaOk = selectedClassId === 0 ? true : (!!sla && Number(sla.AcquireMethod || 0) === 0 && Number(sla.TrivialSkillLineRankLow || 0) === 0);
+      const trainerEligible = selectedClassId === 0 ? trainableAttr : trainableAttr || slaOk;
       let status = 'trainable';
       if (learned) status = 'learned';
       else if (tooLow) status = 'too-low';
@@ -632,8 +633,8 @@ export default function TrainerSpellVisualPanel() {
       } else if (!sla) status = 'blocked';
       else if (!classOk) status = 'blocked';
       else if (!slaOk) status = 'blocked';
-      else if (!trainableAttr) status = 'hidden';
-      return { ...row, learned, tooLow, factionBlocked, classOk, trainableAttr, slaOk, status, sourceCount: row.sources.length, professionTier: getProfessionTier(row) };
+      else if (!trainerEligible) status = 'hidden';
+      return { ...row, learned, tooLow, factionBlocked, classOk, trainableAttr, slaOk, trainerEligible, status, sourceCount: row.sources.length, professionTier: getProfessionTier(row) };
     });
   }, [classBit, learnedSet, playerLevel, playerFaction, selectedClassId, selectedGroupKey, spellRows]);
   const filteredRows = useMemo(() => {
@@ -672,6 +673,12 @@ export default function TrainerSpellVisualPanel() {
     const normalizedTerm = term.replace(/[^a-z0-9]+/gi, ' ').trim();
     const res = await searchSpellsDbc(normalizedTerm || term, { trainerSpells: true, limit: 200, excludeProcSpells: false });
     const rows = res.success ? (res.data || []) : [];
+    const skillLineResults = addOnlyTrainable
+      ? await Promise.all(rows.map(async row => ({ id: row.ID, result: await readSkillLineAbility(row.ID) })))
+      : [];
+    const trainableBySkillLine = new Set(skillLineResults
+      .filter(({ result }) => result.success && (result.data || []).some(entry => Number(entry.AcquireMethod) === 0 && Number(entry.TrivialSkillLineRankLow || 0) === 0))
+      .map(({ id }) => id));
     const visible = [];
     const procFallback = [];
     const seen = new Set();
@@ -680,7 +687,8 @@ export default function TrainerSpellVisualPanel() {
       if (seen.has(key)) continue;
       seen.add(key);
       const level = Number(row.SpellLevel || 0);
-      if (addOnlyTrainable && ((Number(row.Attributes || 0) & 0x10000) === 0 || (Number(row.Attributes || 0) & 0x80000) !== 0)) continue;
+      const hasTrainerAttribute = (Number(row.Attributes || 0) & 0x10000) !== 0 && (Number(row.Attributes || 0) & 0x80000) === 0;
+      if (addOnlyTrainable && !hasTrainerAttribute && !trainableBySkillLine.has(row.ID)) continue;
       if (addMinLevel && level < Number(addMinLevel)) continue;
       if (addMaxLevel && level > Number(addMaxLevel)) continue;
       if (row.HasProcLikeBehavior) {
@@ -690,7 +698,7 @@ export default function TrainerSpellVisualPanel() {
       visible.push(row);
     }
     setAddResults(visible.length > 0 ? visible : procFallback);
-  }, [addHideProcLike, addMaxLevel, addMinLevel, addOnlyTrainable, addSearch, searchSpellsDbc, showAdd]);
+  }, [addHideProcLike, addMaxLevel, addMinLevel, addOnlyTrainable, addSearch, readSkillLineAbility, searchSpellsDbc, showAdd]);
 
   useEffect(() => {
     if (showAdd && !addSkillLine && addSkillLineOptions.length > 0) {
@@ -806,20 +814,17 @@ export default function TrainerSpellVisualPanel() {
           const hasClassSla = slaRead.success && (slaRead.data || []).some(row => (Number(row.ClassMask || 0) & classMask) !== 0);
           if (!hasClassSla) {
             const refSla = await readSkillLineAbility(35395);
-            const refMaxId = refSla.success && (refSla.data || []).length > 0
-              ? Math.max(...refSla.data.map(row => Number(row.ID) || 0))
-              : 21980;
             const classOptions = SKILL_LINE_OPTIONS[selectedClassId] || [];
             const resolvedSkillLine = Number(addSkillLine) || (refSla.success && (refSla.data || []).length > 0
               ? Number(refSla.data[0].SkillLine || 184)
               : (classOptions.length > 0 ? classOptions[0].id : 184));
             const slaResult = await addSkillLineAbility({
-              ID: refMaxId + spellId,
+              ID: 0,
               SkillLine: resolvedSkillLine,
               Spell: spellId,
               RaceMask: 0,
               ClassMask: classMask,
-              AcquireMethod: 1,
+              AcquireMethod: 0,
               TrivialSkillLineRankLow: 0,
               SupercededBySpell: 0,
             });
@@ -1308,7 +1313,7 @@ export default function TrainerSpellVisualPanel() {
                 <div className={`tsv-diag ${activeRow.tooLow ? 'warn' : 'ok'}`}>{activeRow.tooLow ? 'Player level too low' : 'Player level ok'}</div>
                 <div className={`tsv-diag ${activeRow.slaOk ? 'ok' : 'warn'}`}>{activeRow.slaOk ? 'SkillLineAbility allows trainer use' : 'SkillLineAbility may block training'}</div>
                 <div className={`tsv-diag ${activeRow.classOk ? 'ok' : 'warn'}`}>{activeRow.classOk ? 'ClassMask matches' : 'ClassMask mismatch'}</div>
-                <div className={`tsv-diag ${activeRow.trainableAttr ? 'ok' : 'warn'}`}>{activeRow.trainableAttr ? 'Trainer spell flag present' : 'Possible hidden or NPC-only spell'}</div>
+                <div className={`tsv-diag ${activeRow.trainerEligible ? 'ok' : 'warn'}`}>{activeRow.trainableAttr ? 'Trainer spell flag present' : activeRow.trainerEligible ? 'Trainer eligibility via SkillLineAbility' : 'Possible hidden or NPC-only spell'}</div>
                 <div className={`tsv-diag ${activeRow.factionBlocked ? 'warn' : 'ok'}`}>{activeRow.factionBlocked ? 'Faction preview blocks this spell' : 'Faction preview allows this spell'}</div>
               </div>
               <div className="tsv-source-list">

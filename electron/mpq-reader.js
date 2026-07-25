@@ -184,19 +184,18 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
 }
 
 // ── Tile-buffer lezen (BLP) ────────────────────────────────────────────────────
-// preferOldest: doorzoek archieven van oud naar nieuw (base-MPQ's vóór patches),
-// zodat de ORIGINELE (pre-WotLK) versie van een bestand gevonden wordt als die nog
-// onaangetast in een vroeg archief zit — bijv. de vanilla World-overview tiles
-// zonder Northrend, die in lichking.mpq/patch-3.mpq zijn overschreven.
+// preferOldest is retained for the Classic+ overview. Patch-B contains this client's
+// vanilla world-map override, so it must win before the newer Patch-C/WotLK tiles.
 async function readTileBuffer(dataPath, zoneName, tileIndex, preferOldest = false) {
-  const key = `${dataPath}|${zoneName}|${tileIndex}|${preferOldest ? 'old' : 'new'}`;
+  const key = `${dataPath}|${zoneName}|${tileIndex}|${preferOldest ? 'classic' : 'new'}`;
   if (tileCache.has(key)) return tileCache.get(key);
 
   ensureMounted(dataPath);
   const internalPath = `Interface\\WorldMap\\${zoneName}\\${zoneName}${tileIndex}.blp`;
 
   const mpqFiles = findMpqFiles(dataPath);
-  const order = preferOldest ? [...mpqFiles].reverse() : mpqFiles;
+  const patchB = mpqFiles.filter(file => path.basename(file).toLowerCase() === 'patch-b.mpq' && !/[/\\]enus[/\\]/i.test(file));
+  const order = preferOldest ? [...patchB, ...mpqFiles.filter(file => !patchB.includes(file))] : mpqFiles;
 
   for (const mpqPath of order) {
     const buf = await readFileFromMpqEntry(dataPath, mpqPath, internalPath);

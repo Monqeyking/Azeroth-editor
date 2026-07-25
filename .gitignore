@@ -1,6 +1,7 @@
 ﻿node_modules/
 dist/
 dist-electron/
+island-project-source/
 PNG/
 debug-blp/
 output/
@@ -9,6 +10,7 @@ tests/
 .DS_Store
 *.log
 CLAUDE.MD
+AGENTS.MD
 KEIRA3_UPGRADE_TASKS.MD
 PROMPT_next_session.MD
 3deditor.md

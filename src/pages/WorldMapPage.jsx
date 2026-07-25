@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Loader, ArrowLeft } from 'lucide-react';
+import { Loader, ArrowLeft, MapPin, Plus, Trash2 } from 'lucide-react';
 import './WorldMapPage.css';
 
 const IMG_W = 1024, IMG_H = 768;  // world overview (4×3 tiles @ 256px)
@@ -16,45 +16,84 @@ const WORLD_AREAS = [
 ];
 
 const EXP_CLASS = ['classic', 'tbc', 'wotlk'];
+// Patch-B's continent artwork occupies a shorter visible vertical viewport than
+// the full WorldMapArea coordinate range. Keep labels and game overlays together.
+const PATCH_B_PROJECTION = {
+  0: { yScale: 0.86 },
+  1: { yScale: 0.86 },
+  571: { yScale: 1 },
+};
 
 function zoneCenter(zone, cont, W, H) {
   if (!cont) return null;
-  const cy = (zone.locLeft  + zone.locRight)  / 2;
-  const cx = (zone.locTop   + zone.locBottom) / 2;
-  const px = (cont.locLeft  - cy) / (cont.locLeft  - cont.locRight)  * W;
-  const py = (cont.locTop   - cx) / (cont.locTop   - cont.locBottom) * H;
+  const projection = PATCH_B_PROJECTION[cont.mapId] || { yScale: 1 };
+  const x = (zone.locLeft + zone.locRight) / 2;
+  const y = (zone.locTop + zone.locBottom) / 2;
+  const px = (cont.locLeft - x) / (cont.locLeft - cont.locRight) * W;
+  const py = (cont.locTop - y) / (cont.locTop - cont.locBottom) * H * projection.yScale;
   if (px < -60 || px > W + 60 || py < -60 || py > H + 60) return null;
   return { px, py };
 }
 
 // ── Continent detail view ──────────────────────────────────────────────────────
-function ContinentView({ mapId, label, expansion, areas, worldmapMpqPath, onBack }) {
+function ContinentView({ mapId, label, expansion, areas, dbcPath, worldmapMpqPath, markers, onAddMarker, onUpdateMarker, onDeleteMarker, onBack }) {
   const cont   = WORLD_AREAS.find(a => a.mapId === mapId);
   const folder = mapId === 0 ? 'Azeroth' : mapId === 1 ? 'Kalimdor' : mapId === 530 ? 'Expansion01' : 'Northrend';
 
   const [imgSrc, setImgSrc]   = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError]     = useState('');
+  const [tileStatus, setTileStatus] = useState(null);
   const [scale, setScale]     = useState(1);
   const [pan, setPan]         = useState({ x: 0, y: 0 });
+  const [placing, setPlacing] = useState(false);
+  const [selectedMarker, setSelectedMarker] = useState(null);
+  const [selectedZone, setSelectedZone] = useState(null);
+  const [overlays, setOverlays] = useState([]);
+  const [overlayImages, setOverlayImages] = useState([]);
+  const [zoneImgSrc, setZoneImgSrc] = useState(null);
   const vpRef    = useRef(null);
   const dragging = useRef(false);
+  const moved = useRef(false);
   const lastMouse = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
-    setLoading(true); setImgSrc(null);
+    setLoading(true); setImgSrc(null); setError(''); setTileStatus(null); setSelectedMarker(null);
     window.azeroth.worldmap.getZoneImage(folder, folder, worldmapMpqPath).then(res => {
-      if (res.success) setImgSrc(res.data);
+      if (res.success) { setImgSrc(res.data); setTileStatus(res); }
+      else setError(res.error || `No world-map tiles found for ${folder}.`);
       setLoading(false);
-    });
+    }).catch(() => { setError(`Could not load ${folder}.`); setLoading(false); });
   }, [mapId, worldmapMpqPath]);
 
+  useEffect(() => { if (dbcPath) window.azeroth.worldmap.readOverlays(dbcPath).then(res => res.success && setOverlays(res.overlays || [])); }, [dbcPath]);
+  const activeZone = areas.find(area => area.id === selectedZone);
   useEffect(() => {
-    if (!imgSrc || !vpRef.current) return;
+    if (!activeZone) { setZoneImgSrc(null); return; }
+    let cancelled = false;
+    setZoneImgSrc(null);
+    window.azeroth.worldmap.getZoneImage(activeZone.internalName, activeZone.internalName, worldmapMpqPath).then(res => {
+      if (!cancelled && res.success) setZoneImgSrc(res.data);
+    });
+    return () => { cancelled = true; };
+  }, [activeZone?.id, worldmapMpqPath]);
+  useEffect(() => {
+    const zone = areas.find(area => area.id === selectedZone);
+    const selected = overlays.filter(overlay => overlay.mapAreaId === selectedZone);
+    if (!zone || !selected.length) { setOverlayImages([]); return; }
+    let cancelled = false;
+    Promise.all(selected.map(overlay => window.azeroth.worldmap.getOverlayImage(zone.internalName, overlay.textureName, overlay.width, overlay.height, worldmapMpqPath).then(res => res.success ? { ...overlay, data: res.data } : null))).then(images => { if (!cancelled) setOverlayImages(images.filter(Boolean)); });
+    return () => { cancelled = true; };
+  }, [selectedZone, overlays, areas, worldmapMpqPath]);
+
+  const displayImgSrc = activeZone ? zoneImgSrc : imgSrc;
+  useEffect(() => {
+    if (!displayImgSrc || !vpRef.current) return;
     const { width, height } = vpRef.current.getBoundingClientRect();
     const s = Math.min(width / DETAIL_W, height / DETAIL_H) * 0.92;
     setScale(s);
     setPan({ x: (width - DETAIL_W * s) / 2, y: (height - DETAIL_H * s) / 2 });
-  }, [imgSrc]);
+  }, [displayImgSrc]);
 
   const handleWheel = useCallback((e) => {
     e.preventDefault();
@@ -68,9 +107,21 @@ function ContinentView({ mapId, label, expansion, areas, worldmapMpqPath, onBack
     return () => el.removeEventListener('wheel', handleWheel);
   }, [handleWheel]);
 
-  const onMouseDown = (e) => { if (e.button !== 0) return; dragging.current = true; lastMouse.current = { x: e.clientX, y: e.clientY }; };
-  const onMouseMove = (e) => { if (!dragging.current) return; setPan(p => ({ x: p.x + e.clientX - lastMouse.current.x, y: p.y + e.clientY - lastMouse.current.y })); lastMouse.current = { x: e.clientX, y: e.clientY }; };
+  const onMouseDown = (e) => { if (e.button !== 0) return; dragging.current = true; moved.current = false; lastMouse.current = { x: e.clientX, y: e.clientY }; };
+  const onMouseMove = (e) => { if (!dragging.current) return; const dx = e.clientX - lastMouse.current.x, dy = e.clientY - lastMouse.current.y; if (Math.abs(dx) > 3 || Math.abs(dy) > 3) moved.current = true; setPan(p => ({ x: p.x + dx, y: p.y + dy })); lastMouse.current = { x: e.clientX, y: e.clientY }; };
   const onMouseUp   = () => { dragging.current = false; };
+  const addMarkerAt = (e) => {
+    onMouseUp();
+    if (!placing || moved.current || !vpRef.current) return;
+    const rect = vpRef.current.getBoundingClientRect();
+    const x = (e.clientX - rect.left - pan.x) / scale;
+    const y = (e.clientY - rect.top - pan.y) / scale;
+    if (x < 0 || y < 0 || x > DETAIL_W || y > DETAIL_H) return;
+    onAddMarker({ mapId, x: +(x / DETAIL_W).toFixed(5), y: +(y / DETAIL_H).toFixed(5) });
+    setPlacing(false);
+  };
+  const mapMarkers = markers.filter(marker => marker.mapId === mapId);
+  const activeMarker = mapMarkers.find(marker => marker.id === selectedMarker);
 
   const contArea  = areas.find(a => a.mapId === mapId && a.areaId === 0);
   const zoneAreas = areas.filter(a => a.mapId === mapId && a.areaId > 0 && a.internalName);
@@ -80,7 +131,10 @@ function ContinentView({ mapId, label, expansion, areas, worldmapMpqPath, onBack
       <div className="wm-detail-bar">
         <button className="wm-back-btn" onClick={onBack}><ArrowLeft size={13} /> World</button>
         <span className="wm-detail-title">{label}</span>
+        {activeZone && <button className="wm-back-btn" onClick={() => setSelectedZone(null)}><ArrowLeft size={13} /> {label}</button>}
         <span className={`wm-exp-chip exp-${EXP_CLASS[expansion]}`}>{['Classic','TBC','WotLK'][expansion]}</span>
+        {tileStatus && <span className={`wm-tile-status${tileStatus.missingTiles?.length ? ' warn' : ''}`}>{tileStatus.foundTiles}/12 tiles</span>}
+        <button className={`wm-edit-btn${placing ? ' active' : ''}`} onClick={() => setPlacing(value => !value)}><Plus size={13} /> Mark zone</button>
       </div>
       <div
         className="wm-viewport"
@@ -89,25 +143,42 @@ function ContinentView({ mapId, label, expansion, areas, worldmapMpqPath, onBack
         onMouseMove={onMouseMove}
         onMouseUp={onMouseUp}
         onMouseLeave={onMouseUp}
-        style={{ cursor: dragging.current ? 'grabbing' : 'grab' }}
+        onClick={addMarkerAt}
+        style={{ cursor: placing ? 'crosshair' : dragging.current ? 'grabbing' : 'grab' }}
       >
         {loading && <div className="wm-placeholder"><Loader size={20} className="spin" /><span>Map laden…</span></div>}
-        {imgSrc && (
+        {error && <div className="wm-placeholder"><span>{error}</span></div>}
+        {displayImgSrc && (
           <div className="wm-inner" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
             <div className="wm-canvas" style={{ width: DETAIL_W, height: DETAIL_H }}>
-              <img src={imgSrc} width={DETAIL_W} height={DETAIL_H} draggable={false} alt="" />
-              {contArea && zoneAreas.map(zone => {
+              <img src={displayImgSrc} width={DETAIL_W} height={DETAIL_H} draggable={false} alt="" />
+              {!activeZone && contArea && zoneAreas.map(zone => {
                 const pos = zoneCenter(zone, contArea, DETAIL_W, DETAIL_H);
                 if (!pos) return null;
                 return (
-                  <div key={zone.id} className="wm-zone-label" style={{ left: pos.px, top: pos.py }}>
+                  <button key={zone.id} className={`wm-zone-label${selectedZone === zone.id ? ' selected' : ''}`} style={{ left: pos.px, top: pos.py }} onClick={() => setSelectedZone(zone.id)}>
                     {zone.internalName}
-                  </div>
+                  </button>
                 );
               })}
+              {overlayImages.map(overlay => <img key={overlay.id} className="wm-game-overlay" src={overlay.data} style={{ left: overlay.offsetX * (DETAIL_W / IMG_W), top: overlay.offsetY * (DETAIL_H / IMG_H), width: overlay.width * (DETAIL_W / IMG_W), height: overlay.height * (DETAIL_H / IMG_H) }} draggable={false} alt="" />)}
+              {mapMarkers.map(marker => (
+                <button key={marker.id} className={`wm-marker${selectedMarker === marker.id ? ' selected' : ''}`} style={{ left: marker.x * DETAIL_W, top: marker.y * DETAIL_H, '--marker-color': marker.color }} onMouseDown={e => e.stopPropagation()} onClick={e => { e.stopPropagation(); setSelectedMarker(marker.id); }} title={marker.label}>
+                  <MapPin size={20} fill="currentColor" />
+                  <span>{marker.label}</span>
+                </button>
+              ))}
             </div>
           </div>
         )}
+        {activeMarker && <aside className="wm-marker-editor">
+          <div className="wm-marker-editor-title">Zone marker</div>
+          <label>Name<input value={activeMarker.label} onChange={e => onUpdateMarker(activeMarker.id, { label: e.target.value })} /></label>
+          <label>Color<input type="color" value={activeMarker.color} onChange={e => onUpdateMarker(activeMarker.id, { color: e.target.value })} /></label>
+          <label>Note<textarea rows="3" value={activeMarker.note || ''} onChange={e => onUpdateMarker(activeMarker.id, { note: e.target.value })} /></label>
+          <div className="wm-marker-coords">Map {mapId} · {Math.round(activeMarker.x * DETAIL_W)}, {Math.round(activeMarker.y * DETAIL_H)}</div>
+          <button className="wm-delete-btn" onClick={() => { onDeleteMarker(activeMarker.id); setSelectedMarker(null); }}><Trash2 size={13} /> Remove marker</button>
+        </aside>}
       </div>
     </div>
   );
@@ -163,33 +234,10 @@ function eraseLandmass(ctx, cx, cy, rx, ry) {
   ctx.putImageData(imgData, x0, y0);
 }
 
-function drawWorldCanvas(canvas, img, hoveredMapId, hiddenAreas) {
+function drawWorldCanvas(canvas, img) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, IMG_W, IMG_H);
   ctx.drawImage(img, 0, 0, IMG_W, IMG_H);
-
-  hiddenAreas.forEach(area => eraseLandmass(ctx, area.cx, area.cy, area.rx, area.ry));
-
-  // Glow for hovered continent via screen blend —
-  // screen on dark ocean ≈ no change; screen on bright land = visibly lighter
-  if (hoveredMapId !== null) {
-    const area = WORLD_AREAS.find(a => a.mapId === hoveredMapId);
-    if (area) {
-      const cx = area.cx * IMG_W;
-      const cy = area.cy * IMG_H;
-      const r  = Math.max(area.rx, area.ry) * IMG_W * 1.1;
-      const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, r);
-      grd.addColorStop(0,    'rgba(215, 155, 25, 0.80)');
-      grd.addColorStop(0.45, 'rgba(190, 120, 10, 0.45)');
-      grd.addColorStop(0.75, 'rgba(140,  80,  0, 0.15)');
-      grd.addColorStop(1,    'rgba(0,0,0,0)');
-      ctx.globalCompositeOperation = 'screen';
-      ctx.fillStyle = grd;
-      ctx.fillRect(0, 0, IMG_W, IMG_H);
-    }
-  }
-
-  ctx.globalCompositeOperation = 'source-over';
 }
 
 // ── World overview ─────────────────────────────────────────────────────────────
@@ -207,7 +255,6 @@ function WorldOverview({ classicOnly, worldmapMpqPath, onSelect }) {
   const moved     = useRef(false);
 
   const visibleAreas = WORLD_AREAS.filter(a => a.cx !== null && (!classicOnly || a.expansion === 0));
-  const hiddenAreas  = classicOnly ? WORLD_AREAS.filter(a => a.cx !== null && a.expansion > 0) : [];
 
   useEffect(() => {
     setLoading(true); setLoaded(false);
@@ -225,11 +272,11 @@ function WorldOverview({ classicOnly, worldmapMpqPath, onSelect }) {
     });
   }, [worldmapMpqPath, classicOnly]);
 
-  // Redraw whenever hover, filter, or image changes
+  // Patch-B already contains the Classic+ artwork. Keep the original pixels intact.
   useEffect(() => {
     if (!loaded || !canvasRef.current || !imgRef.current) return;
-    drawWorldCanvas(canvasRef.current, imgRef.current, hovered, hiddenAreas);
-  }, [loaded, hovered, classicOnly]);
+    drawWorldCanvas(canvasRef.current, imgRef.current);
+  }, [loaded]);
 
   // Center on load
   useEffect(() => {
@@ -317,6 +364,7 @@ export default function WorldMapPage() {
   const [classicOnly, setClassicOnly] = useState(true);
   const [selected, setSelected]       = useState(null);
   const [areas, setAreas]             = useState([]);
+  const [markers, setMarkers]         = useState([]);
 
   useEffect(() => {
     if (!dbcPath) return;
@@ -324,6 +372,25 @@ export default function WorldMapPage() {
       if (res.success) setAreas(res.areas);
     });
   }, [dbcPath]);
+
+  useEffect(() => {
+    let cancelled = false;
+    window.azeroth.config.load().then(res => {
+      if (!cancelled && res.success) setMarkers(Array.isArray(res.data?.worldMapMarkers) ? res.data.worldMapMarkers : []);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveMarkers = useCallback((next) => {
+    setMarkers(next);
+    window.azeroth.config.save({ worldMapMarkers: next });
+  }, []);
+  const addMarker = useCallback(({ mapId, x, y }) => {
+    const id = `wm-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    saveMarkers([...markers, { id, mapId, x, y, label: 'New zone', note: '', color: '#e3ad32' }]);
+  }, [markers, saveMarkers]);
+  const updateMarker = useCallback((id, patch) => saveMarkers(markers.map(marker => marker.id === id ? { ...marker, ...patch } : marker)), [markers, saveMarkers]);
+  const deleteMarker = useCallback((id) => saveMarkers(markers.filter(marker => marker.id !== id)), [markers, saveMarkers]);
 
   useEffect(() => {
     if (selected && classicOnly && selected.expansion > 0) setSelected(null);
@@ -356,7 +423,12 @@ export default function WorldMapPage() {
           label={selected.label}
           expansion={selected.expansion}
           areas={areas}
+          dbcPath={dbcPath}
           worldmapMpqPath={worldmapMpqPath}
+          markers={markers}
+          onAddMarker={addMarker}
+          onUpdateMarker={updateMarker}
+          onDeleteMarker={deleteMarker}
           onBack={() => setSelected(null)}
         />
       ) : (

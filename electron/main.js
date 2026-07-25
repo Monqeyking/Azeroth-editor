@@ -361,6 +361,7 @@ const SPELL_OFFSETS = {
   EffectTriggerSpell_2:     { offset: 468, type: 'uint32' },
   EffectTriggerSpell_3:     { offset: 472, type: 'uint32' },
   SpellVisualID_1:          { offset: 524, type: 'uint32' },
+  SpellVisualID_2:          { offset: 528, type: 'uint32' },
   SpellIconID:              { offset: 532, type: 'uint32' },
   SpellPriority:            { offset: 540, type: 'uint32' },
   ManaCostPct:              { offset: 816, type: 'uint32' },
@@ -1331,9 +1332,12 @@ ipcMain.handle('dbc:readSkillLineTree', async (_, dbcPath, opts = {}) => {
   }
 });
 
-// Voeg een nieuw record toe aan SkillLineAbility.dbc
+// Insert or update a SkillLineAbility record. Record IDs are independent from Spell IDs.
 ipcMain.handle('dbc:addSkillLineAbility', async (_, dbcPath, entry) => {
   try {
+    if (!Number(entry?.Spell) || !Number(entry?.SkillLine)) {
+      return { success: false, error: 'SkillLineAbility requires both a Spell ID and a SkillLine ID' };
+    }
     const filePath = path.join(dbcPath, 'SkillLineAbility.dbc');
     const raw = fs.readFileSync(filePath);
     const recordCount = raw.readUInt32LE(4);
@@ -1342,24 +1346,42 @@ ipcMain.handle('dbc:addSkillLineAbility', async (_, dbcPath, entry) => {
     const headerSize = 20;
     const recordsEnd = headerSize + recordCount * recordSize;
 
-    const newRecord = Buffer.alloc(recordSize, 0);
-    newRecord.writeUInt32LE(entry.ID >>> 0, 0);
+    const requestedId = Number(entry.ID) || 0;
+    const matchingIndexes = [];
+    let maxId = 0;
+    for (let i = 0; i < recordCount; i++) {
+      const id = raw.readUInt32LE(headerSize + i * recordSize);
+      maxId = Math.max(maxId, id);
+      if (requestedId && id === requestedId) matchingIndexes.push(i);
+    }
+    const existingIndex = matchingIndexes.length ? matchingIndexes[matchingIndexes.length - 1] : -1;
+    const recordId = existingIndex >= 0 ? requestedId : maxId + 1;
+    const newRecord = existingIndex >= 0
+      ? Buffer.from(raw.subarray(headerSize + existingIndex * recordSize, headerSize + (existingIndex + 1) * recordSize))
+      : Buffer.alloc(recordSize, 0);
+    newRecord.writeUInt32LE(recordId >>> 0, 0);
     newRecord.writeUInt32LE(entry.SkillLine >>> 0, 4);
     newRecord.writeUInt32LE(entry.Spell >>> 0, 8);
     newRecord.writeUInt32LE((entry.RaceMask || 0) >>> 0, 12);
     newRecord.writeUInt32LE((entry.ClassMask || 0) >>> 0, 16);
-    newRecord.writeUInt32LE((entry.AcquireMethod || 0) >>> 0, 28);
     newRecord.writeUInt32LE((entry.SupercededBySpell || 0) >>> 0, 32);
-    newRecord.writeUInt32LE((entry.TrivialSkillLineRankLow || 0) >>> 0, 36);
+    newRecord.writeUInt32LE((entry.AcquireMethod || 0) >>> 0, 36);
+    newRecord.writeUInt32LE((entry.TrivialSkillLineRankLow || 0) >>> 0, 40);
 
-    const newFile = Buffer.alloc(raw.length + recordSize);
-    raw.copy(newFile, 0, 0, recordsEnd);          // header + bestaande records
-    newRecord.copy(newFile, recordsEnd);           // nieuw record
-    raw.copy(newFile, recordsEnd + recordSize, recordsEnd); // string block
-    newFile.writeUInt32LE(recordCount + 1, 4);    // recordCount + 1
+    const records = [];
+    for (let i = 0; i < recordCount; i++) {
+      if (matchingIndexes.includes(i) && i !== existingIndex) continue;
+      records.push(i === existingIndex ? newRecord : raw.subarray(headerSize + i * recordSize, headerSize + (i + 1) * recordSize));
+    }
+    if (existingIndex < 0) records.push(newRecord);
+    const newFile = Buffer.alloc(headerSize + records.length * recordSize + stringBlockSize);
+    raw.copy(newFile, 0, 0, headerSize);
+    records.forEach((record, i) => record.copy(newFile, headerSize + i * recordSize));
+    raw.copy(newFile, headerSize + records.length * recordSize, recordsEnd);
+    newFile.writeUInt32LE(records.length, 4);
 
     fs.writeFileSync(filePath, newFile);
-    return { success: true, id: entry.ID };
+    return { success: true, id: recordId, created: existingIndex < 0, removedDuplicates: Math.max(0, matchingIndexes.length - 1) };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -1383,11 +1405,49 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
     const schoolFilter = options.schoolFilter !== undefined && options.schoolFilter !== null && options.schoolFilter !== ''
       ? parseInt(options.schoolFilter) : null;
     const idMin = options.idMin !== undefined && options.idMin !== null && options.idMin !== ''
-      ? parseInt(options.idMin) : (options.customOnly === true ? 4000000 : null);
+      ? parseInt(options.idMin) : (options.customOnly === true ? (parseInt(options.customMin) || 4000000) : null);
     const idMax = options.idMax !== undefined && options.idMax !== null && options.idMax !== ''
       ? parseInt(options.idMax) : null;
     const duplicatesOnly = options.duplicatesOnly === true;
     const excludeProcSpells = options.excludeProcSpells !== false;
+    const spellTypeFilter = String(options.spellTypeFilter || '');
+    const talentOnly = options.talentOnly === true;
+    const triggeredSpellIds = new Set();
+    const talentSpellIds = new Set();
+    const skillLineTrainerSpellIds = new Set();
+
+    if (trainerFilter) {
+      const skillLineAbilityDbc = await readDbcFile(path.join(dbcPath, 'SkillLineAbility.dbc'));
+      if (skillLineAbilityDbc) {
+        for (let i = 0; i < skillLineAbilityDbc.recordCount; i++) {
+          const off = i * skillLineAbilityDbc.recordSize;
+          const spellId = skillLineAbilityDbc.dataBuffer.readUInt32LE(off + 8);
+          const acquireMethod = skillLineAbilityDbc.dataBuffer.readUInt32LE(off + 36);
+          const trainerVisibility = skillLineAbilityDbc.dataBuffer.readUInt32LE(off + 40);
+          if (spellId && acquireMethod === 0 && trainerVisibility === 0) skillLineTrainerSpellIds.add(spellId);
+        }
+      }
+    }
+
+    if (spellTypeFilter === 'active' || spellTypeFilter === 'proc' || talentOnly) {
+      for (let i = 0; i < dbc.recordCount; i++) {
+        const off = i * dbc.recordSize;
+        for (const triggerOffset of [464, 468, 472]) {
+          const triggerId = dbc.dataBuffer.readUInt32LE(off + triggerOffset);
+          if (triggerId) triggeredSpellIds.add(triggerId);
+        }
+      }
+      const talentDbc = await readDbcFile(path.join(dbcPath, 'Talent.dbc'));
+      if (talentDbc) {
+        for (let i = 0; i < talentDbc.recordCount; i++) {
+          const off = i * talentDbc.recordSize;
+          for (let rankOffset = 16; rankOffset <= 48; rankOffset += 4) {
+            const spellId = talentDbc.dataBuffer.readUInt32LE(off + rankOffset);
+            if (spellId) talentSpellIds.add(spellId);
+          }
+        }
+      }
+    }
 
     let nameCounts = null;
     if (duplicatesOnly) {
@@ -1411,10 +1471,40 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
       const trigger1 = dbc.dataBuffer.readUInt32LE(off + 464);
       const trigger2 = dbc.dataBuffer.readUInt32LE(off + 468);
       const trigger3 = dbc.dataBuffer.readUInt32LE(off + 472);
+      const effect1 = dbc.dataBuffer.readUInt32LE(off + 284);
+      const effect2 = dbc.dataBuffer.readUInt32LE(off + 288);
+      const effect3 = dbc.dataBuffer.readUInt32LE(off + 292);
+      const castingTimeIndex = dbc.dataBuffer.readUInt32LE(off + 112);
+      const recoveryTime = dbc.dataBuffer.readUInt32LE(off + 116);
+      const categoryRecoveryTime = dbc.dataBuffer.readUInt32LE(off + 120);
+      const manaCost = dbc.dataBuffer.readUInt32LE(off + 168);
+      const manaCostPct = dbc.dataBuffer.readUInt32LE(off + 816);
+      const rangeIndex = dbc.dataBuffer.readUInt32LE(off + 184);
+      const spellFamily = dbc.dataBuffer.readUInt32LE(off + 832);
       const hasProcLikeBehavior = procTypeMask !== 0 || procChance !== 0 || procCharges !== 0 || trigger1 !== 0 || trigger2 !== 0 || trigger3 !== 0;
+      const isPassive = (attrs & 0x40) !== 0;
+      const isHidden = (attrs & 0x80) !== 0 || (attrs & 0x100) !== 0;
+      const isAura = [effect1, effect2, effect3].some(effect => [6, 27, 35, 65, 119, 128, 129].includes(effect));
+      const isProfession = (attrs & 0x20) !== 0 || [24, 53, 118, 127, 158].includes(effect1) || [24, 53, 118, 127, 158].includes(effect2) || [24, 53, 118, 127, 158].includes(effect3);
+      const hasNonActionbarEffect = [effect1, effect2, effect3].some(effect => [24, 36, 47, 53, 54, 57, 66, 74, 95, 99, 101, 102, 109, 118, 127].includes(effect));
+      const hasDirectCastEvidence = (
+        (attrs & 0x10) !== 0 || recoveryTime !== 0 || categoryRecoveryTime !== 0 ||
+        (castingTimeIndex !== 0 && (manaCost !== 0 || manaCostPct !== 0 || rangeIndex !== 0))
+      );
+      const isActiveAbility = !isPassive && !isHidden && !triggeredSpellIds.has(id) && !hasNonActionbarEffect && hasDirectCastEvidence &&
+        (spellFamily !== 0 || talentSpellIds.has(id));
+      const isProcTriggered = !isActiveAbility && (triggeredSpellIds.has(id) || hasProcLikeBehavior);
 
-      if (trainerFilter && (!(attrs & 0x10000) || (attrs & 0x80000))) continue;
+      const hasTrainerSpellAttribute = (attrs & 0x10000) !== 0 && (attrs & 0x80000) === 0;
+      if (trainerFilter && !hasTrainerSpellAttribute && !skillLineTrainerSpellIds.has(id)) continue;
       if (trainerFilter && excludeProcSpells && hasProcLikeBehavior) continue;
+      if (talentOnly && !talentSpellIds.has(id)) continue;
+      if (spellTypeFilter === 'active' && !isActiveAbility) continue;
+      if (spellTypeFilter === 'passive' && !isPassive) continue;
+      if (spellTypeFilter === 'proc' && !isProcTriggered) continue;
+      if (spellTypeFilter === 'aura' && !isAura) continue;
+      if (spellTypeFilter === 'hidden' && !isHidden) continue;
+      if (spellTypeFilter === 'profession' && !isProfession) continue;
       if (idMin !== null && id < idMin) continue;
       if (idMax !== null && id > idMax) continue;
       if (classFilter !== null && dbc.dataBuffer.readUInt32LE(off + 832) !== classFilter) continue;
@@ -1443,6 +1533,12 @@ ipcMain.handle('dbc:searchSpells', async (_, dbcPath, term, options = {}) => {
         DefenseType: dbc.dataBuffer.readUInt32LE(off + 852),
         SpellClassSet: dbc.dataBuffer.readUInt32LE(off + 832),
         HasProcLikeBehavior: hasProcLikeBehavior,
+        IsPassive: isPassive,
+        IsHidden: isHidden,
+        IsAura: isAura,
+        IsProfession: isProfession,
+        IsActiveAbility: isActiveAbility,
+        IsProcTriggered: isProcTriggered,
         ProcTypeMask: procTypeMask,
         ProcChance: procChance,
         ProcCharges: procCharges,
@@ -1701,6 +1797,86 @@ ipcMain.handle('dbc:readScalingStatValues', async (_, dbcPath) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('dbc:getSpellAnimation', async (_, dbcPath, spellId) => {
+  try {
+    const [spell, visual, kit, animations] = await Promise.all([
+      readDbcFile(path.join(dbcPath, 'Spell.dbc')),
+      readDbcFile(path.join(dbcPath, 'SpellVisual.dbc')),
+      readDbcFile(path.join(dbcPath, 'SpellVisualKit.dbc')),
+      readDbcFile(path.join(dbcPath, 'AnimationData.dbc')),
+    ]);
+    if (!spell || !visual || !kit || !animations) throw new Error('Required animation DBC files are unavailable');
+    const find = (dbc, id) => { for (let i = 0; i < dbc.recordCount; i++) { const off = i * dbc.recordSize; if (dbc.dataBuffer.readUInt32LE(off) === id) return off; } return -1; };
+    const spellOff = find(spell, Number(spellId));
+    if (spellOff < 0) throw new Error(`Spell ${spellId} not found`);
+    const visualId = spell.dataBuffer.readUInt32LE(spellOff + 524);
+    const visualOff = find(visual, visualId);
+    if (visualOff < 0) return { success: true, data: { visualId, castKitId: 0, animationId: -1, animations: [] } };
+    const castKitId = visual.dataBuffer.readUInt32LE(visualOff + 8);
+    const kitOff = find(kit, castKitId);
+    const animationId = kitOff < 0 ? -1 : kit.dataBuffer.readInt32LE(kitOff + 8);
+    const readName = (ref) => readStringFromBlock(null, ref, animations.stringBlock);
+    const animationList = [];
+    for (let i = 0; i < animations.recordCount; i++) {
+      const off = i * animations.recordSize;
+      animationList.push({ id: animations.dataBuffer.readUInt32LE(off), name: readName(animations.dataBuffer.readUInt32LE(off + 4)), fallback: animations.dataBuffer.readUInt32LE(off + 20) });
+    }
+    const readVisual = (field) => visual.dataBuffer.readUInt32LE(visualOff + field * 4);
+    const readKit = (field) => kitOff < 0 ? 0 : kit.dataBuffer.readUInt32LE(kitOff + field * 4);
+    return { success: true, data: {
+      visualId, castKitId, animationId, animations: animationList,
+      visual: { precastKit: readVisual(1), castKit: readVisual(2), impactKit: readVisual(3), stateKit: readVisual(4), stateDoneKit: readVisual(5), channelKit: readVisual(6), missileModel: readVisual(8), missilePathType: readVisual(9), missileDestinationAttachment: readVisual(10), missileSound: readVisual(11), flags: readVisual(13), casterImpactKit: readVisual(14), targetImpactKit: readVisual(15), missileAttachment: readVisual(16), missileCastOffsetX: visual.dataBuffer.readFloatLE(visualOff + 104), missileCastOffsetY: visual.dataBuffer.readFloatLE(visualOff + 108), missileCastOffsetZ: visual.dataBuffer.readFloatLE(visualOff + 112), missileImpactOffsetX: visual.dataBuffer.readFloatLE(visualOff + 116), missileImpactOffsetY: visual.dataBuffer.readFloatLE(visualOff + 120), missileImpactOffsetZ: visual.dataBuffer.readFloatLE(visualOff + 124) },
+      castKit: { startAnimId: readKit(1), animId: readKit(2), headEffect: readKit(3), chestEffect: readKit(4), baseEffect: readKit(5), leftHandEffect: readKit(6), rightHandEffect: readKit(7), leftWeaponEffect: readKit(9), rightWeaponEffect: readKit(10), soundId: readKit(15), shakeId: readKit(16), flags: readKit(37) },
+    } };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('dbc:cloneSpellCastAnimation', async (_, dbcPath, spellId, animationId, settings = {}) => {
+  try {
+    const files = ['Spell.dbc', 'SpellVisual.dbc', 'SpellVisualKit.dbc'];
+    const paths = Object.fromEntries(files.map(name => [name, path.join(dbcPath, name)]));
+    const raw = Object.fromEntries(files.map(name => [name, fs.readFileSync(paths[name])]));
+    const find = (buffer, id) => { const count = buffer.readUInt32LE(4), size = buffer.readUInt32LE(12); for (let i = 0; i < count; i++) { const off = 20 + i * size; if (buffer.readUInt32LE(off) === id) return off; } return -1; };
+    const nextId = (buffer, startId = 1) => { const count = buffer.readUInt32LE(4), size = buffer.readUInt32LE(12), used = new Set(); for (let i = 0; i < count; i++) used.add(buffer.readUInt32LE(20 + i * size)); let id = Math.max(1, Number(startId) || 1); while (used.has(id)) id++; return id; };
+    const appendClone = (buffer, sourceOff, newId) => { const count = buffer.readUInt32LE(4), size = buffer.readUInt32LE(12), strings = buffer.readUInt32LE(16), end = 20 + count * size; const out = Buffer.alloc(buffer.length + size); buffer.copy(out, 0, 0, end); buffer.copy(out, end, sourceOff, sourceOff + size); out.writeUInt32LE(newId, end); buffer.copy(out, end + size, end); out.writeUInt32LE(count + 1, 4); return out; };
+    const spellOff = find(raw['Spell.dbc'], Number(spellId));
+    if (spellOff < 0) throw new Error(`Spell ${spellId} not found`);
+    const oldVisualId = raw['Spell.dbc'].readUInt32LE(spellOff + 524);
+    const visualOff = find(raw['SpellVisual.dbc'], oldVisualId);
+    if (visualOff < 0) throw new Error(`SpellVisual ${oldVisualId} not found`);
+    const oldKitId = raw['SpellVisual.dbc'].readUInt32LE(visualOff + 8);
+    const kitOff = find(raw['SpellVisualKit.dbc'], oldKitId);
+    if (kitOff < 0) throw new Error(`SpellVisualKit ${oldKitId} not found`);
+    const customStart = Number(settings.idStart) || 1;
+    const newKitId = nextId(raw['SpellVisualKit.dbc'], customStart);
+    const newVisualId = nextId(raw['SpellVisual.dbc'], customStart);
+    const newKit = appendClone(raw['SpellVisualKit.dbc'], kitOff, newKitId);
+    const newKitOff = 20 + raw['SpellVisualKit.dbc'].readUInt32LE(4) * raw['SpellVisualKit.dbc'].readUInt32LE(12);
+    newKit.writeInt32LE(Number(animationId), newKitOff + 8);
+    for (const [field, offset] of Object.entries({ startAnimId: 4, headEffect: 12, chestEffect: 16, baseEffect: 20, leftHandEffect: 24, rightHandEffect: 28, leftWeaponEffect: 36, rightWeaponEffect: 40, soundId: 60, shakeId: 64 })) {
+      if (settings.castKit?.[field] !== undefined) newKit.writeUInt32LE(Number(settings.castKit[field]) >>> 0, newKitOff + offset);
+    }
+    const newVisual = appendClone(raw['SpellVisual.dbc'], visualOff, newVisualId);
+    const newVisualOff = 20 + raw['SpellVisual.dbc'].readUInt32LE(4) * raw['SpellVisual.dbc'].readUInt32LE(12);
+    newVisual.writeUInt32LE(newKitId, newVisualOff + 8);
+    const visualFields = { precastKit: 4, impactKit: 12, stateKit: 16, stateDoneKit: 20, channelKit: 24, missileModel: 32, missilePathType: 36, missileDestinationAttachment: 40, missileSound: 44, flags: 52, casterImpactKit: 56, targetImpactKit: 60, missileAttachment: 64, missileCastOffsetX: 104, missileCastOffsetY: 108, missileCastOffsetZ: 112, missileImpactOffsetX: 116, missileImpactOffsetY: 120, missileImpactOffsetZ: 124 };
+    const visualFloatFields = new Set(['missileCastOffsetX', 'missileCastOffsetY', 'missileCastOffsetZ', 'missileImpactOffsetX', 'missileImpactOffsetY', 'missileImpactOffsetZ']);
+    for (const [field, offset] of Object.entries(visualFields)) {
+      if (settings.visual?.[field] !== undefined) {
+        if (visualFloatFields.has(field)) newVisual.writeFloatLE(Number(settings.visual[field]) || 0, newVisualOff + offset);
+        else newVisual.writeUInt32LE(Number(settings.visual[field]) >>> 0, newVisualOff + offset);
+      }
+    }
+    const newSpell = Buffer.from(raw['Spell.dbc']);
+    newSpell.writeUInt32LE(newVisualId, spellOff + 524);
+    fs.writeFileSync(paths['SpellVisualKit.dbc'], newKit);
+    fs.writeFileSync(paths['SpellVisual.dbc'], newVisual);
+    fs.writeFileSync(paths['Spell.dbc'], newSpell);
+    spellDbcCache = null;
+    return { success: true, data: { visualId: newVisualId, castKitId: newKitId, animationId: Number(animationId) } };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('dbc:copySpell', async (_, dbcPath, sourceId, newId) => {
@@ -3645,6 +3821,8 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
     const fullW = COLS * tileW;
     const fullH = ROWS * tileH;
     const composite = Buffer.alloc(fullW * fullH * 4, 0);
+    const missingTiles = [];
+    let foundTiles = 0;
 
     const useMpq = dataPath && getMpqReader().isDataPath(dataPath);
 
@@ -3663,7 +3841,12 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
           }
         }
 
-        if (!blpBuf) continue;
+        if (!blpBuf) {
+          missingTiles.push(idx);
+          continue;
+        }
+
+        foundTiles++;
 
         const { rgba, w, h } = decodeBLP(blpBuf);
         const ox = col * tileW;
@@ -3682,8 +3865,9 @@ ipcMain.handle('worldmap:getZoneImage', async (_, folderName, baseName, dataPath
       }
     }
 
+    if (foundTiles === 0) return { success: false, error: `No world-map tiles found for ${folderName}.`, foundTiles, missingTiles };
     const png = rgbaToPNG(composite, fullW, fullH);
-    return { success: true, data: `data:image/png;base64,${png.toString('base64')}` };
+    return { success: true, data: `data:image/png;base64,${png.toString('base64')}`, foundTiles, missingTiles };
   } catch (e) {
     console.error('worldmap:getZoneImage error:', e);
     return { success: false, error: e.message };
@@ -4664,6 +4848,55 @@ ipcMain.handle('dbc:setCreatureDisplayBakeName', async (_, dbcPath, extraId) => 
   }
 });
 
+ipcMain.handle('worldmap:getOverlayImage', async (_, folderName, textureName, width, height, dataPath) => {
+  try {
+    const tileW = 256, tileH = 256;
+    const cols = Math.ceil(width / tileW), rows = Math.ceil(height / tileH);
+    const composite = Buffer.alloc(width * height * 4, 0);
+    const useMpq = dataPath && getMpqReader().isDataPath(dataPath);
+    for (let row = 0; row < rows; row++) for (let col = 0; col < cols; col++) {
+      const idx = row * cols + col + 1;
+      const internalPath = `Interface\\WorldMap\\${folderName}\\${textureName}${idx}.blp`;
+      let blpBuf = useMpq ? await getMpqReader().readBlpFromMpqs(dataPath, internalPath) : null;
+      if (!blpBuf) continue;
+      const { rgba, w, h } = decodeBLP(blpBuf);
+      for (let y = 0; y < Math.min(h, height - row * tileH); y++) for (let x = 0; x < Math.min(w, width - col * tileW); x++) {
+        const src = (y * w + x) * 4, dst = (((row * tileH + y) * width) + col * tileW + x) * 4;
+        composite[dst] = rgba[src]; composite[dst + 1] = rgba[src + 1]; composite[dst + 2] = rgba[src + 2]; composite[dst + 3] = rgba[src + 3];
+      }
+    }
+    return { success: true, data: `data:image/png;base64,${rgbaToPNG(composite, width, height).toString('base64')}` };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('dbc:addSpellIcon', async (_, dbcPath, iconPath, customStart = 1) => {
+  try {
+    const filePath = path.join(dbcPath, 'SpellIcon.dbc');
+    const raw = fs.readFileSync(filePath);
+    const recordCount = raw.readUInt32LE(4), recordSize = raw.readUInt32LE(12), stringSize = raw.readUInt32LE(16);
+    const recordsEnd = 20 + recordCount * recordSize;
+    const normalized = String(iconPath || '').replace(/\//g, '\\').replace(/\.blp$/i, '').trim();
+    if (!normalized) throw new Error('An icon path is required');
+    for (let i = 0; i < recordCount; i++) {
+      const off = 20 + i * recordSize;
+      const ref = raw.readUInt32LE(off + 4);
+      const existing = readStringFromBlock(null, ref, raw.subarray(recordsEnd, recordsEnd + stringSize));
+      if (existing.toLowerCase() === normalized.toLowerCase()) return { success: true, data: { id: raw.readUInt32LE(off), existing: true } };
+    }
+    const usedIds = new Set();
+    for (let i = 0; i < recordCount; i++) usedIds.add(raw.readUInt32LE(20 + i * recordSize));
+    let id = Math.max(1, Number(customStart) || 1);
+    while (usedIds.has(id)) id++;
+    const text = Buffer.from(`${normalized}\0`, 'utf8');
+    const record = Buffer.alloc(recordSize); record.writeUInt32LE(id, 0); record.writeUInt32LE(stringSize, 4);
+    const out = Buffer.alloc(raw.length + recordSize + text.length);
+    raw.copy(out, 0, 0, recordsEnd); record.copy(out, recordsEnd); raw.copy(out, recordsEnd + recordSize, recordsEnd, recordsEnd + stringSize); text.copy(out, recordsEnd + recordSize + stringSize);
+    out.writeUInt32LE(recordCount + 1, 4); out.writeUInt32LE(stringSize + text.length, 16);
+    fs.writeFileSync(filePath, out);
+    return { success: true, data: { id, existing: false } };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('dbc:setCreatureDisplayObjectPackage', async (_, dbcPath, displayId) => {
   try {
     const id = Number(displayId);
@@ -5042,6 +5275,18 @@ ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('worldmap:readOverlays', async (_, dbcPath) => {
+  try {
+    const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapOverlay.dbc'));
+    if (buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Geen DBC' };
+    const count = buffer.readUInt32LE(4), size = buffer.readUInt32LE(12), strings = 20 + count * size;
+    const readStr = offset => { let end = offset; while (strings + end < buffer.length && buffer[strings + end]) end++; return offset ? buffer.slice(strings + offset, strings + end).toString('utf8') : ''; };
+    const overlays = [];
+    for (let i = 0; i < count; i++) { const b = 20 + i * size; overlays.push({ id: buffer.readUInt32LE(b), mapAreaId: buffer.readUInt32LE(b + 4), textureName: readStr(buffer.readUInt32LE(b + 32)), width: buffer.readUInt32LE(b + 36), height: buffer.readUInt32LE(b + 40), offsetX: buffer.readUInt32LE(b + 44), offsetY: buffer.readUInt32LE(b + 48) }); }
+    return { success: true, overlays };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 // Read the Character Customization test build only. Keeping this as a separate

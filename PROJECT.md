@@ -86,6 +86,17 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 
 ### ItemSetEditorPage uitbreidingen
 
+#### Tier-set workbench tracking
+
+- [x] 2026-07-24: Right-hand item inspector with icon, basic stats, `ItemDisplayInfo` models/textures and read-only geoset values.
+- [ ] Clone an existing set into a custom Classic+ tier, including selected item entries.
+- [ ] Tier wizard: select armor items, generate the set, write DBC, and update `item_template.ItemSet`.
+- [ ] Set-slot validation: class/subclass/inventory slot, duplicate, and incomplete-set warnings.
+- [ ] Appearance clone: allocate a custom `ItemDisplayInfo` ID before changing a shared appearance.
+- [ ] Equipment BLP editor: reuse paint/recolor controls and attach exported textures to the cloned appearance.
+- [ ] Geoset editor: enable only after a cloned M2/display pipeline exists; support choosing a leggings-compatible model instead of a kilt without altering shared assets.
+- [ ] Export a client patch containing custom BLP, M2, and DBC files.
+
 - Clone existing set Ã¢â€ â€™ custom Classic+ tier.
 - Wizard: armor items selecteren Ã¢â€ â€™ set genereren Ã¢â€ â€™ schrijf DBC + update `item_template.ItemSet`.
 - Spell lookup modal voor set bonus spells.
