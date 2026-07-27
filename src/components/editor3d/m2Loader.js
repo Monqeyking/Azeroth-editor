@@ -6,6 +6,9 @@ const m2ResultCache    = new Map();
 const m2MaterialCache  = new Map();
 const m2GlobalListeners = new Set();            // brede listeners (Inspector, InstanceLayers)
 const m2AssetListeners  = new Map();            // displayId → Set<fn>  (per-spawn)
+const M2_CACHE_MAX = 48;
+const m2BuildQueue = [];
+let m2BuildFrame = null;
 
 function notifyM2Cache(displayId) {
   // Notificeer alleen de spawns die dit displayId hebben
@@ -28,7 +31,34 @@ export function subscribeM2Asset(displayId, fn) {
 
 export function getCachedM2Asset(displayId) {
   if (!displayId) return null;
-  return m2ResultCache.get(displayId) ?? null;
+  const asset = m2ResultCache.get(displayId) ?? null;
+  if (asset) {
+    m2ResultCache.delete(displayId);
+    m2ResultCache.set(displayId, asset);
+  }
+  return asset;
+}
+
+function disposeM2Asset(asset) {
+  if (!asset) return;
+  if (asset.texture) {
+    const material = m2MaterialCache.get(asset.texture.uuid);
+    material?.dispose();
+    m2MaterialCache.delete(asset.texture.uuid);
+    asset.texture.dispose();
+  }
+  asset.geo?.dispose();
+}
+
+export function pruneM2AssetCache(keepDisplayIds) {
+  const keep = new Set(keepDisplayIds);
+  while (m2ResultCache.size > M2_CACHE_MAX) {
+    const candidate = [...m2ResultCache.keys()].find(id => !keep.has(id));
+    if (candidate == null) break;
+    const asset = m2ResultCache.get(candidate);
+    m2ResultCache.delete(candidate);
+    disposeM2Asset(asset);
+  }
 }
 
 // 'idle' | 'loading' | 'loaded' | 'failed'
@@ -100,15 +130,28 @@ export function buildM2Asset(data) {
     texture,
     modelPath: data.modelPath ?? null,
     texturePath: data.texturePath ?? null,
-    debug: data.debug ?? null,
   };
+}
+
+function queueM2Build(data) {
+  return new Promise((resolve) => {
+    m2BuildQueue.push({ data, resolve });
+    if (m2BuildFrame != null) return;
+    const flush = () => {
+      m2BuildFrame = null;
+      const next = m2BuildQueue.shift();
+      if (!next) return;
+      next.resolve(buildM2Asset(next.data));
+      if (m2BuildQueue.length) m2BuildFrame = requestAnimationFrame(flush);
+    };
+    m2BuildFrame = requestAnimationFrame(flush);
+  });
 }
 
 export function fetchM2Model(displayId) {
   if (m2PromiseCache.has(displayId)) return m2PromiseCache.get(displayId);
-  const promise = window.azeroth.m2.loadModel({ displayId }).then(res => {
-    const asset = (res?.success && res.data) ? buildM2Asset(res.data) : null;
-    if (asset?.debug) console.log(`[m2:${displayId}]`, asset.debug);
+  const promise = window.azeroth.m2.loadModel({ displayId }).then(async res => {
+    const asset = (res?.success && res.data) ? await queueM2Build(res.data) : null;
     m2ResultCache.set(displayId, asset);
     notifyM2Cache(displayId);
     return asset;
@@ -116,6 +159,8 @@ export function fetchM2Model(displayId) {
     m2ResultCache.set(displayId, null);
     notifyM2Cache(displayId);
     return null;
+  }).finally(() => {
+    m2PromiseCache.delete(displayId);
   });
   m2PromiseCache.set(displayId, promise);
   return promise;

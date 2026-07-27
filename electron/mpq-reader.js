@@ -304,7 +304,12 @@ async function readWdtBuffer(dataPath, mapName) {
 
 async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   const key = `${dataPath}|${mapName}|${tileX}|${tileY}`;
-  if (adtCache.has(key)) return adtCache.get(key);
+  if (adtCache.has(key)) {
+    const cached = adtCache.get(key);
+    adtCache.delete(key);
+    adtCache.set(key, cached);
+    return cached;
+  }
 
   ensureMounted(dataPath);
   const internalPath = `World\\Maps\\${mapName}\\${mapName}_${tileX}_${tileY}.adt`;
@@ -444,6 +449,8 @@ async function collectListfilePaths(dataPath) {
 
     if (stat.isDirectory()) {
       walkDirBlps(mpqPath, '', paths);
+      walkDirFiles(mpqPath, '', paths, '.m2');
+      walkDirFiles(mpqPath, '', paths, '.mdx');
       continue;
     }
 

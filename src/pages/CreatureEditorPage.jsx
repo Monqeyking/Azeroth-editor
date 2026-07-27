@@ -27,6 +27,14 @@ const TRAINER_CLASSES = [
   { value: 11, label: 'Druid' },
 ];
 
+const TRAINER_PROFESSIONS = [
+  { value: 164, label: 'Blacksmithing' }, { value: 165, label: 'Leatherworking' }, { value: 171, label: 'Alchemy' },
+  { value: 182, label: 'Herbalism' }, { value: 185, label: 'Cooking' }, { value: 186, label: 'Mining' },
+  { value: 197, label: 'Tailoring' }, { value: 202, label: 'Engineering' }, { value: 333, label: 'Enchanting' },
+  { value: 356, label: 'Fishing' }, { value: 393, label: 'Skinning' }, { value: 755, label: 'Jewelcrafting' },
+  { value: 773, label: 'Inscription' }, { value: 129, label: 'First Aid' },
+];
+
 const MODEL_COLUMNS = ['Idx', 'CreatureDisplayID', 'DisplayScale', 'Probability', 'VerifiedBuild'];
 
 const SUB_TABS = [
@@ -35,7 +43,7 @@ const SUB_TABS = [
   { id: 'trainer', label: 'Trainer Settings', role: 'trainer' },
   { id: 'vendor', label: 'Vendor Items', role: 'vendor' },
   { id: 'spawns', label: 'World Spawns', role: 'spawn' },
-  { id: 'directions', label: 'Directions', role: 'directions' },
+  { id: 'directions', label: 'Gossip Options' },
   { id: 'quests', label: 'Quests' },
 ];
 
@@ -324,7 +332,11 @@ export default function CreatureEditorPage() {
   const [refSelectedModelIdx, setRefSelectedModelIdx] = useState(0);
   const [refRoles, setRefRoles] = useState({ trainer: false, vendor: false, spawn: false });
   const [questRelations, setQuestRelations] = useState({ starters: [], enders: [] });
-  const [directions, setDirections] = useState({ loading: false, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null, routes: [] });
+  const [directions, setDirections] = useState({ loading: false, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], menuRefs: [], meta: null, routes: [] });
+  const [trainerMenuKind, setTrainerMenuKind] = useState('class');
+  const [trainerMenuRequirement, setTrainerMenuRequirement] = useState('7');
+  const [trainerMenuCandidates, setTrainerMenuCandidates] = useState([]);
+  const [trainerMenuLoading, setTrainerMenuLoading] = useState(false);
   const [directionTargetEntry, setDirectionTargetEntry] = useState('4000002');
   const [directionSpeech, setDirectionSpeech] = useState('');
   const [directionTarget, setDirectionTarget] = useState(null);
@@ -441,9 +453,9 @@ export default function CreatureEditorPage() {
   }, [query, creatureTypeFilter, rankFilter, gossipFilter, factionFilter, minLevelFilter, maxLevelFilter]);
 
   const loadDirections = useCallback(async (entry) => {
-    setDirections({ loading: true, error: '', menus: [], pois: [], conditions: [], guardSpawns: [] });
+    setDirections({ loading: true, error: '', menus: [], pois: [], conditions: [], guardSpawns: [], menuRefs: [] });
     try {
-      const [treeRes, guardSpawnRes, metaRes, routesRes] = await Promise.all([
+      const [treeRes, guardSpawnRes, menuRefsRes, metaRes, routesRes] = await Promise.all([
         query(`
           WITH RECURSIVE menu_tree AS (
             SELECT gossip_menu_id AS MenuID, 0 AS depth, CAST(gossip_menu_id AS CHAR(2000)) AS path
@@ -461,13 +473,15 @@ export default function CreatureEditorPage() {
           LEFT JOIN gossip_menu_option gmo ON gmo.MenuID = mt.MenuID
           ORDER BY mt.depth, mt.MenuID, gmo.OptionID`, [entry]),
         query('SELECT guid, map, zoneId, areaId, position_x, position_y, position_z FROM creature WHERE id1 = ? ORDER BY map, guid', [entry]),
+        query(`SELECT entry, name FROM creature_template
+               WHERE gossip_menu_id = (SELECT gossip_menu_id FROM creature_template WHERE entry = ? LIMIT 1)
+               ORDER BY entry`, [entry]),
         query('SELECT * FROM guard_directions_editor_meta WHERE guard_entry = ? LIMIT 1', [entry]).catch(() => ({ data: [] })),
         query('SELECT * FROM guard_directions_editor_route WHERE guard_entry = ?', [entry]).catch(() => ({ data: [] })),
       ]);
       const menus = treeRes.data || [];
       const poiIds = [...new Set(menus.map(row => Number(row.ActionPoiID)).filter(Boolean))];
       const menuIds = [...new Set(menus.map(row => Number(row.MenuID)).filter(Boolean))];
-      const optionIds = [...new Set(menus.map(row => Number(row.OptionID)).filter(Number.isFinite))];
       const [poiRes, conditionRes] = await Promise.all([
         poiIds.length
           ? query(`SELECT poi.*, (SELECT COUNT(*) FROM gossip_menu_option linked WHERE linked.ActionPoiID = poi.ID) AS referenceCount,
@@ -481,11 +495,9 @@ export default function CreatureEditorPage() {
           : Promise.resolve({ data: [] }),
         menuIds.length
           ? query(`SELECT DISTINCT c.* FROM conditions c
-                   WHERE c.SourceGroup IN (${menuIds.map(() => '?').join(',')})
-                      OR c.SourceEntry IN (${menuIds.map(() => '?').join(',')})
-                      OR c.SourceId IN (${menuIds.map(() => '?').join(',')})
-                      ${optionIds.length ? `OR c.SourceEntry IN (${optionIds.map(() => '?').join(',')}) OR c.SourceGroup IN (${optionIds.map(() => '?').join(',')})` : ''}
-                   ORDER BY c.SourceTypeOrReferenceId, c.SourceGroup, c.SourceEntry`, [...menuIds, ...menuIds, ...menuIds, ...optionIds, ...optionIds])
+                   WHERE c.SourceTypeOrReferenceId = 15
+                     AND c.SourceGroup IN (${menuIds.map(() => '?').join(',')})
+                   ORDER BY c.SourceGroup, c.SourceEntry`, menuIds)
           : Promise.resolve({ data: [] }),
       ]);
       const poiGroups = Object.values((poiRes.data || []).reduce((out, row) => {
@@ -494,10 +506,10 @@ export default function CreatureEditorPage() {
         if (row.destinationEntry) out[key].destinations.push({ entry: row.destinationEntry, name: row.destinationName, subname: row.destinationSubname, guid: row.destinationGuid, map: row.destinationMap, x: row.position_x, y: row.position_y, z: row.position_z });
         return out;
       }, {}));
-      setDirections({ loading: false, error: '', menus, pois: poiGroups, conditions: conditionRes.data || [], guardSpawns: guardSpawnRes.data || [], meta: metaRes.data?.[0] || null, routes: routesRes.data || [] });
+      setDirections({ loading: false, error: '', menus, pois: poiGroups, conditions: conditionRes.data || [], guardSpawns: guardSpawnRes.data || [], menuRefs: menuRefsRes.data || [], meta: metaRes.data?.[0] || null, routes: routesRes.data || [] });
       return menus.some(row => Number(row.ActionPoiID) || ['Class Trainer', 'A class trainer', 'Profession Trainer', 'A profession trainer'].includes(row.OptionText));
     } catch (err) {
-      setDirections({ loading: false, error: err?.message || 'Could not inspect directions.', menus: [], pois: [], conditions: [], guardSpawns: [], meta: null, routes: [] });
+      setDirections({ loading: false, error: err?.message || 'Could not inspect directions.', menus: [], pois: [], conditions: [], guardSpawns: [], menuRefs: [], meta: null, routes: [] });
       return false;
     }
   }, [query]);
@@ -836,6 +848,77 @@ export default function CreatureEditorPage() {
     setMsg({ type: 'success', text: `Removed the ${route.OptionText} gossip route.` });
     await loadDirections(selected.entry);
   }, [loadDirections, query, removeOwnedRoute, selected]);
+
+  const removeRootGossipOption = useCallback(async (option) => {
+    if (!selected || Number(option.MenuID) !== Number(form.gossip_menu_id)) return;
+    const label = option.OptionText || '(unnamed option)';
+    if (!window.confirm(`Remove “${label}” from ${selected.name}? If its menu is shared, this creature will receive a private copy automatically.`)) return;
+    try {
+      const [refsRes, menusRes] = await Promise.all([
+        query('SELECT entry FROM creature_template WHERE gossip_menu_id = ? ORDER BY entry', [option.MenuID]),
+        query('SELECT MenuID FROM gossip_menu WHERE MenuID >= 4000000 ORDER BY MenuID'),
+      ]);
+      const refs = refsRes.data || [];
+      const shared = refs.length > 1;
+      const run = async (sql, params = []) => { const res = await query(sql, params); if (!res.success) throw new Error(res.error || 'Database write failed'); };
+      if (!shared) {
+        await runAtomicWrite([], async () => {
+          await run('DELETE FROM conditions WHERE SourceTypeOrReferenceId = 15 AND SourceGroup = ? AND SourceEntry = ?', [option.MenuID, option.OptionID]);
+          await run('DELETE FROM gossip_menu_option WHERE MenuID = ? AND OptionID = ?', [option.MenuID, option.OptionID]);
+        });
+      } else {
+        const used = new Set((menusRes.data || []).map(row => Number(row.MenuID)));
+        let privateMenuId = 4000000; while (used.has(privateMenuId)) privateMenuId++;
+        await runAtomicWrite([], async () => {
+          await run('INSERT INTO gossip_menu (MenuID, TextID) SELECT ?, TextID FROM gossip_menu WHERE MenuID = ?', [privateMenuId, option.MenuID]);
+          await run(`INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild)
+            SELECT ?, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild
+            FROM gossip_menu_option WHERE MenuID = ? AND OptionID <> ?`, [privateMenuId, option.MenuID, option.OptionID]);
+          await run(`INSERT INTO conditions (SourceTypeOrReferenceId, SourceGroup, SourceEntry, SourceId, ElseGroup, ConditionTypeOrReference, ConditionTarget, ConditionValue1, ConditionValue2, ConditionValue3, NegativeCondition, ErrorType, ErrorTextId, ScriptName, Comment)
+            SELECT SourceTypeOrReferenceId, ?, SourceEntry, SourceId, ElseGroup, ConditionTypeOrReference, ConditionTarget, ConditionValue1, ConditionValue2, ConditionValue3, NegativeCondition, ErrorType, ErrorTextId, ScriptName, Comment
+            FROM conditions WHERE SourceTypeOrReferenceId = 15 AND SourceGroup = ? AND SourceEntry <> ?`, [privateMenuId, option.MenuID, option.OptionID]);
+          await run('UPDATE creature_template SET gossip_menu_id = ? WHERE entry = ?', [privateMenuId, selected.entry]);
+        });
+        setForm(current => ({ ...current, gossip_menu_id: privateMenuId }));
+        setSelected(current => ({ ...current, gossip_menu_id: privateMenuId }));
+      }
+      setMsg({ type: 'success', text: `Removed “${label}”${shared ? ' and assigned a private gossip menu to this creature' : ''}.` });
+      await loadDirections(selected.entry);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not remove gossip option.' }); }
+  }, [form.gossip_menu_id, loadDirections, query, runAtomicWrite, selected]);
+
+  const loadTrainerMenuCandidates = useCallback(async () => {
+    const requirement = Number(trainerMenuRequirement);
+    if (!requirement) return;
+    setTrainerMenuLoading(true);
+    try {
+      const res = await query(`SELECT ct.gossip_menu_id AS MenuID,
+        GROUP_CONCAT(DISTINCT gm.TextID ORDER BY gm.TextID SEPARATOR ', ') AS TextIDs,
+        GROUP_CONCAT(DISTINCT CONCAT('#', ct.entry, ' ', ct.name) ORDER BY ct.entry SEPARATOR ' | ') AS Users,
+        GROUP_CONCAT(DISTINCT CONCAT(gmo.OptionID, ': ', gmo.OptionText) ORDER BY gmo.OptionID SEPARATOR ' | ') AS Options
+        FROM creature_template ct
+        JOIN creature_default_trainer cdt ON cdt.CreatureId = ct.entry
+        JOIN trainer t ON t.Id = cdt.TrainerId
+        LEFT JOIN gossip_menu gm ON gm.MenuID = ct.gossip_menu_id
+        LEFT JOIN gossip_menu_option gmo ON gmo.MenuID = ct.gossip_menu_id
+        WHERE ct.gossip_menu_id <> 0 AND t.Type = ? AND t.Requirement = ?
+        GROUP BY ct.gossip_menu_id
+        ORDER BY ct.gossip_menu_id`, [trainerMenuKind === 'class' ? 0 : 2, requirement]);
+      if (!res.success) throw new Error(res.error || 'Could not load trainer menus.');
+      setTrainerMenuCandidates(res.data || []);
+    } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not load trainer menus.' }); }
+    finally { setTrainerMenuLoading(false); }
+  }, [query, trainerMenuKind, trainerMenuRequirement]);
+
+  const useTrainerMenu = useCallback(async (menuId) => {
+    if (!selected || !menuId || !window.confirm(`Use gossip menu #${menuId} for ${selected.name}? This only changes this creature's menu reference.`)) return;
+    const res = await query('UPDATE creature_template SET gossip_menu_id = ? WHERE entry = ?', [menuId, selected.entry]);
+    if (!res.success) { setMsg({ type: 'error', text: res.error || 'Could not assign gossip menu.' }); return; }
+    setForm(current => ({ ...current, gossip_menu_id: Number(menuId) }));
+    setSelected(current => ({ ...current, gossip_menu_id: Number(menuId) }));
+    setMsg({ type: 'success', text: `Assigned gossip menu #${menuId}.` });
+    await loadDirections(selected.entry);
+  }, [loadDirections, query, selected]);
 
   const changeOwnedDestination = useCallback(async (route) => {
     const entry = Number(window.prompt('Destination creature entry', route.destination_entry || ''));
@@ -1699,7 +1782,9 @@ export default function CreatureEditorPage() {
   const renderDirectionsPanel = () => {
     if (directions.loading) return <div className="creature-section-block"><p className="field-hint">Inspecting gossip menus and linked points of interest…</p></div>;
     if (directions.error) return <div className="creature-section-block"><p className="field-hint" style={{ color: 'var(--danger, #ee7070)' }}>{directions.error}</p></div>;
-    const optionRows = directions.menus.filter(row => row.OptionID != null);
+    const optionRows = directions.menus.filter(row => row.OptionID != null).filter((row, index, rows) =>
+      rows.findIndex(other => Number(other.MenuID) === Number(row.MenuID) && Number(other.OptionID) === Number(row.OptionID)) === index
+    );
     const poiIds = new Set(directions.pois.map(poi => Number(poi.ID)));
     const routeForOption = (option) => {
       const labels = [option.OptionText].filter(Boolean);
@@ -1715,16 +1800,26 @@ export default function CreatureEditorPage() {
     const routesForPoi = (poiId) => [...new Set(optionRows.filter(row => Number(row.ActionPoiID) === Number(poiId)).map(routeForOption))];
     return (
       <div className="creature-section-block directions-panel">
-        <div className="creature-section-head"><h4 className="field-section-title">Guard Directions Inspector</h4></div>
-        <p className="field-hint">Read-only. This follows ActionMenuID submenu links and ActionPoiID map markers; it does not modify gossip, POIs, conditions, or spawns.</p>
-        {!Number(form.gossip_menu_id) || !hasFlag(form.npcflag, 1) ? (
-          <p className="field-hint directions-warning">This creature is not a verified gossip guard: it needs both a gossip menu and NPC flag 1 before a directions route can exist.</p>
-        ) : null}
+        <div className="creature-section-head"><h4 className="field-section-title">Gossip Options</h4></div>
+        <p className="field-hint">Shows this creature’s reachable gossip tree. Root options can be removed here; shared root menus are copied for this creature first.</p>
+        {!Number(form.gossip_menu_id) ? <p className="field-hint directions-warning">This creature has no gossip menu assigned.</p> : null}
         <div className="directions-summary">
           <span>Root menu <strong>#{form.gossip_menu_id || 0}</strong></span>
+          <span>{directions.menuRefs.length === 1 ? 'Private menu' : `Shared by ${directions.menuRefs.length} creatures`}</span>
           <span>{optionRows.length} option{optionRows.length === 1 ? '' : 's'}</span>
           <span>{directions.pois.length} POI{directions.pois.length === 1 ? '' : 's'}</span>
           <span>{directions.conditions.length} condition{directions.conditions.length === 1 ? '' : 's'}</span>
+        </div>
+        {directions.menuRefs.length > 1 && <p className="field-hint">Menu users: {directions.menuRefs.map(row => `#${row.entry} ${row.name || ''}`).join(' · ')}</p>}
+        <div className="creature-section-block" style={{ marginTop: '14px' }}>
+          <h5 className="field-subsection-title">Reuse an existing trainer menu</h5>
+          <p className="field-hint">Browse normal trainer menus and their exact options, then assign one to this creature without editing the shared menu.</p>
+          <div className="form-fields creature-section-fields">
+            <div className="field-group"><label>Trainer kind</label><select value={trainerMenuKind} onChange={e => { const kind = e.target.value; setTrainerMenuKind(kind); setTrainerMenuRequirement(kind === 'class' ? '1' : '164'); setTrainerMenuCandidates([]); }}><option value="class">Class trainer</option><option value="profession">Profession trainer</option></select></div>
+            <div className="field-group"><label>{trainerMenuKind === 'class' ? 'Class' : 'Profession'}</label><select value={trainerMenuRequirement} onChange={e => { setTrainerMenuRequirement(e.target.value); setTrainerMenuCandidates([]); }}>{(trainerMenuKind === 'class' ? TRAINER_CLASSES : TRAINER_PROFESSIONS).map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></div>
+            <div className="field-group" style={{ alignSelf: 'end' }}><button type="button" className="btn-ghost" onClick={loadTrainerMenuCandidates} disabled={trainerMenuLoading}>{trainerMenuLoading ? 'Loading…' : 'Find menus'}</button></div>
+          </div>
+          {trainerMenuCandidates.map(menu => <div className="directions-option" key={menu.MenuID}><span className="mono">menu #{menu.MenuID} · texts {menu.TextIDs || '—'}</span><strong>{menu.Options || '(no options)'}</strong><span>{menu.Users}</span><button type="button" className="btn-primary directions-destination" onClick={() => useTrainerMenu(menu.MenuID)}>Use this menu</button></div>)}
         </div>
         {directions.guardSpawns.length === 0 && <p className="field-hint directions-warning">No live guard spawn was found. A POI has no map column, so its map cannot be verified from this guard.</p>}
         {directions.guardSpawns.length > 0 && <p className="field-hint">Guard spawn context: {directions.guardSpawns.map(s => `#${s.guid} on map ${s.map} (${Number(s.position_x).toFixed(2)}, ${Number(s.position_y).toFixed(2)})`).join(' · ')}</p>}
@@ -1735,11 +1830,11 @@ export default function CreatureEditorPage() {
               <strong>{row.OptionText || '(no option text)'}</strong>
               {row.ActionMenuID ? <span>→ menu #{row.ActionMenuID}</span> : null}
               {row.ActionPoiID ? <span className="directions-poi-link"><MapPin size={12} /> POI #{row.ActionPoiID}</span> : null}
+              {Number(row.MenuID) === Number(form.gossip_menu_id) && <button type="button" className="btn-danger directions-destination" onClick={() => removeRootGossipOption(row)}>Remove option</button>}
             </div>
           ))}
         </div>
-        <h5 className="field-subsection-title">Linked points of interest</h5>
-        {directions.pois.length === 0 ? <p className="field-hint">No points of interest are linked from this gossip tree.</p> : directions.pois.map(poi => {
+        {directions.pois.length > 0 && <><h5 className="field-subsection-title">Linked points of interest</h5>{directions.pois.map(poi => {
           const ownedRoute = directions.routes.find(route => Number(route.poi_id) === Number(poi.ID)) || (directions.meta && Number(directions.meta.poi_id) === Number(poi.ID) ? { ...directions.meta, parent_menu_id: directions.meta.class_menu_id, option_id: directions.meta.shaman_option_id, leaf_menu_id: directions.meta.leaf_menu_id, npc_text_id: directions.meta.npc_text_id, destination_entry: directions.meta.destination_entry, destination_guid: directions.meta.destination_guid, legacy: true } : null);
           const poiOptions = optionRows.filter(row => Number(row.ActionPoiID) === Number(poi.ID));
           return <div className="directions-poi-card" key={poi.ID}>
@@ -1761,7 +1856,7 @@ export default function CreatureEditorPage() {
               </button>
             )) : <p className="field-hint directions-warning">No creature template could be resolved by the POI name. The database schema has no explicit POI → creature-entry relation.</p>}
           </div>;
-        })}
+        })}</>}
         {directions.conditions.length > 0 && <details className="directions-conditions"><summary>Related conditions ({directions.conditions.length})</summary><pre>{JSON.stringify(directions.conditions, null, 2)}</pre></details>}
         <h5 className="field-subsection-title">Add custom direction</h5>
         <p className="field-hint">Add a route below an existing city category such as Class Trainer or Profession Trainer. Custom labels use Broadcast Text ID 0.</p>
@@ -2210,12 +2305,12 @@ export default function CreatureEditorPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header creature-editor-header">
         <h2 className="editor-page-title">Creature Editor</h2>
         <p className="editor-page-subtitle">Manage creature templates, trainers, vendors & spawns</p>
       </div>
-      <div className="editor-layout">
-        <div className="editor-list">
+      <div className="editor-layout creature-editor-layout">
+        <div className="editor-list creature-editor-list">
           <div className="editor-list-header">
             <div className="search-box">
               <Search size={13} />
@@ -2230,7 +2325,7 @@ export default function CreatureEditorPage() {
               <Plus size={14} />
             </button>
           </div>
-          <div className="creature-filter-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px', margin: '12px 0' }}>
+          <div className="creature-filter-row">
             <div className="field-group">
               <label>Type</label>
               <select value={creatureTypeFilter} onChange={e => setCreatureTypeFilter(e.target.value)}>
@@ -2293,7 +2388,7 @@ export default function CreatureEditorPage() {
           ) : (
             <div className={`creature-workspace-grid ${splitRef ? 'split' : ''}`}>
               <div className="creature-draft-pane">
-                <div className="page-header">
+                <div className="page-header creature-draft-header">
                   <div>
                     <h1 className="page-title">
                       {selected.name}

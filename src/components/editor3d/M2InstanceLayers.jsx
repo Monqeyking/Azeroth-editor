@@ -1,11 +1,11 @@
 import { useRef, useMemo, useLayoutEffect, useState, useEffect, useCallback, useReducer } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { getSpawnPose, horizontalDistSq, MODEL_LOAD_DIST, useTerrainTick } from './spawnLod';
+import { getSpawnPose, getSpawnsInRange, horizontalDistSq, MODEL_LOAD_DIST, useTerrainTick } from './spawnLod';
 import {
-  fetchM2Model,
   getCachedM2Asset,
   getM2Material,
+  pruneM2AssetCache,
   subscribeM2Cache,
 } from './m2Loader';
 
@@ -93,7 +93,7 @@ export default function M2InstanceLayers({ spawns, transforms, selectedId, onSel
 
     const next = nextSetRef.current;
     next.clear();
-    for (const s of spawns) {
+    for (const s of getSpawnsInRange(spawns, camera, MODEL_LOAD_DIST)) {
       if (s.type !== 'creature' || !s.displayId) continue;
       const { pos } = getSpawnPose(s, transforms);
       if (horizontalDistSq(camera, pos) <= MODEL_LOAD_SQ) next.add(s.guid);
@@ -109,7 +109,7 @@ export default function M2InstanceLayers({ spawns, transforms, selectedId, onSel
     const byDisplay = new Map();
     const inRange = inRangeRef.current;
 
-    for (const spawn of spawns) {
+    for (const spawn of getSpawnsInRange(spawns, camera, MODEL_LOAD_DIST)) {
       if (spawn.type !== 'creature' || !spawn.displayId) continue;
       if (!inRange.has(spawn.guid)) continue;
       if (spawn.guid === selectedId) continue;
@@ -130,15 +130,8 @@ export default function M2InstanceLayers({ spawns, transforms, selectedId, onSel
   }, [spawns, transforms, selectedId, cacheTick, rangeTick, terrainTick]);
 
   useEffect(() => {
-    const ids = new Set();
-    const inRange = inRangeRef.current;
-    for (const s of spawns) {
-      if (s.type !== 'creature' || !s.displayId || !inRange.has(s.guid)) continue;
-      if (s.guid === selectedId) continue;
-      if (!getCachedM2Asset(s.displayId)) ids.add(s.displayId);
-    }
-    ids.forEach(id => fetchM2Model(id));
-  }, [spawns, selectedId, cacheTick]);
+    pruneM2AssetCache(groups.map(group => group.displayId));
+  }, [groups]);
 
   const handleHover = useCallback((guid) => {
     setHoveredGuid(guid);

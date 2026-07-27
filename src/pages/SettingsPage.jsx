@@ -15,10 +15,9 @@ const ID_RANGE_EDITORS = [
 ];
 
 export default function SettingsPage() {
-  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, minimapPath, setMinimapPath, worldmapMpqPath, setWorldmapMpqPath, mapsPath, setMapsPath, idRanges, setIdRanges, serverPaths, setServerPaths, expansionsFolder, setExpansionsFolder } = useConnection();
+  const { soapConfig, setSoapConfig, dbcPath, setDbcPath, worldmapMpqPath, setWorldmapMpqPath, mapsPath, setMapsPath, idRanges, setIdRanges, serverPaths, setServerPaths, expansionsFolder, setExpansionsFolder, backupPath, setBackupPath } = useConnection();
   const [form, setForm] = useState(soapConfig);
   const [dbcForm, setDbcForm] = useState(dbcPath);
-  const [minimapForm, setMinimapForm] = useState(minimapPath);
   const [worldmapForm, setWorldmapForm] = useState(worldmapMpqPath);
   const [mapsForm, setMapsForm] = useState(mapsPath);
   const [mapsSaved, setMapsSaved] = useState(false);
@@ -27,7 +26,6 @@ export default function SettingsPage() {
   const [testResult, setTestResult] = useState(null);
   const [saved, setSaved] = useState(false);
   const [dbcSaved, setDbcSaved] = useState(false);
-  const [minimapSaved, setMinimapSaved] = useState(false);
   const [worldmapSaved, setWorldmapSaved] = useState(false);
   const [worldmapValidating, setWorldmapValidating] = useState(false);
   const [worldmapValidation, setWorldmapValidation] = useState(null);
@@ -36,6 +34,8 @@ export default function SettingsPage() {
   const [serverPathsSaved, setServerPathsSaved] = useState(false);
   const [expansionsFolderForm, setExpansionsFolderForm] = useState(expansionsFolder);
   const [expansionsFolderSaved, setExpansionsFolderSaved] = useState(false);
+  const [backupPathForm, setBackupPathForm] = useState(backupPath);
+  const [backupPathSaved, setBackupPathSaved] = useState(false);
 
   const handleChange = (e) => setForm(f => ({ ...f, [e.target.name]: e.target.value }));
   const handleDbcChange = (e) => setDbcForm(e.target.value);
@@ -47,10 +47,6 @@ export default function SettingsPage() {
   useEffect(() => {
     setDbcForm(dbcPath);
   }, [dbcPath]);
-
-  useEffect(() => {
-    setMinimapForm(minimapPath);
-  }, [minimapPath]);
 
   useEffect(() => {
     setWorldmapForm(worldmapMpqPath);
@@ -66,18 +62,12 @@ export default function SettingsPage() {
 
   useEffect(() => { setServerPathsForm(serverPaths); }, [serverPaths]);
   useEffect(() => { setExpansionsFolderForm(expansionsFolder); }, [expansionsFolder]);
+  useEffect(() => { setBackupPathForm(backupPath); }, [backupPath]);
 
   const persistConfig = async (patch) => {
     const result = await window.azeroth.config.load();
     const current = (result.success && result.data) ? result.data : {};
     await window.azeroth.config.save({ ...current, ...patch });
-  };
-
-  const handleMinimapSave = async () => {
-    setMinimapPath(minimapForm);
-    await persistConfig({ minimapPath: minimapForm });
-    setMinimapSaved(true);
-    setTimeout(() => setMinimapSaved(false), 2000);
   };
 
   const handleWorldmapSave = async () => {
@@ -134,6 +124,13 @@ export default function SettingsPage() {
     setTimeout(() => setExpansionsFolderSaved(false), 2000);
   };
 
+  const handleBackupPathSave = async () => {
+    setBackupPath(backupPathForm);
+    await persistConfig({ backupPath: backupPathForm });
+    setBackupPathSaved(true);
+    setTimeout(() => setBackupPathSaved(false), 2000);
+  };
+
   const handleIdRangesSave = async () => {
     const parsed = {};
     for (const { key } of ID_RANGE_EDITORS) {
@@ -161,15 +158,15 @@ export default function SettingsPage() {
   };
 
   return (
-    <div style={{ height: '100%', overflowY: 'auto' }} className="fade-in">
-      <div className="page-header">
+    <div className="settings-page fade-in">
+      <div className="page-header settings-header">
         <div>
           <h1 className="page-title">Settings</h1>
           <p className="page-sub">Configure SOAP and editor preferences</p>
         </div>
       </div>
 
-      <div style={{ padding: '24px 28px', maxWidth: 560 }}>
+      <div className="settings-content">
         <div className="panel">
           <div className="panel-header">
             <Zap size={13} />
@@ -233,7 +230,7 @@ export default function SettingsPage() {
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Paden naar de server executables. Hiermee kun je de auth- en worldserver starten/stoppen vanuit het dashboard.
+              Paths to the server executables. They enable Authserver and Worldserver control from the dashboard.
             </p>
             {[
               { key: 'authExe',  label: 'Authserver executable',  placeholder: 'D:\\CaioCore\\CaioServer\\authserver.exe' },
@@ -269,12 +266,33 @@ export default function SettingsPage() {
 
         <div className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
+            <FolderOpen size={13} />
+            <span>Database Backups</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p className="settings-description">Destination for timestamped database backups. The dashboard will create this folder if needed.</p>
+            <div className="field-group" style={{ marginBottom: 10 }}>
+              <label>Backup Folder</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input style={{ flex: 1 }} value={backupPathForm} onChange={e => setBackupPathForm(e.target.value)} placeholder="D:\\CaioCore Tools\\azeroth-editor\\backups" />
+                <button className="btn-ghost" style={{ flexShrink: 0 }} onClick={async () => {
+                  const selected = await window.azeroth.dialog.openFolder({ title: 'Select backup folder' });
+                  if (selected) setBackupPathForm(selected);
+                }}><FolderOpen size={13} /></button>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={handleBackupPathSave}><Save size={13} /> {backupPathSaved ? 'Saved!' : 'Save Backup Folder'}</button>
+          </div>
+        </div>
+
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
             <Hash size={13} />
             <span>Custom ID Ranges — Clone start IDs</span>
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Startpunt voor het zoeken naar een vrije ID bij het klonen van records. Standaard: 4.000.000.
+              Starting point used to find a free ID when copying records. Default: 4,000,000.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 16 }}>
               {ID_RANGE_EDITORS.map(({ key, label }) => (
@@ -294,6 +312,7 @@ export default function SettingsPage() {
           </div>
         </div>
 
+        {false && (
         <div className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <Zap size={13} />
@@ -301,8 +320,8 @@ export default function SettingsPage() {
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Map naar de map met minimap tiles. Verwacht structuur: <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Map_0\Map_0_32_32.png</code>
-              <br/>Ondersteunde formaten: PNG, JPEG.
+              Path to the folder containing minimap tiles. Expected structure: <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Map_0\Map_0_32_32.png</code>
+              <br/>Supported formats: PNG, JPEG.
             </p>
             <div className="field-group" style={{ marginBottom: 16 }}>
               <label>Minimap Path</label>
@@ -314,7 +333,7 @@ export default function SettingsPage() {
             </div>
             {minimapSaved && (
               <div className="editor-msg success" style={{ marginBottom: 12 }}>
-                Minimap path opgeslagen!
+                Minimap path saved!
               </div>
             )}
             <button className="btn-primary" onClick={handleMinimapSave}>
@@ -322,20 +341,21 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+        )}
 
-        <div className="panel" style={{ marginTop: 24 }}>
+        <div className="panel wow-client-data-panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <Zap size={13} />
             <span>Worldmap Tiles — WoW Client Data</span>
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Pad naar de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Data</code>-map van je WoW-client.
-              De app zoekt automatisch in alle MPQ-bestanden (root + <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>enUS/</code>) naar worldmap tiles.
-              <br/>Voorbeeld: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\Client\Data</code>
+              Path to your WoW client's <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Data</code> folder.
+              Used for world maps, 3D assets, textures, UI files, and minimap data directly from the client MPQs.
+              <br/>Example: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\Client\Data</code>
             </p>
             <div className="field-group" style={{ marginBottom: 16 }}>
-              <label>WoW Client Data-map (optioneel)</label>
+              <label>WoW Client Data Folder</label>
               <input
                 value={worldmapForm}
                 onChange={e => setWorldmapForm(e.target.value)}
@@ -350,7 +370,7 @@ export default function SettingsPage() {
             )}
             {worldmapSaved && (
               <div className="editor-msg success" style={{ marginBottom: 12 }}>
-                Worldmap path opgeslagen!
+                World map path saved!
               </div>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
@@ -358,7 +378,7 @@ export default function SettingsPage() {
                 <Zap size={13} /> {worldmapValidating ? 'Validating...' : 'Validate Path'}
               </button>
               <button className="btn-primary" onClick={handleWorldmapSave}>
-                <Save size={13} /> {worldmapSaved ? 'Opgeslagen!' : 'Save Worldmap Path'}
+              <Save size={13} /> {worldmapSaved ? 'Saved!' : 'Save WoW Client Data'}
               </button>
             </div>
           </div>
@@ -371,9 +391,9 @@ export default function SettingsPage() {
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Pad naar de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>maps/</code>-map van de AzerothCore server data.
-              Gebruikt voor naadloos terrain in de 3D editor.
-              <br/>Voorbeeld: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\CaioServer\data\maps</code>
+              Path to the <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>maps/</code> folder in AzerothCore server data.
+              Used for seamless terrain in the 3D editor.
+              <br/>Example: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\CaioServer\data\maps</code>
             </p>
             <div className="field-group" style={{ marginBottom: 16 }}>
               <label>Maps Path (AzerothCore data/maps)</label>
@@ -386,7 +406,7 @@ export default function SettingsPage() {
             </div>
             {mapsSaved && (
               <div className="editor-msg success" style={{ marginBottom: 12 }}>
-                Maps path opgeslagen!
+                Maps path saved!
               </div>
             )}
             <button className="btn-primary" onClick={handleMapsSave}>
@@ -401,10 +421,10 @@ export default function SettingsPage() {
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Basismap met de <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Classic/</code>,{' '}
+              Base folder containing the <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Classic/</code>,{' '}
               <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>TBC/</code> en{' '}
-              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Wotlk/</code> submappen.
-              Gebruikt door Expansion Lock om DBC-bestanden te wisselen.
+              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Wotlk/</code> subfolders.
+              Used by Expansion Lock to switch DBC files.
             </p>
             <div className="field-group" style={{ marginBottom: 10 }}>
               <label>Expansions Folder</label>

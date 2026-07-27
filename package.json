@@ -45,10 +45,17 @@
     "directories": {
       "output": "dist-electron"
     },
+    "compression": "maximum",
+    "electronLanguages": [
+      "en-US",
+      "en-GB"
+    ],
     "files": [
       "dist/**/*",
       "electron/**/*",
-      "node_modules/**/*"
+      "!**/*.map",
+      "!**/{test,tests,__tests__,docs,doc,example,examples}/**",
+      "!**/{README,README.md,CHANGELOG,CHANGELOG.md,HISTORY.md,*.d.ts,*.d.mts,*.d.cts}"
     ]
   }
 }

@@ -1115,3 +1115,122 @@
   cursor: help;
   vertical-align: middle;
 }
+
+/* Creature Editor uses the compact 3D Asset Editor workspace language. */
+.creature-editor-header {
+  padding: 16px 20px 12px;
+  background: #12131b;
+  border: 0;
+}
+.creature-editor-header .editor-page-title { color: #e2e6f0; font-family: inherit; font-size: 20px; }
+.creature-editor-header .editor-page-subtitle { color: #8d92a5; }
+.creature-editor-layout { height: calc(100vh - 73px); background: #12131b; }
+.creature-editor-layout .editor-list { width: 270px; background: #191b27; border-color: #2a2e40; }
+.creature-editor-layout .editor-list-header { background: #1a1c28; border-color: #2a2e40; padding: 7px; flex-direction: row; align-items: center; }
+.creature-editor-layout .editor-list-header .search-box { margin: 0; background: #10121a; border-color: #34394e; border-radius: 4px; }
+.creature-editor-layout .editor-list-header .search-box input { color: #dce3f5; }
+.creature-editor-layout .editor-list-header .icon-btn { flex: 0 0 auto; padding: 8px; border-radius: 4px; }
+.creature-filter-row {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+  margin: 0; padding: 8px; border-bottom: 1px solid #2a2e40; background: #191b27;
+}
+.creature-filter-row .field-group { gap: 3px; }
+.creature-filter-row .field-group label { color: #8790a7; font-size: 9px; }
+.creature-filter-row .field-group input, .creature-filter-row .field-group select {
+  padding: 5px 6px; background: #10121a; border-color: #34394e; color: #dbe2f4; font-size: 11px;
+}
+.creature-editor-layout .list-item { padding: 8px 10px; border-color: #292d3d; }
+.creature-editor-layout .list-item:hover { background: #22283a; }
+.creature-editor-layout .list-item.active { background: #28334e; border-left-color: #6380ba; }
+.creature-editor-layout .list-item-name { color: #dce3f5; }
+.creature-editor-layout .editor-form { background: #12131b; }
+.creature-draft-header {
+  padding: 10px 14px; background: #1a1c28; border-color: #2a2e40;
+}
+.creature-draft-header .page-title { color: #e2e6f0; font-family: inherit; font-size: 17px; }
+.creature-draft-header .page-sub { color: #8993ab; }
+.creature-draft-header .header-actions { gap: 5px; }
+.creature-draft-header .header-actions button { padding: 6px 8px; font-size: 11px; }
+.creature-editor-layout .btn-ghost { border-color: #34394e; background: #242838; color: #bfc5d8; }
+.creature-editor-layout .btn-ghost:hover, .creature-editor-layout .btn-ghost.active { border-color: #5c75ae; background: #344267; color: #e6edff; }
+.creature-editor-layout .btn-primary { background: #344267; border-color: #5c75ae; color: #e6edff; }
+.creature-editor-layout .creature-subtabs { gap: 0; padding: 0 12px; background: #1a1c28; border-color: #2a2e40; overflow-x: auto; }
+.creature-editor-layout .creature-subtab { padding: 9px 10px; color: #8e97ae; font-size: 11px; white-space: nowrap; }
+.creature-editor-layout .creature-subtab:hover:not(:disabled), .creature-editor-layout .creature-subtab.active { color: #c7d5f4; border-bottom-color: #6f8ed0; }
+.creature-editor-layout .creature-section-block { padding: 12px 14px 0; }
+.creature-editor-layout .creature-section-head { padding-bottom: 7px; border-bottom: 1px solid #2a2e40; margin-bottom: 10px; }
+.creature-editor-layout .field-section-title { color: #9ba8c9; letter-spacing: .06em; }
+.creature-editor-layout .form-fields { gap: 8px; padding: 0 0 12px; }
+.creature-editor-layout .field-group label { color: #929bb2; font-size: 10px; }
+.creature-editor-layout .field-group input, .creature-editor-layout .field-group select, .creature-editor-layout .field-group textarea {
+  background: #10121a; border-color: #353b50; border-radius: 3px; color: #dbe2f4; padding: 6px 8px; font-size: 12px;
+}
+.creature-editor-layout .field-group input:focus, .creature-editor-layout .field-group select:focus, .creature-editor-layout .field-group textarea:focus { border-color: #5c75ae; }
+.creature-editor-layout .creature-data-table { border: 1px solid #2a2e40; }
+.creature-editor-layout .creature-data-table th, .creature-editor-layout .creature-data-table td { border-color: #2a2e40; }
+.creature-editor-layout .creature-data-table th { background: #1a1c28; color: #9aa6c8; }
+.creature-editor-layout .creature-data-table input { color: #dbe2f4; }
+.creature-editor-layout .creature-ref-pane { background: #191b27; border-color: #2a2e40; }
+.creature-editor-layout .creature-ref-header, .creature-editor-layout .creature-ref-search, .creature-editor-layout .creature-ref-list, .creature-editor-layout .creature-ref-title { border-color: #2a2e40; }
+.creature-editor-layout .creature-ref-header { padding: 10px 12px 7px; }
+.creature-editor-layout .creature-ref-header h3 { color: #dce3f5; }
+.creature-editor-layout .creature-model-preview { border-color: #353b50; border-radius: 4px; }
+.creature-editor-layout .creature-model-preview-head, .creature-editor-layout .creature-model-preview-debug { background: #1a1c28; border-color: #2a2e40; color: #9ba8c9; }
+@media (max-width: 900px) {
+  .creature-editor-layout .editor-list { width: 220px; }
+  .creature-draft-header .header-actions button { padding: 6px; }
+  .creature-draft-header .header-actions button svg + * { display: none; }
+}
+
+/* Quest and Item Editors share the compact Asset Editor workspace treatment. */
+.quest-editor-header, .item-editor-header { padding: 16px 20px 12px; background: #12131b; border: 0; }
+.quest-editor-header .editor-page-title, .item-editor-header .editor-page-title { color: #e2e6f0; font-family: inherit; font-size: 20px; }
+.quest-editor-header .editor-page-subtitle, .item-editor-header .editor-page-subtitle { color: #8d92a5; }
+.quest-editor-layout, .item-editor-layout { height: calc(100vh - 73px); background: #12131b; }
+.quest-editor-layout .editor-list, .item-editor-layout .editor-list { background: #191b27; border-color: #2a2e40; }
+.quest-editor-layout .editor-list-header, .item-editor-layout .editor-list-header { background: #1a1c28; border-color: #2a2e40; padding: 8px; }
+.quest-editor-layout .search-box, .item-editor-layout .search-box { background: #10121a; border-color: #34394e; border-radius: 4px; }
+.quest-editor-layout .search-box input, .item-editor-layout .search-box input { color: #dbe2f4; }
+.quest-editor-layout .list-item, .item-editor-layout .list-item { padding: 8px 10px; border-color: #292d3d; }
+.quest-editor-layout .list-item:hover, .item-editor-layout .list-item:hover { background: #22283a; }
+.quest-editor-layout .list-item.active, .item-editor-layout .list-item.active { background: #28334e; border-left-color: #6380ba; }
+.quest-editor-layout .list-item-name, .item-editor-layout .list-item-name { color: #dce3f5; }
+.quest-editor-layout .editor-form, .item-editor-layout .editor-form { background: #12131b; }
+.quest-editor-layout .creature-subtabs, .item-editor-layout .creature-subtabs { background: #1a1c28 !important; border-color: #2a2e40 !important; padding-inline: 12px !important; }
+.quest-editor-layout .creature-subtab, .item-editor-layout .creature-subtab { color: #8e97ae; font-size: 11px; }
+.quest-editor-layout .creature-subtab:hover:not(:disabled), .quest-editor-layout .creature-subtab.active, .item-editor-layout .creature-subtab:hover:not(:disabled), .item-editor-layout .creature-subtab.active { color: #c7d5f4; border-bottom-color: #6f8ed0; }
+.quest-draft-header, .item-draft-header { padding: 10px 14px; background: #1a1c28; border-color: #2a2e40; }
+.quest-draft-header .page-title, .item-draft-header .page-title { color: #e2e6f0; font-family: inherit; font-size: 17px; }
+.quest-draft-header .page-sub, .item-draft-header .page-sub { color: #8993ab; }
+.quest-editor-layout .header-actions, .item-editor-layout .header-actions { gap: 5px; }
+.quest-editor-layout .header-actions button, .item-editor-layout .header-actions button { padding: 6px 8px; font-size: 11px; }
+.quest-editor-layout .btn-ghost, .item-editor-layout .btn-ghost { border-color: #34394e; background: #242838; color: #bfc5d8; }
+.quest-editor-layout .btn-ghost:hover, .item-editor-layout .btn-ghost:hover { border-color: #5c75ae; background: #344267; color: #e6edff; }
+.quest-editor-layout .btn-primary, .item-editor-layout .btn-primary { background: #344267; border-color: #5c75ae; color: #e6edff; }
+.quest-editor-layout .form-fields, .item-editor-layout .form-fields { gap: 8px; }
+.quest-editor-layout .field-group label, .item-editor-layout .field-group label { color: #929bb2; font-size: 10px; }
+.quest-editor-layout .field-group input, .quest-editor-layout .field-group select, .quest-editor-layout .field-group textarea, .item-editor-layout .field-group input, .item-editor-layout .field-group select, .item-editor-layout .field-group textarea { background: #10121a; border-color: #353b50; border-radius: 3px; color: #dbe2f4; padding: 6px 8px; font-size: 12px; }
+.quest-editor-layout .field-group input:focus, .quest-editor-layout .field-group select:focus, .quest-editor-layout .field-group textarea:focus, .item-editor-layout .field-group input:focus, .item-editor-layout .field-group select:focus, .item-editor-layout .field-group textarea:focus { border-color: #5c75ae; }
+.quest-editor-layout .field-section-title, .item-editor-layout .field-section-title { color: #9ba8c9; letter-spacing: .06em; }
+.quest-editor-layout .quest-lookup-display { background: #171923; border-color: #353b50; color: #aeb8d4; }
+.item-editor-layout > div:last-child { background: #191b27 !important; border-color: #2a2e40 !important; }
+.item-editor-layout > div:last-child > div:first-child { background: #1a1c28; border-color: #2a2e40 !important; color: #9ba8c9 !important; }
+
+/* Settings: compact, grouped configuration workspace. */
+.settings-page { height: 100%; overflow-y: auto; background: #12131b; }
+.settings-header { padding: 16px 20px 12px; background: #12131b; border: 0; }
+.settings-header .page-title { color: #e2e6f0; font-family: inherit; font-size: 20px; }
+.settings-header .page-sub { color: #8d92a5; }
+.settings-content { max-width: 760px; padding: 0 20px 24px; }
+.settings-page .panel { background: #191b27; border-color: #2a2e40; border-radius: 4px; }
+.settings-page .panel-header { padding: 8px 10px; background: #1a1c28; border-color: #2a2e40; color: #9ba8c9; font-size: 11px; letter-spacing: .06em; }
+.settings-page .field-group label { color: #929bb2; font-size: 10px; }
+.settings-page .field-group input, .settings-page .field-group select { background: #10121a; border-color: #353b50; border-radius: 3px; color: #dbe2f4; padding: 6px 8px; font-size: 12px; }
+.settings-page .field-group input:focus, .settings-page .field-group select:focus { border-color: #5c75ae; }
+.settings-page .btn-ghost { border-color: #34394e; background: #242838; color: #bfc5d8; }
+.settings-page .btn-ghost:hover { border-color: #5c75ae; background: #344267; color: #e6edff; }
+.settings-page .btn-primary { border-color: #5c75ae; background: #344267; color: #e6edff; }
+.settings-page .editor-msg { margin-inline: 0; }
+.settings-description { margin: 0 0 16px; color: #aeb7cf; font-size: 12px; line-height: 1.5; }
+.wow-client-data-panel .panel-header span { font-size: 0; }
+.wow-client-data-panel .panel-header span::after { content: 'WoW Client Data'; font-size: 11px; }

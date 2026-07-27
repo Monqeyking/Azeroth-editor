@@ -124,6 +124,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   // ADT terrain (3D editor)
   adt: {
     getTerrain:             (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
+    getPlacements:          (opts) => ipcRenderer.invoke('adt:getPlacements', opts),
     getTileTextures:        (opts) => ipcRenderer.invoke('adt:getTileTextures', opts),
     getTextureLayers:         (opts) => ipcRenderer.invoke('adt:getTextureLayers', opts),
     diagBLP:                  (opts) => ipcRenderer.invoke('adt:diagBLP', opts),
@@ -135,10 +136,15 @@ contextBridge.exposeInMainWorld('azeroth', {
     loadModelByPath: (opts) => ipcRenderer.invoke('m2:loadModelByPath', opts),
     prefetch:      (opts) => ipcRenderer.invoke('m2:prefetch', opts),
     loadCharModel: (opts) => ipcRenderer.invoke('m2:loadCharModel', opts),
+    pickModelPath: () => ipcRenderer.invoke('m2:pickModelPath'),
+    searchAssets: (opts) => ipcRenderer.invoke('m2:searchAssets', opts),
+    findDisplaysByModelPath: (opts) => ipcRenderer.invoke('m2:findDisplaysByModelPath', opts),
   },
   // Server process control
   server: {
     status:      (opts) => ipcRenderer.invoke('server:status', opts),
+    attachConsole: () => ipcRenderer.invoke('server:attachConsole'),
+    readLog:     (opts) => ipcRenderer.invoke('server:readLog', opts),
     start:       (opts) => ipcRenderer.invoke('server:start', opts),
     stop:        (opts) => ipcRenderer.invoke('server:stop', opts),
     sendCommand: (opts) => ipcRenderer.invoke('server:sendCommand', opts),

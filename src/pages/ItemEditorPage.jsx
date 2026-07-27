@@ -561,7 +561,7 @@ export default function ItemEditorPage() {
 
   const handleCreate = async () => {
     if (!createEntryId || !createForm.name?.trim()) {
-      setCreateMsg({ type:'error', text:'Naam is verplicht.' });
+      setCreateMsg({ type:'error', text:'Name is required.' });
       return;
     }
     setCreateSaving(true);
@@ -582,7 +582,7 @@ export default function ItemEditorPage() {
       await searchItems(search, filterClass, filterSubclass, filterQuality);
       await selectItem(createEntryId);
       setActiveTab('edit');
-      setMsg({ type:'success', text:`✓ Item #${createEntryId} aangemaakt` });
+      setMsg({ type:'success', text:`Item #${createEntryId} created` });
 
       // Reset create state for next item
       setCreateEntryId(null);
@@ -608,9 +608,9 @@ export default function ItemEditorPage() {
       if (!result.success) throw new Error(result.error);
       await searchItems(search, filterClass, filterSubclass, filterQuality);
       await selectItem(newId);
-      setMsg({ type:'success', text:`✓ Gekloond naar entry #${newId}` });
+      setMsg({ type:'success', text:`Copied to entry #${newId}` });
     } catch (e) {
-      setMsg({ type:'error', text:`✗ Klonen mislukt: ${e.message}` });
+      setMsg({ type:'error', text:`Copy failed: ${e.message}` });
     }
     setCopying(false);
   };
@@ -645,7 +645,7 @@ export default function ItemEditorPage() {
       const result = await query(`UPDATE item_template SET \`${bulkField}\` = ? ${where}`, [bulkValue, ...params]);
       if (!result.success) throw new Error(result.error);
       if (soapConfig?.user) await soapCommand('.reload item_template');
-      setBulkMsg({ type:'success', text:`✓ ${bulkCount} items bijgewerkt` });
+      setBulkMsg({ type:'success', text:`${bulkCount} items updated` });
       setBulkConfirm(false);
       searchItems(search, filterClass, filterSubclass, filterQuality);
     } catch (e) { setBulkMsg({ type:'error', text:`✗ ${e.message}` }); }
@@ -669,14 +669,14 @@ export default function ItemEditorPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header item-editor-header">
         <h2 className="editor-page-title">Item Editor</h2>
         <p className="editor-page-subtitle">Manage item templates and properties</p>
       </div>
-      <div className="editor-layout">
+      <div className="editor-layout item-editor-layout">
 
         {/* ── List panel ── */}
-        <div className="editor-list" style={{width:'300px'}}>
+        <div className="editor-list item-editor-list" style={{width:'300px'}}>
           <div className="editor-list-header" style={{flexDirection:'column',gap:'6px'}}>
             <div className="search-box">
               <Search size={13} />
@@ -704,7 +704,7 @@ export default function ItemEditorPage() {
             </select>
             {hasFilters && (
               <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',fontSize:'11px',color:'var(--gold)'}}>
-                <span>{bulkCount!==null?`${bulkCount} items totaal`:'Filter actief'}</span>
+                <span>{bulkCount!==null?`${bulkCount} items total`:'Filter active'}</span>
                 <button style={{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'11px',padding:'0'}}
                   onClick={()=>{setFilterClass('');setFilterSubclass('');setFilterQuality('');}}>
                   ✕ reset
@@ -745,12 +745,12 @@ export default function ItemEditorPage() {
                   style={{fontSize:'12px',padding:'5px 8px',background:'var(--bg-panel)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',color:'var(--text-primary)'}}>
                   {BULK_FIELDS.map(f=><option key={f.key} value={f.key}>{f.label}</option>)}
                 </select>
-                <input type="number" placeholder="Nieuwe waarde..." value={bulkValue}
+                <input type="number" placeholder="New value..." value={bulkValue}
                   onChange={e=>{setBulkValue(e.target.value);setBulkConfirm(false);setBulkMsg(null);}}
                   style={{fontSize:'12px',padding:'5px 8px',background:'var(--bg-panel)',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',color:'var(--text-primary)'}} />
                 <button onClick={handleBulkApply} disabled={bulkApplying||bulkValue===''||bulkCount===0}
                   style={{padding:'6px 10px',fontSize:'12px',fontWeight:600,background:bulkConfirm?'rgba(204,74,74,0.2)':'rgba(200,169,110,0.15)',border:`1px solid ${bulkConfirm?'rgba(204,74,74,0.5)':'rgba(200,169,110,0.3)'}`,borderRadius:'var(--radius-sm)',color:bulkConfirm?'#ee7070':'var(--gold)',cursor:bulkValue===''||bulkCount===0?'not-allowed':'pointer',opacity:bulkApplying?0.6:1}}>
-                  {bulkApplying?'Bezig...':bulkConfirm?`⚠ Bevestig: ${bulkCount} items`:`Apply → ${bulkCount??'?'} items`}
+                  {bulkApplying?'Applying...':bulkConfirm?`Confirm: ${bulkCount} items`:`Apply → ${bulkCount??'?'} items`}
                 </button>
                 {bulkMsg && (
                   <div style={{fontSize:'11px',padding:'4px 8px',borderRadius:'var(--radius-sm)',background:bulkMsg.type==='success'?'rgba(74,170,106,0.1)':'rgba(204,74,74,0.1)',border:`1px solid ${bulkMsg.type==='success'?'rgba(74,170,106,0.3)':'rgba(204,74,74,0.3)'}`,color:bulkMsg.type==='success'?'#6dca88':'#ee7070'}}>
@@ -763,7 +763,7 @@ export default function ItemEditorPage() {
         </div>
 
         {/* ── Form panel ── */}
-        <div className="editor-form">
+        <div className="editor-form item-editor-form">
 
           {/* Tab bar */}
           <div style={{display:'flex',borderBottom:'1px solid var(--border)',background:'var(--bg-panel)',flexShrink:0}}>
@@ -775,7 +775,7 @@ export default function ItemEditorPage() {
             </button>
             <button className={`creature-subtab ${activeTab==='scaling'?'active':''} ${Number(selected?.Quality)!==7?'locked':''}`}
               onClick={()=>{ if(Number(selected?.Quality)===7){ setActiveTab('scaling'); setScalingTab(true); } }}
-              title={Number(selected?.Quality)===7 ? 'Heirloom scaling configureren' : 'Alleen beschikbaar voor Heirloom items'}>
+              title={Number(selected?.Quality)===7 ? 'Configure Heirloom scaling' : 'Only available for Heirloom items'}>
               <Layers size={12} style={{marginRight:'4px'}} /> Scaling
             </button>
           </div>
@@ -789,7 +789,7 @@ export default function ItemEditorPage() {
               </div>
             ) : (
               <>
-                <div className="page-header">
+                <div className="page-header item-draft-header">
                   <div>
                     <h1 className="page-title" style={{color:QUALITY_COLORS[selected.Quality]||'var(--gold-bright)'}}>
                       {selected.name}{dirty&&<span style={{color:'var(--gold)',marginLeft:'8px'}}>●</span>}
@@ -798,7 +798,7 @@ export default function ItemEditorPage() {
                   </div>
                   <div className="header-actions">
                     {dirty && <button className="btn-ghost" onClick={()=>{setForm(selected);setDirty(false);}}><RotateCcw size={13}/> Reset</button>}
-                    <button className="btn-ghost" onClick={handleCopy} disabled={copying}><Copy size={13}/> {copying?'Klonen...':'Copy'}</button>
+                    <button className="btn-ghost" onClick={handleCopy} disabled={copying}><Copy size={13}/> {copying?'Copying...':'Copy'}</button>
                     <button className="btn-primary" onClick={handleSave} disabled={saving||!dirty}><Save size={13}/> {saving?'Saving...':'Save & Reload'}</button>
                   </div>
                 </div>
@@ -808,7 +808,7 @@ export default function ItemEditorPage() {
                     Heirloom —{' '}
                     <button style={{background:'none',border:'none',color:'var(--gold)',cursor:'pointer',fontSize:'11px',padding:0,textDecoration:'underline'}}
                       onClick={()=>setActiveTab('scaling')}>
-                      configureer scaling →
+                      configure scaling →
                     </button>
                   </div>
                 )}
@@ -823,7 +823,7 @@ export default function ItemEditorPage() {
           {activeTab === 'create' && (
             /* ── Create tab ── */
             <div>
-              <div className="page-header">
+              <div className="page-header item-draft-header">
                 <div>
                   <h1 className="page-title" style={{color:'var(--gold-bright)'}}>
                     Create New Item
@@ -842,14 +842,14 @@ export default function ItemEditorPage() {
                     <RotateCcw size={13} /> Blank
                   </button>
                   <button className="btn-primary" onClick={handleCreate} disabled={createSaving||createIdLoading||!createEntryId}>
-                    <Plus size={13} /> {createSaving ? 'Aanmaken...' : 'Create'}
+                    <Plus size={13} /> {createSaving ? 'Creating...' : 'Create'}
                   </button>
                 </div>
               </div>
 
               {!selected && (
                 <div className="editor-msg info" style={{margin:'0 28px 0'}}>
-                  Tip: selecteer een item in de lijst en gebruik "Use selected as template" om snel een variatie te maken.
+                  Tip: select an item in the list and use "Use selected as template" to create a variation quickly.
                 </div>
               )}
               {createMsg && <div className={`editor-msg ${createMsg.type}`}>{createMsg.text}</div>}

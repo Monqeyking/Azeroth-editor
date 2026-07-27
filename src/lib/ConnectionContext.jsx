@@ -20,11 +20,11 @@ export function ConnectionProvider({ children }) {
   });
 
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
-  const [minimapPath, setMinimapPath] = useState('');
   const [worldmapMpqPath, setWorldmapMpqPath] = useState('');
   const [mapsPath, setMapsPath] = useState('');
   const [serverPaths, setServerPaths] = useState({ authExe: '', worldExe: '' });
   const [expansionsFolder, setExpansionsFolder] = useState('D:\\CaioCore\\CaioServer\\data\\Expansions');
+  const [backupPath, setBackupPath] = useState('');
 
   const [idRanges, setIdRanges] = useState({
     creature: 4000000,
@@ -41,12 +41,12 @@ export function ConnectionProvider({ children }) {
       if (result.success && result.data) {
         if (result.data.soap) setSoapConfig(prev => ({ ...prev, ...result.data.soap }));
         if (result.data.dbcPath) setDbcPath(result.data.dbcPath);
-        if (result.data.minimapPath) setMinimapPath(result.data.minimapPath);
         if (result.data.worldmapMpqPath) setWorldmapMpqPath(result.data.worldmapMpqPath);
         if (result.data.mapsPath) setMapsPath(result.data.mapsPath);
         if (result.data.idRanges) setIdRanges(prev => ({ ...prev, ...result.data.idRanges }));
         if (result.data.serverPaths) setServerPaths(prev => ({ ...prev, ...result.data.serverPaths }));
         if (result.data.expansionsFolder) setExpansionsFolder(result.data.expansionsFolder);
+        if (result.data.backupPath) setBackupPath(result.data.backupPath);
       }
     });
   }, []);
@@ -290,7 +290,6 @@ export function ConnectionProvider({ children }) {
       dbConfig, setDbConfig,
       soapConfig, setSoapConfig,
       dbcPath, setDbcPath,
-      minimapPath, setMinimapPath,
       worldmapMpqPath, setWorldmapMpqPath,
       mapsPath, setMapsPath,
       dbStatus, dbError,
@@ -313,6 +312,7 @@ export function ConnectionProvider({ children }) {
       idRanges, setIdRanges,
       serverPaths, setServerPaths,
       expansionsFolder, setExpansionsFolder,
+      backupPath, setBackupPath,
     }}>
       {children}
     </ConnectionContext.Provider>

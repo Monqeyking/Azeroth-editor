@@ -403,6 +403,12 @@
 	opacity: 0.75;
 }
 
+.map-game-overlay {
+	position: absolute;
+	pointer-events: none;
+	z-index: 1;
+}
+
 /* ── No image placeholder ────────────────────────────────────────────── */
 .map-no-image {
 	position: absolute;

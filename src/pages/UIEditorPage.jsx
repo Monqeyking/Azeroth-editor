@@ -474,7 +474,6 @@ function ScenePreview({ title, blpPath, xmlSources, modelPath, onOpenSource }) {
                         userSelect: 'none',
                       };
                       const common = {
-                        key: widget.id,
                         type: 'button',
                         className: 'ui-editor-login-widget ui-editor-login-widget-' + widget.kind + (selected ? ' selected' : ''),
                         style,
@@ -499,7 +498,7 @@ function ScenePreview({ title, blpPath, xmlSources, modelPath, onOpenSource }) {
 
                       if (widget.kind === 'checkbox') {
                         return (
-                          <button {...common}>
+                          <button key={widget.id} {...common}>
                             <span className="ui-editor-login-checkbox">ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¹ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¹Ãƒâ€¦Ã¢â‚¬Å“</span>
                             <span>{selectedDraft.text ?? widget.text}</span>
                           </button>
@@ -508,7 +507,7 @@ function ScenePreview({ title, blpPath, xmlSources, modelPath, onOpenSource }) {
 
                       if (widget.kind === 'brand') {
                         return (
-                          <button {...common} className={common.className + ' brand'}>
+                          <button key={widget.id} {...common} className={common.className + ' brand'}>
                             <span className="ui-editor-login-brand-main">{selectedDraft.text ?? widget.text}</span>
                             <span className="ui-editor-login-brand-sub">{selectedDraft.subtext ?? widget.subtext}</span>
                           </button>
@@ -517,7 +516,7 @@ function ScenePreview({ title, blpPath, xmlSources, modelPath, onOpenSource }) {
 
                       if (widget.kind === 'panel') {
                         return (
-                          <button {...common} className={common.className + ' panel'}>
+                          <button key={widget.id} {...common} className={common.className + ' panel'}>
                             <span className="ui-editor-login-panel-title">{selectedDraft.text ?? widget.text}</span>
                             <span className="ui-editor-login-panel-sub">{selectedDraft.subtext ?? widget.subtext}</span>
                           </button>
@@ -525,7 +524,7 @@ function ScenePreview({ title, blpPath, xmlSources, modelPath, onOpenSource }) {
                       }
 
                       return (
-                        <button {...common}>
+                        <button key={widget.id} {...common}>
                           <span>{selectedDraft.text ?? widget.text}</span>
                         </button>
                       );
