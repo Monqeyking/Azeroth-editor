@@ -1156,7 +1156,7 @@ export default function QuestEditorPage() {
       await refreshList();
       await selectQuest(createId);
       setActiveTab('edit');
-      setMsg({ type: 'success', text: `âœ“ Quest #${createId} aangemaakt` });
+      setMsg({ type: 'success', text: `Quest #${createId} created` });
       setCreateId(null);
       setCreateForm({ ...CREATE_DEFAULTS });
       setCreateBaseline({ ...CREATE_DEFAULTS });
@@ -1198,9 +1198,9 @@ export default function QuestEditorPage() {
       });
       await refreshList();
       await selectQuest(newId);
-      setMsg({ type: 'success', text: `âœ“ Gekloond naar ID #${newId}` });
+      setMsg({ type: 'success', text: `Copied to ID #${newId}` });
     } catch (e) {
-      setMsg({ type: 'error', text: `âœ— Klonen mislukt: ${e.message}` });
+      setMsg({ type: 'error', text: `Copy failed: ${e.message}` });
     }
     setCopying(false);
   };
@@ -1265,12 +1265,12 @@ export default function QuestEditorPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header quest-editor-header">
         <h2 className="editor-page-title">Quest Editor</h2>
         <p className="editor-page-subtitle">Manage quest templates and properties</p>
       </div>
-      <div className="editor-layout">
-        <div className="editor-list" style={{ width: '300px' }}>
+      <div className="editor-layout quest-editor-layout">
+        <div className="editor-list quest-editor-list" style={{ width: '300px' }}>
           <div className="editor-list-header">
             <div className="search-box">
               <Search size={13} />
@@ -1306,9 +1306,9 @@ export default function QuestEditorPage() {
           </div>
         </div>
 
-        <div className="editor-form">
+        <div className="editor-form quest-editor-form">
           {/* Tab bar */}
-          <div className="creature-subtabs" style={{ padding: '8px 16px 0', borderBottom: '1px solid var(--border)' }}>
+          <div className="creature-subtabs quest-editor-tabs" style={{ padding: '8px 16px 0', borderBottom: '1px solid var(--border)' }}>
             <button className={`creature-subtab ${activeTab === 'edit' ? 'active' : ''}`} onClick={() => setActiveTab('edit')}>Edit</button>
             <button className={`creature-subtab ${activeTab === 'create' ? 'active' : ''}`} onClick={openCreateTab}>
               + New Quest
@@ -1324,7 +1324,7 @@ export default function QuestEditorPage() {
               </div>
             ) : (
               <>
-                <div className="page-header">
+                <div className="page-header quest-draft-header">
                   <div>
                     <h1 className="page-title">
                       {selected.LogTitle || '(untitled)'}
@@ -1335,7 +1335,7 @@ export default function QuestEditorPage() {
                   <div className="header-actions">
                     {dirty && <button className="btn-ghost" onClick={() => { setForm(selected); setEditBaseline(selected); setDirty(false); setActiveField(null); }}><RotateCcw size={13} /> Reset</button>}
                     <button className="btn-ghost" onClick={handleCopy} disabled={copying}>
-                      <Copy size={13} /> {copying ? 'Klonen...' : 'Copy'}
+                      <Copy size={13} /> {copying ? 'Copying...' : 'Copy'}
                     </button>
                     <button className="btn-primary" onClick={handleSave} disabled={saving || !dirty}>
                       <Save size={13} /> {saving ? 'Saving...' : 'Save & Reload'}
@@ -1351,7 +1351,7 @@ export default function QuestEditorPage() {
           {/* â”€â”€ Create tab â”€â”€ */}
           {activeTab === 'create' && (
             <>
-              <div className="page-header">
+              <div className="page-header quest-draft-header">
                 <div>
                   <h1 className="page-title">
                     New Quest
@@ -1363,7 +1363,7 @@ export default function QuestEditorPage() {
                 </div>
                 <div className="header-actions">
                   {selected && (
-                    <button className="btn-ghost" onClick={handleUseAsTemplate} title="Kopieer geselecteerde quest als template">
+                    <button className="btn-ghost" onClick={handleUseAsTemplate} title="Copy selected quest as template">
                       <Copy size={13} /> Use "{selected.LogTitle?.slice(0, 20) || 'selected'}" as template
                     </button>
                   )}
@@ -1371,7 +1371,7 @@ export default function QuestEditorPage() {
                     <RotateCcw size={13} /> Reset
                   </button>
                   <button className="btn-primary" onClick={handleCreate} disabled={createSaving || createIdLoading || !createId}>
-                    <Save size={13} /> {createSaving ? 'Aanmaken...' : 'Create Quest'}
+                    <Save size={13} /> {createSaving ? 'Creating...' : 'Create Quest'}
                   </button>
                 </div>
               </div>

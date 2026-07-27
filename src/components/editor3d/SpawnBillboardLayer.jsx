@@ -2,13 +2,17 @@ import { useRef, useMemo, useEffect, useCallback, useState, useReducer } from 'r
 import { useFrame, useThree } from '@react-three/fiber';
 import { Text } from '@react-three/drei';
 import * as THREE from 'three';
-import { getSpawnPose, horizontalDistSq, BILLBOARD_LOD_DIST, MODEL_LOAD_DIST, useTerrainTick } from './spawnLod';
+import { getSpawnPose, getSpawnsInRange, horizontalDistSq, BILLBOARD_LOD_DIST, MODEL_LOAD_DIST, useTerrainTick } from './spawnLod';
 import { getCachedM2Asset, subscribeM2Cache } from './m2Loader';
 
 const BILLBOARD_SQ = BILLBOARD_LOD_DIST * BILLBOARD_LOD_DIST;
 const MODEL_SQ     = MODEL_LOAD_DIST    * MODEL_LOAD_DIST;
 const LABEL_COUNT  = 30;
+const MAX_BILLBOARDS = 160;
 const MOVE_SQ      = 4;
+const _frustum = new THREE.Frustum();
+const _viewProjection = new THREE.Matrix4();
+const _spawnPoint = new THREE.Vector3();
 
 const FACTION_COLOR = {
   hostile:  new THREE.Color('#e67e22'),
@@ -190,10 +194,20 @@ export default function SpawnBillboardLayer({ spawns, transforms, selectedId, on
   const [tick,        bump]           = useReducer(n => n + 1, 0);
   const terrainTick = useTerrainTick();
   const lastPos = useRef({ x: Infinity, z: Infinity });
+  const frameTime = useRef({ total: 0, count: 0 });
+  const [billboardBudget, setBillboardBudget] = useState(MAX_BILLBOARDS);
 
   useEffect(() => subscribeM2Cache(() => setCacheTick(t => t + 1)), []);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
+    frameTime.current.total += delta;
+    frameTime.current.count += 1;
+    if (frameTime.current.count >= 30) {
+      const average = frameTime.current.total / frameTime.current.count;
+      const nextBudget = average > 0.032 ? 60 : average > 0.022 ? 100 : MAX_BILLBOARDS;
+      frameTime.current = { total: 0, count: 0 };
+      setBillboardBudget(current => current === nextBudget ? current : nextBudget);
+    }
     const { x, z } = camera.position;
     const dx = x - lastPos.current.x;
     const dz = z - lastPos.current.z;
@@ -205,17 +219,22 @@ export default function SpawnBillboardLayer({ spawns, transforms, selectedId, on
 
   const entries = useMemo(() => {
     const result = [];
-    for (const spawn of spawns) {
+    camera.updateMatrixWorld();
+    _viewProjection.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    _frustum.setFromProjectionMatrix(_viewProjection);
+    for (const spawn of getSpawnsInRange(spawns, camera, BILLBOARD_LOD_DIST)) {
       if (spawn.guid === selectedId) continue;
       const { pos } = getSpawnPose(spawn, transforms);
       const dSq = horizontalDistSq(camera, pos);
       if (dSq > BILLBOARD_SQ) continue;
+      if (!_frustum.containsPoint(_spawnPoint.set(pos[0], pos[1], pos[2]))) continue;
       // Creature met M2-model in model-range → door M2InstanceLayers
       if (spawn.type === 'creature' && spawn.displayId && getCachedM2Asset(spawn.displayId) && dSq <= MODEL_SQ) continue;
-      result.push({ spawn, pos });
+      result.push({ spawn, pos, dSq });
     }
-    return result;
-  }, [spawns, transforms, selectedId, tick, cacheTick, terrainTick]); // eslint-disable-line react-hooks/exhaustive-deps
+    result.sort((a, b) => a.dSq - b.dSq);
+    return result.slice(0, billboardBudget);
+  }, [spawns, transforms, selectedId, tick, cacheTick, terrainTick, billboardBudget]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleSelect = useCallback((guid) => onSelect(guid), [onSelect]);
   const handleHover  = useCallback((guid) => setHoveredGuid(guid), []);

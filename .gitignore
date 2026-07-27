@@ -7,8 +7,17 @@ debug-blp/
 output/
 tests/
 .env
+.env.*
+!.env.example
 .DS_Store
 *.log
+.vs/
+**/bin/
+**/obj/
+*.user
+*.suo
+TestResults/
+coverage/
 CLAUDE.MD
 AGENTS.MD
 KEIRA3_UPGRADE_TASKS.MD

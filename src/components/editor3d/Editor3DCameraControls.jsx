@@ -2,8 +2,10 @@ import { useEffect, useRef, useMemo, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { cameraInput } from './cameraInputState';
+import { getTerrainHeight } from './spawnLod';
 
 const FLY_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
+const GROUND_CLEARANCE = 3;
 
 function easeOutCubic(t) {
   return 1 - (1 - t) ** 3;
@@ -38,7 +40,7 @@ export function useAltHeld() {
 }
 
 export function CameraFlyControls() {
-  const { camera, controls, gl } = useThree();
+  const { camera, controls, gl, invalidate } = useThree();
   const rightDown = useRef(false);
   const forward = useMemo(() => new THREE.Vector3(), []);
   const right = useMemo(() => new THREE.Vector3(), []);
@@ -53,6 +55,7 @@ export function CameraFlyControls() {
       rightDown.current = true;
       cameraInput.flyActive = true;
       el.setPointerCapture?.(e.pointerId);
+      invalidate();
     };
     const onPointerUp = (e) => {
       if (e.button !== 2) return;
@@ -66,6 +69,7 @@ export function CameraFlyControls() {
       if (!rightDown.current) return;
       e.preventDefault();
       setFlyKey(e.key, true);
+      invalidate();
     };
     const onKeyUp = (e) => {
       if (!FLY_KEYS.has(e.key.toLowerCase())) return;
@@ -94,38 +98,50 @@ export function CameraFlyControls() {
       window.removeEventListener('blur', clearFly);
       clearFly();
     };
-  }, [gl]);
+  }, [gl, invalidate]);
 
   useFrame((state, delta) => {
-    if (!controls || !rightDown.current) return;
+    if (!controls) return;
     const { forward: f, back, left, right: r, down, up } = cameraInput.keys;
-    if (!f && !back && !left && !r && !down && !up) return;
+    if (rightDown.current && (f || back || left || r || down || up)) {
+      const dist = Math.max(camera.position.distanceTo(controls.target), 8);
+      // Do not compensate for a blocked render frame: that turns a short load hitch
+      // into a large camera jump after the frame resumes.
+      const speed = dist * 2.2 * Math.min(delta, 1 / 30);
 
-    const dist = Math.max(camera.position.distanceTo(controls.target), 8);
-    const speed = dist * 2.2 * delta;
+      camera.getWorldDirection(forward);
+      forward.y = 0;
+      if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
+      forward.normalize();
 
-    camera.getWorldDirection(forward);
-    forward.y = 0;
-    if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
-    forward.normalize();
+      right.crossVectors(forward, camera.up).normalize();
 
-    right.crossVectors(forward, camera.up).normalize();
+      move.set(0, 0, 0);
+      if (f) move.add(forward);
+      if (back) move.sub(forward);
+      if (r) move.add(right);
+      if (left) move.sub(right);
+      if (up) move.y += 1;
+      if (down) move.y -= 1;
 
-    move.set(0, 0, 0);
-    if (f) move.add(forward);
-    if (back) move.sub(forward);
-    if (r) move.add(right);
-    if (left) move.sub(right);
-    if (up) move.y += 1;
-    if (down) move.y -= 1;
+      if (move.lengthSq() >= 1e-8) {
+        move.normalize().multiplyScalar(speed);
+        camera.position.add(move);
+        controls.target.add(move);
+        controls.update();
+        state.invalidate();
+      }
+    }
 
-    if (move.lengthSq() < 1e-8) return;
-    move.normalize().multiplyScalar(speed);
-
-    camera.position.add(move);
-    controls.target.add(move);
-    controls.update();
-    state.invalidate(); // vraag volgende frame aan voor continue fly-beweging
+    const ground = getTerrainHeight(-camera.position.z, -camera.position.x);
+    const minCameraY = ground == null ? null : ground + GROUND_CLEARANCE;
+    if (minCameraY != null && camera.position.y < minCameraY) {
+      const lift = minCameraY - camera.position.y;
+      camera.position.y += lift;
+      controls.target.y += lift;
+      controls.update();
+      state.invalidate();
+    }
   });
 
   return null;

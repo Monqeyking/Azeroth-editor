@@ -422,6 +422,8 @@ export default function Editor3DScene({
   return (
     <Canvas
       frameloop="demand"
+      dpr={[1, 1.5]}
+      gl={{ powerPreference: 'high-performance' }}
       camera={{ position: [0, 42, 65], fov: 60, near: 0.5, far: 60000 }}
       style={{ background: '#1a1a2e' }}
       onPointerMissed={() => onSelect(null)}

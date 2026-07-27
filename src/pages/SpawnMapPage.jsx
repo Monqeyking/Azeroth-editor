@@ -124,6 +124,8 @@ export default function SpawnMapPage() {
 
 	const [bgImage, setBgImage] = useState(null);
 	const [imgLoading, setImgLoading] = useState(false);
+	const [overlays, setOverlays] = useState([]);
+	const [overlayImages, setOverlayImages] = useState([]);
 
 	const [creatures, setCreatures] = useState([]);
 	const [gameobjects, setGameobjects] = useState([]);
@@ -237,6 +239,13 @@ export default function SpawnMapPage() {
 	}, [dbcPath]);
 
 	useEffect(() => {
+		if (!dbcPath) return;
+		window.azeroth.worldmap.readOverlays(dbcPath).then(res => {
+			if (res.success) setOverlays(res.overlays || []);
+		});
+	}, [dbcPath]);
+
+	useEffect(() => {
 		const folder = zone ? zone.internalName : continent.folder;
 		const base = zone ? zone.internalName : continent.base;
 		setImgLoading(true);
@@ -258,7 +267,21 @@ export default function SpawnMapPage() {
 		setDragPos(null);
 		dragRef.current = null;
 		setSearchTerm('');
-	}, [continent, zone]);
+	}, [continent, zone, worldmapMpqPath]);
+
+	useEffect(() => {
+		if (!zone || !overlays.length || !worldmapMpqPath) { setOverlayImages([]); return; }
+		const selected = overlays.filter(overlay => overlay.mapAreaId === zone.id);
+		if (!selected.length) { setOverlayImages([]); return; }
+		let cancelled = false;
+		Promise.all(selected.map(overlay =>
+			window.azeroth.worldmap.getOverlayImage(zone.internalName, overlay.textureName, overlay.width, overlay.height, worldmapMpqPath)
+				.then(res => res.success ? { ...overlay, data: res.data } : null)
+		)).then(images => {
+			if (!cancelled) setOverlayImages(images.filter(Boolean));
+		});
+		return () => { cancelled = true; };
+	}, [zone?.id, zone?.internalName, overlays, worldmapMpqPath]);
 
 	useEffect(() => {
 		if (!zone) { setCreatures([]); setGameobjects([]); setWaypoints([]); return; }
@@ -698,6 +721,11 @@ export default function SpawnMapPage() {
 							<img src={bgImage} width={IMG_W} height={IMG_H}
 								style={{ display: 'block' }} draggable={false} />
 						)}
+						{overlayImages.map(overlay => (
+							<img key={overlay.id} className="map-game-overlay" src={overlay.data}
+								style={{ left: overlay.offsetX * 2, top: overlay.offsetY * 2, width: overlay.width * 2, height: overlay.height * 2 }}
+								draggable={false} alt="" />
+						))}
 						{!bgImage && !imgLoading && (
 							<div className="map-no-image">Geen afbeelding gevonden</div>
 						)}

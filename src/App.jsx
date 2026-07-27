@@ -18,6 +18,7 @@ import ProfessionEditorPage from './pages/ProfessionEditorPage';
 import CharCustomizationPage from './pages/CharCustomizationPage';
 import LootEditorPage from './pages/LootEditorPage';
 import ItemSetEditorPage from './pages/ItemSetEditorPage';
+import TextureWorkshopPage from './pages/TextureWorkshopPage';
 import EnemiesPage from './pages/EnemiesPage';
 import NPCWorkflowPage from './pages/NPCWorkflowPage';
 import VendorEditorPage from './pages/VendorEditorPage';
@@ -26,6 +27,7 @@ import DbcSqlPage from './pages/DbcSqlPage';
 import ExpansionLockPage from './pages/ExpansionLockPage';
 import WorldMapPage from './pages/WorldMapPage';
 import UIEditorPage from './pages/UIEditorPage';
+import AssetEditorPage from './pages/AssetEditorPage';
 import AchievementEditorPage from './pages/AchievementEditorPage';
 import NpcMovementPage from './pages/NpcMovementPage';
 import SpellLookup from './components/SpellLookup';
@@ -60,12 +62,14 @@ const router = createHashRouter([
       { path: 'char-customization', element: <CharCustomizationPage /> },
       { path: 'loot',               element: <LootEditorPage /> },
       { path: 'item-sets',          element: <ItemSetEditorPage /> },
+      { path: 'texture-workshop',   element: <TextureWorkshopPage /> },
       { path: 'vendors',            element: <VendorEditorPage /> },
       { path: 'sql',                element: <SqlEditorPage /> },
       { path: 'dbc-sql',           element: <DbcSqlPage /> },
       { path: 'expansion-lock',    element: <ExpansionLockPage /> },
       { path: 'worldmap',          element: <WorldMapPage /> },
       { path: 'ui-editor',          element: <UIEditorPage /> },
+      { path: 'asset-editor',       element: <AssetEditorPage /> },
       { path: 'settings',           element: <SettingsPage /> },
     ],
   },

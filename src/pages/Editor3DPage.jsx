@@ -14,6 +14,7 @@ import { setTerrainData } from '../components/editor3d/spawnLod';
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
 const ENABLE_MINIMAP_FALLBACK = false;
+const INITIAL_WORLD_READY_TILES = 9;
 
 const MAP_ADT_NAME = {
   0:   'Azeroth',
@@ -57,9 +58,41 @@ export default function Editor3DPage() {
   const [focusTick,  setFocusTick]  = useState(0);
   const [streamKey,  setStreamKey]  = useState(0);
   const [worldLoading, setWorldLoading] = useState(true);
+  const [perfMetrics, setPerfMetrics] = useState({ terrain: null, textures: null });
   const worldLoadTimeoutRef = useRef(null);
   const camPosRef = useRef({ wx: 0, wy: 0 });
   const invalidateRef = useRef(null);
+  const perfSamplesRef = useRef({ terrain: [], textures: [] });
+  const textureUploadQueueRef = useRef([]);
+  const textureUploadFrameRef = useRef(null);
+
+  const queueTextureUploads = useCallback((rows) => {
+    if (!rows?.length) return;
+    textureUploadQueueRef.current.push(...rows);
+    if (textureUploadFrameRef.current) return;
+    const flush = () => {
+      textureUploadFrameRef.current = null;
+      const next = textureUploadQueueRef.current.shift();
+      if (!next) return;
+      setTileTextures(prev => ({ ...prev, [`${next.tileX}_${next.tileY}`]: next }));
+      invalidateRef.current?.();
+      if (textureUploadQueueRef.current.length) textureUploadFrameRef.current = requestAnimationFrame(flush);
+    };
+    textureUploadFrameRef.current = requestAnimationFrame(flush);
+  }, []);
+
+  useEffect(() => () => {
+    if (textureUploadFrameRef.current) cancelAnimationFrame(textureUploadFrameRef.current);
+  }, []);
+
+  const recordPerf = useCallback((kind, elapsedMs, tiles) => {
+    const samples = perfSamplesRef.current[kind];
+    samples.push({ elapsedMs, tiles });
+    if (samples.length > 12) samples.shift();
+    const totalMs = samples.reduce((sum, item) => sum + item.elapsedMs, 0);
+    const totalTiles = samples.reduce((sum, item) => sum + item.tiles, 0);
+    setPerfMetrics(prev => ({ ...prev, [kind]: { elapsedMs: totalMs / samples.length, tiles: totalTiles / samples.length } }));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,6 +103,7 @@ export default function Editor3DPage() {
       setSpawns([]);
       setTerrain(null);
       setTileTextures({});
+      textureUploadQueueRef.current = [];
       setSelectedId(null);
       setTransforms({});
 
@@ -103,12 +137,13 @@ export default function Editor3DPage() {
   useEffect(() => {
     setWorldLoading(true);
     clearTimeout(worldLoadTimeoutRef.current);
-    worldLoadTimeoutRef.current = setTimeout(() => setWorldLoading(false), 4000);
+    worldLoadTimeoutRef.current = setTimeout(() => setWorldLoading(false), 20000);
     return () => clearTimeout(worldLoadTimeoutRef.current);
   }, [mapId]);
 
-  // Clear overlay wanneer eerste terrain batch klaar is
-  const terrainReady = !!(terrain?.length);
+  // Keep the initial overlay until the nearby terrain and its texture layers are usable.
+  const terrainReady = (terrain?.length ?? 0) >= INITIAL_WORLD_READY_TILES
+    && Object.keys(tileTextures).length >= INITIAL_WORLD_READY_TILES;
   useEffect(() => {
     if (terrainReady) {
       clearTimeout(worldLoadTimeoutRef.current);
@@ -121,7 +156,7 @@ export default function Editor3DPage() {
 
   // ── Terrain streaming: laad tiles rond de camera, evict wat ver weg is ──────
   const TILE_RADIUS = 4;   // 9×9 blok rond camera
-  const MAX_TILES   = 200;
+  const MAX_TILES   = 81; // 9x9 active terrain window; prevents GPU texture accumulation
   const BATCH_MAX   = 16;  // max tiles per IPC zodat main process responsief blijft
 
   useEffect(() => {
@@ -134,9 +169,10 @@ export default function Editor3DPage() {
     const loaded   = new Set();
     const missing  = new Set();
     const texQueue = []; // tiles die terrain hebben maar nog geen texture
+    const TEXTURE_YIELD_MS = 24;
 
     async function tickTerrain() {
-      if (disposed || terrainInFlight) return;
+      if (disposed || terrainInFlight || textureInFlight) return;
       const { wx, wy } = camPosRef.current;
       if (wx === 0 && wy === 0) return;
 
@@ -159,7 +195,9 @@ export default function Editor3DPage() {
 
       terrainInFlight = true;
       try {
+        const started = performance.now();
         const tr = await window.azeroth.adt.getTerrain({ mapName, tiles: batch });
+        recordPerf('terrain', performance.now() - started, tr?.data?.length ?? 0);
         if (disposed) return;
         if (!tr.success) { batch.forEach(t => loaded.delete(`${t.tileX}_${t.tileY}`)); return; }
 
@@ -211,36 +249,37 @@ export default function Editor3DPage() {
         for (const { tileX, tileY } of tileBatch) texQueue.push({ tileX, tileY, evicted });
       } finally {
         terrainInFlight = false;
+        if (!disposed && texQueue.length) setTimeout(tickTexture, 0);
       }
     }
 
     async function tickTexture() {
-      if (disposed || textureInFlight || !texQueue.length) return;
+      if (disposed || textureInFlight || terrainInFlight || !texQueue.length) return;
       const TEX_BATCH = 4; // klein houden: compositing blokkeert main process
-      const items = texQueue.splice(0, TEX_BATCH);
+      const items = texQueue.splice(0, TEX_BATCH).filter(({ tileX, tileY }) => loaded.has(`${tileX}_${tileY}`));
+      if (!items.length) {
+        if (texQueue.length) setTimeout(tickTexture, 0);
+        return;
+      }
       const tileBatch = items.map(({ tileX, tileY }) => ({ tileX, tileY }));
 
       textureInFlight = true;
       try {
+        const started = performance.now();
         const tex = await window.azeroth.adt.getTextureLayers({ mapName, tiles: tileBatch });
+        recordPerf('textures', performance.now() - started, tex?.data?.length ?? 0);
         if (!disposed && tex.success && tex.data.length) {
-          setTileTextures(prev => {
-            const next = { ...prev };
-            for (const { tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha } of tex.data) {
-              next[`${tileX}_${tileY}`] = { paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha };
-            }
-            return next;
-          });
-          invalidateRef.current?.();
+          queueTextureUploads(tex.data);
         }
       } finally {
         textureInFlight = false;
+        if (!disposed && texQueue.length) setTimeout(tickTexture, TEXTURE_YIELD_MS);
       }
     }
 
     const id = setInterval(() => { tickTerrain(); tickTexture(); }, 600);
     return () => { disposed = true; clearInterval(id); };
-  }, [mapId, streamKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [mapId, streamKey, queueTextureUploads]);
 
   useEffect(() => {
     setTerrain(null);
@@ -423,7 +462,7 @@ export default function Editor3DPage() {
         <div className="ed3-viewport">
           {worldLoading && (
             <div className="ed3-world-overlay">
-              <span className="ed3-world-overlay-text">Wereld laden…</span>
+              <span className="ed3-world-overlay-text">Loading world assets…</span>
             </div>
           )}
           <Editor3DErrorBoundary>
@@ -446,6 +485,13 @@ export default function Editor3DPage() {
             />
           </Editor3DErrorBoundary>
           <MinimapOverlay mapId={mapId} camPosRef={camPosRef} />
+          {(perfMetrics.terrain || perfMetrics.textures) && (
+            <div className="ed3-perf-panel">
+              <strong>Streaming</strong>
+              {perfMetrics.terrain && <span>Terrain: {Math.round(perfMetrics.terrain.elapsedMs)} ms / {Math.round(perfMetrics.terrain.tiles)} tiles</span>}
+              {perfMetrics.textures && <span>Textures: {Math.round(perfMetrics.textures.elapsedMs)} ms / {Math.round(perfMetrics.textures.tiles)} tiles</span>}
+            </div>
+          )}
         </div>
 
         <Editor3DInspector

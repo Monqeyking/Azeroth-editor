@@ -247,6 +247,25 @@
   z-index: 10;
 }
 
+.ed3-perf-panel {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 10;
+  display: grid;
+  gap: 3px;
+  min-width: 165px;
+  padding: 7px 9px;
+  border: 1px solid rgba(138, 138, 214, 0.38);
+  border-radius: 4px;
+  background: rgba(10, 10, 20, 0.82);
+  color: #b8b8d8;
+  font: 11px/1.25 ui-monospace, SFMono-Regular, Consolas, monospace;
+  pointer-events: none;
+}
+
+.ed3-perf-panel strong { color: #e0e0ff; font-weight: 600; }
+
 .ed3-minimap {
   display: block;
   width: 200px !important;
