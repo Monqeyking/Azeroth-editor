@@ -136,6 +136,8 @@
   align-items: center;
   justify-content: center;
 }
+.wm-continent-highlight { position: absolute; overflow: hidden; pointer-events: none; z-index: 1; mix-blend-mode: screen; }
+.wm-continent-highlight > img { max-width: none; }
 
 .wm-continent-name {
   font-size: 13px;
@@ -185,6 +187,8 @@
 }
 .wm-zone-label:hover, .wm-zone-label.selected { color: #fff3b4; text-decoration: underline; cursor: pointer; }
 .wm-game-overlay { position: absolute; pointer-events: none; z-index: 1; }
+.wm-zone-highlight-crop { position: absolute; overflow: hidden; pointer-events: none; z-index: 1; mix-blend-mode: screen; }
+.wm-zone-highlight-crop img { position: absolute; max-width: none; opacity: .9; }
 .wm-zone-label, .wm-marker { z-index: 2; }
 
 .wm-marker {
