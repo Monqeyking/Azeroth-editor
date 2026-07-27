@@ -5277,6 +5277,26 @@ ipcMain.handle('dbc:readCharSections', async (_, dbcPath) => {
   }
 });
 
+ipcMain.handle('worldmap:readContinents', async (_, dbcPath) => {
+  try {
+    const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapContinent.dbc'));
+    if (buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Geen DBC' };
+    const count = buffer.readUInt32LE(4), size = buffer.readUInt32LE(12);
+    const continents = [];
+    for (let i = 0; i < count; i++) {
+      const b = 20 + i * size;
+      continents.push({
+        id: buffer.readUInt32LE(b), mapId: buffer.readUInt32LE(b + 4),
+        leftBoundary: buffer.readInt32LE(b + 8), rightBoundary: buffer.readInt32LE(b + 12),
+        topBoundary: buffer.readInt32LE(b + 16), bottomBoundary: buffer.readInt32LE(b + 20),
+        offsetX: buffer.readFloatLE(b + 24), offsetY: buffer.readFloatLE(b + 28),
+        scale: buffer.readFloatLE(b + 32), worldMapId: buffer.readUInt32LE(b + 52),
+      });
+    }
+    return { success: true, continents };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 ipcMain.handle('worldmap:readOverlays', async (_, dbcPath) => {
   try {
     const buffer = fs.readFileSync(path.join(dbcPath, 'WorldMapOverlay.dbc'));

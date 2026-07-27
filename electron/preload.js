@@ -102,6 +102,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   worldmap: {
     getZoneImage: (folderName, baseName, dataPath, preferOldest = false) => ipcRenderer.invoke('worldmap:getZoneImage', folderName, baseName, dataPath, preferOldest),
     readWorldMapAreas: (dbcPath) => ipcRenderer.invoke('worldmap:readWorldMapAreas', dbcPath),
+    readContinents: (dbcPath) => ipcRenderer.invoke('worldmap:readContinents', dbcPath),
     readOverlays: (dbcPath) => ipcRenderer.invoke('worldmap:readOverlays', dbcPath),
     getOverlayImage: (folderName, textureName, width, height, dataPath) => ipcRenderer.invoke('worldmap:getOverlayImage', folderName, textureName, width, height, dataPath),
     listZones: (dataPath) => ipcRenderer.invoke('worldmap:listZones', dataPath),
