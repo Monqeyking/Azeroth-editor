@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Wand2, X } from 'lucide-react';
 import './DashboardPage.css';
@@ -486,6 +487,7 @@ const SPELL_FIELDS = [
 
 export default function SpellEditorPage() {
   const { searchSpellsDbc, readSpellFull, writeSpellFull, findNextSpellId, copySpellDbc, idRanges, readSkillLineAbility, addSkillLineAbility, query, readCastTimes, readDurations, readRanges, dbcPath, runAtomicWrite } = useConnection();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [search, setSearch] = useState('');
   const [spells, setSpells] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -721,6 +723,16 @@ export default function SpellEditorPage() {
     const slaRes = await readSkillLineAbility(ID);
     setSlaData(slaRes.success && slaRes.data.length > 0 ? slaRes.data[0] : null);
   };
+
+  useEffect(() => {
+    const spellId = Number(searchParams.get('select'));
+    if (!Number.isInteger(spellId) || spellId <= 0) return;
+    setActiveView('spells');
+    setSearch(String(spellId));
+    searchSpells(String(spellId));
+    selectSpell(spellId);
+    setSearchParams({}, { replace: true });
+  }, [searchParams, searchSpells, setSearchParams]);
 
   const handleChange = (key, value) => {
     setForm(f => ({ ...f, [key]: value }));

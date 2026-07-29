@@ -58,6 +58,7 @@ app.setAppUserModelId('com.azeroth.editor');
 
 let mainWindow;
 let spellLookupWindow;
+let spellLookupQuery = '';
 const lookupWindows = new Map();
 let dbConnection = null;
 let activeAtomicWrite = null;
@@ -76,6 +77,8 @@ const CONSOLE_HOST_PORT = 47321;
 let consoleHostSocket = null;
 let consoleHostBuffer = '';
 let consoleRequestId = 0;
+let consoleHostSubscribed = false;
+let consoleSubscribePromise = null;
 const consoleRequests = new Map();
 
 function connectConsoleHost() {
@@ -88,6 +91,7 @@ function connectConsoleHost() {
       socket.removeListener('error', fail);
       consoleHostSocket = socket;
       consoleHostBuffer = '';
+      consoleHostSubscribed = false;
       socket.on('data', data => {
         consoleHostBuffer += data.toString();
         let newline;
@@ -100,8 +104,8 @@ function connectConsoleHost() {
           }
         }
       });
-      socket.on('close', () => { if (consoleHostSocket === socket) consoleHostSocket = null; });
-      socket.on('error', () => { if (consoleHostSocket === socket) consoleHostSocket = null; });
+      socket.on('close', () => { if (consoleHostSocket === socket) { consoleHostSocket = null; consoleHostSubscribed = false; } });
+      socket.on('error', () => { if (consoleHostSocket === socket) { consoleHostSocket = null; consoleHostSubscribed = false; } });
       resolve(socket);
     });
   });
@@ -129,6 +133,18 @@ async function consoleRequest(action, payload = {}, startHost = false) {
     consoleRequests.set(id, message => { clearTimeout(timer); resolve(message); });
     socket.write(`${JSON.stringify({ id, action, ...payload })}\n`);
   });
+}
+
+function subscribeConsoleHost() {
+  if (consoleHostSubscribed) return Promise.resolve({ success: true });
+  if (consoleSubscribePromise) return consoleSubscribePromise;
+  consoleSubscribePromise = consoleRequest('subscribe', {}, false)
+    .then(result => {
+      if (result.success) consoleHostSubscribed = true;
+      return result;
+    })
+    .finally(() => { consoleSubscribePromise = null; });
+  return consoleSubscribePromise;
 }
 
 function checkTcpPort(host, port) {
@@ -164,9 +180,13 @@ ipcMain.handle('server:status', async (_, { authHost, authPort, worldHost, world
     getServerProcessInfo(worldExe),
   ]);
   const sessions = hostStatus.success ? hostStatus.servers || {} : {};
+  const authStarting = sessions.auth?.running || !!authProcess || startingServers.has('auth');
+  const worldStarting = sessions.world?.running || !!worldProcess || startingServers.has('world');
+  if (auth) startingServers.delete('auth');
+  if (world) startingServers.delete('world');
   return {
-    auth: auth ? 'online' : (startingServers.has('auth') ? 'starting' : 'offline'),
-    world: world ? 'online' : (startingServers.has('world') ? 'starting' : 'offline'),
+    auth: auth ? 'online' : (authStarting ? 'starting' : 'offline'),
+    world: world ? 'online' : (worldStarting ? 'starting' : 'offline'),
     soap: soap ? 'online' : 'offline',
     authUptimeMs: sessions.auth?.uptimeMs || authProcess?.uptimeMs || 0,
     worldUptimeMs: sessions.world?.uptimeMs || worldProcess?.uptimeMs || 0,
@@ -176,7 +196,7 @@ ipcMain.handle('server:status', async (_, { authHost, authPort, worldHost, world
 });
 
 ipcMain.handle('server:attachConsole', async () => {
-  try { return await consoleRequest('subscribe', {}, false); }
+  try { return await subscribeConsoleHost(); }
   catch { return { success: false, error: 'No console host session is running' }; }
 });
 
@@ -587,21 +607,104 @@ function openLookupWindow(kind, title) {
   if (isDev) win.loadURL(`http://localhost:5173/#/${kind}-lookup`); else win.loadFile(path.join(__dirname, '../dist/index.html'), { hash: `/${kind}-lookup` });
 }
 
-function openSpellLookupWindow() {
-  if (spellLookupWindow && !spellLookupWindow.isDestroyed()) return spellLookupWindow.focus();
+function openSpellLookupWindow(query = '') {
+  spellLookupQuery = (typeof query === 'string' || typeof query === 'number') ? String(query) : '';
+  if (spellLookupWindow && !spellLookupWindow.isDestroyed()) {
+    spellLookupWindow.webContents.send('spell-lookup:query', spellLookupQuery);
+    return spellLookupWindow.focus();
+  }
   spellLookupWindow = new BrowserWindow({ width: 520, height: 680, minWidth: 380, minHeight: 420, parent: mainWindow, title: 'Spell Lookup', icon: path.join(__dirname, '../src/assets/icon.ico'), backgroundColor: '#0a0c10', webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, nodeIntegration: false } });
   spellLookupWindow.setMenu(null);
   spellLookupWindow.on('closed', () => { spellLookupWindow = null; });
   if (isDev) spellLookupWindow.loadURL('http://localhost:5173/#/spell-lookup'); else spellLookupWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: '/spell-lookup' });
 }
-ipcMain.handle('window:openSpellLookup', () => openSpellLookupWindow());
+ipcMain.handle('window:openSpellLookup', (_, query) => openSpellLookupWindow(query));
+ipcMain.handle('window:openSpellEditor', (_, spellId) => {
+  const id = Number(spellId);
+  if (!Number.isInteger(id) || id <= 0) return { success: false, error: 'Invalid spell ID' };
+  mainWindow?.webContents.send('app:openSpellEditor', id);
+  mainWindow?.focus();
+  return { success: true };
+});
+
+function parseServerConfig(text) {
+  const lines = text.split(/\r?\n/);
+  const settings = [];
+  let comments = [];
+  lines.forEach((line, index) => {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    if (/^[#;]/.test(trimmed)) {
+      comments.push(trimmed.replace(/^[#;]\s?/, ''));
+      return;
+    }
+    const match = line.match(/^(\s*)([A-Za-z][\w.-]*)(\s*=\s*)(.*?)(\s*(?:[#;].*)?)$/);
+    if (!match) { comments = []; return; }
+    const descriptionLine = [...comments].reverse().find(comment => /^Description:\s*/i.test(comment));
+    const fallback = [...comments].reverse().find(comment => comment && !/^[-#=_]+$/.test(comment));
+    settings.push({ line: index + 1, key: match[2], value: match[4].trim(), description: (descriptionLine || fallback || '').replace(/^Description:\s*/i, '') });
+    comments = [];
+  });
+  return settings;
+}
+
+function serverConfigFiles(exePath) {
+  if (!exePath || !fs.existsSync(exePath)) return [];
+  const serverRoot = path.dirname(exePath);
+  const folders = [serverRoot, 'configs', 'config', 'etc'].map(name => name === serverRoot ? name : path.join(serverRoot, name)).filter(fs.existsSync);
+  const files = [];
+  const scan = (folder, recursive) => {
+    for (const entry of fs.readdirSync(folder, { withFileTypes: true })) {
+      const filePath = path.join(folder, entry.name);
+      if (recursive && entry.isDirectory()) scan(filePath, true);
+      else if (/\.conf$/i.test(entry.name) && !/\.conf\.dist$/i.test(entry.name)) files.push({ name: path.relative(serverRoot, filePath), path: filePath });
+    }
+  };
+  folders.forEach(folder => scan(folder, folder !== serverRoot));
+  return [...new Map(files.map(file => [file.path.toLowerCase(), file])).values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+ipcMain.handle('serverConfig:list', async (_, { authExe, worldExe } = {}) => {
+  try {
+    const files = [...serverConfigFiles(worldExe), ...serverConfigFiles(authExe)];
+    const unique = [...new Map(files.map(file => [file.path.toLowerCase(), file])).values()];
+    return { success: true, files: unique.map(({ name, path: filePath }) => ({ name, filePath })) };
+  } catch (e) { return { success: false, error: e.message, files: [] }; }
+});
+
+ipcMain.handle('serverConfig:read', async (_, { filePath } = {}) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath) || !/\.conf$/i.test(filePath)) throw new Error('Config file not found');
+    const text = fs.readFileSync(filePath, 'utf8');
+    return { success: true, settings: parseServerConfig(text) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('serverConfig:save', async (_, { filePath, updates = [] } = {}) => {
+  try {
+    if (!filePath || !fs.existsSync(filePath) || !/\.conf$/i.test(filePath)) throw new Error('Config file not found');
+    const source = fs.readFileSync(filePath, 'utf8');
+    const lines = source.split(/\r?\n/);
+    for (const update of updates) {
+      const index = Number(update.line) - 1;
+      const match = lines[index]?.match(/^(\s*)([A-Za-z][\w.-]*)(\s*=\s*)(.*?)(\s*(?:[#;].*)?)$/);
+      if (!match || match[2] !== update.key) throw new Error(`Setting changed externally: ${update.key}`);
+      lines[index] = `${match[1]}${match[2]}${match[3]}${String(update.value ?? '')}${match[5]}`;
+    }
+    const backupPath = `${filePath}.azeroth-editor.bak`;
+    fs.copyFileSync(filePath, backupPath);
+    fs.writeFileSync(filePath, lines.join(source.includes('\r\n') ? '\r\n' : '\n'), 'utf8');
+    return { success: true, backupPath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+ipcMain.handle('window:getSpellLookupQuery', () => spellLookupQuery);
 ipcMain.handle('clipboard:writeText', (_, value) => clipboard.writeText(String(value || '')));
 app.whenReady().then(() => {
   createWindow();
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [{ role: 'close' }, { type: 'separator' }, { role: 'quit' }] },
     { label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] },
-    { label: 'View', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, { type: 'separator' }, { label: 'Spell Lookup...', click: openSpellLookupWindow }, { label: 'NPC Lookup...', click: () => openLookupWindow('npc', 'NPC Lookup') }, { label: 'Item Lookup...', click: () => openLookupWindow('item', 'Item Lookup') }] },
+    { label: 'View', submenu: [{ role: 'reload' }, { role: 'forceReload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }, { type: 'separator' }, { role: 'togglefullscreen' }, { type: 'separator' }, { label: 'Spell Lookup...', click: () => openSpellLookupWindow() }, { label: 'NPC Lookup...', click: () => openLookupWindow('npc', 'NPC Lookup') }, { label: 'Item Lookup...', click: () => openLookupWindow('item', 'Item Lookup') }] },
     { label: 'Window', submenu: [{ role: 'minimize' }, { role: 'zoom' }, { role: 'close' }] },
     { role: 'help' },
   ]));
@@ -1773,7 +1876,13 @@ ipcMain.handle('dbc:findNextSpellId', async (_, dbcPath, startId) => {
     if (!dbc) return { success: false, error: 'Kon Spell.dbc niet lezen' };
     const usedIds = new Set();
     for (let i = 0; i < dbc.recordCount; i++) usedIds.add(dbc.dataBuffer.readUInt32LE(i * dbc.recordSize));
+    // Talent IDs are client-facing DBC IDs, unlike server custom IDs. Allocate
+    // directly after the highest existing talent so sparse high custom ranges
+    // cannot destabilize the 3.3.5 talent UI.
     let nextId = Number(startId);
+    if (!Number.isInteger(nextId) || nextId <= 0) {
+      nextId = Math.max(...usedIds) + 1;
+    }
     while (usedIds.has(nextId)) nextId++;
     return { success: true, nextId };
   } catch (e) {
@@ -2449,6 +2558,29 @@ ipcMain.handle('dbc:findNextTalentId', async (_, dbcPath, startId) => {
   }
 });
 
+function sortTalentDbcRecords(buffer) {
+  const headerSize = 20;
+  const recordCount = buffer.readUInt32LE(4);
+  const recordSize = buffer.readUInt32LE(12);
+  const stringBlockSize = buffer.readUInt32LE(16);
+  const dataEnd = headerSize + recordCount * recordSize;
+  if (recordSize < 16 || buffer.length < dataEnd + stringBlockSize) throw new Error('Invalid Talent.dbc record layout');
+
+  const records = Array.from({ length: recordCount }, (_, index) => Buffer.from(buffer.subarray(headerSize + index * recordSize, headerSize + (index + 1) * recordSize)));
+  records.sort((a, b) =>
+    (a.readUInt32LE(4) - b.readUInt32LE(4)) ||
+    (a.readUInt32LE(8) - b.readUInt32LE(8)) ||
+    (a.readUInt32LE(12) - b.readUInt32LE(12)) ||
+    (a.readUInt32LE(0) - b.readUInt32LE(0))
+  );
+
+  const sorted = Buffer.alloc(buffer.length);
+  buffer.copy(sorted, 0, 0, headerSize);
+  records.forEach((record, index) => record.copy(sorted, headerSize + index * recordSize));
+  buffer.copy(sorted, dataEnd, dataEnd, dataEnd + stringBlockSize);
+  return sorted;
+}
+
 ipcMain.handle('dbc:copyTalent', async (_, dbcPath, sourceId, newId) => {
   try {
     const filePath = path.join(dbcPath, 'Talent.dbc');
@@ -2481,8 +2613,48 @@ ipcMain.handle('dbc:copyTalent', async (_, dbcPath, sourceId, newId) => {
     newBuffer.writeUInt32LE(newId, newOffset);
     buffer.copy(newBuffer, headerSize + (recordCount + 1) * recordSize, headerSize + dataSize, headerSize + dataSize + stringBlockSize);
 
-    fs.writeFileSync(filePath, newBuffer);
+    fs.writeFileSync(filePath, sortTalentDbcRecords(newBuffer));
     return { success: true, newId };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('dbc:insertTalent', async (_, dbcPath, talent) => {
+  try {
+    const filePath = path.join(dbcPath, 'Talent.dbc');
+    const buffer = fs.readFileSync(filePath);
+    if (buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'Ongeldig DBC bestand' };
+
+    const recordCount = buffer.readUInt32LE(4);
+    const recordSize = buffer.readUInt32LE(12);
+    const stringBlockSize = buffer.readUInt32LE(16);
+    const headerSize = 20;
+    if (recordSize < 76) return { success: false, error: `Onverwachte Talent.dbc record size: ${recordSize}` };
+
+    const talentId = Number(talent.ID);
+    if (!Number.isInteger(talentId) || talentId <= 0) return { success: false, error: 'Talent-ID moet een positief geheel getal zijn.' };
+    for (let i = 0; i < recordCount; i++) {
+      if (buffer.readUInt32LE(headerSize + i * recordSize) === talentId) return { success: false, error: `ID ${talentId} bestaat al` };
+    }
+
+    const record = Buffer.alloc(recordSize);
+    record.writeUInt32LE(talentId, 0);
+    record.writeUInt32LE(Number(talent.TabID) || 0, 4);
+    record.writeUInt32LE(Number(talent.TierID) || 0, 8);
+    record.writeUInt32LE(Number(talent.ColumnIndex) || 0, 12);
+    for (let i = 1; i <= 9; i++) record.writeUInt32LE(Number(talent[`SpellRank_${i}`]) || 0, 16 + (i - 1) * 4);
+    for (let i = 1; i <= 3; i++) record.writeUInt32LE(Number(talent[`PrereqTalent_${i}`]) || 0, 48 + i * 4);
+    for (let i = 1; i <= 3; i++) record.writeUInt32LE(Number(talent[`PrereqRank_${i}`]) || 0, 60 + i * 4);
+
+    const dataEnd = headerSize + recordCount * recordSize;
+    const newBuffer = Buffer.alloc(headerSize + (recordCount + 1) * recordSize + stringBlockSize);
+    buffer.copy(newBuffer, 0, 0, dataEnd);
+    record.copy(newBuffer, dataEnd);
+    buffer.copy(newBuffer, dataEnd + recordSize, dataEnd, dataEnd + stringBlockSize);
+    newBuffer.writeUInt32LE(recordCount + 1, 4);
+    fs.writeFileSync(filePath, sortTalentDbcRecords(newBuffer));
+    return { success: true, newId: talentId };
   } catch (e) {
     return { success: false, error: e.message };
   }
@@ -2533,7 +2705,7 @@ ipcMain.handle('dbc:writeTalent', async (_, dbcPath, talent) => {
     tempBuffer.writeUInt32LE(talent.PrereqRank_2 || 0, offset + 68);
     tempBuffer.writeUInt32LE(talent.PrereqRank_3 || 0, offset + 72);
 
-    fs.writeFileSync(filePath, tempBuffer);
+    fs.writeFileSync(filePath, sortTalentDbcRecords(tempBuffer));
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -2565,7 +2737,7 @@ ipcMain.handle('dbc:deleteTalent', async (_, dbcPath, talentId) => {
     buffer.copy(newBuf, headerSize, headerSize, headerSize + idx * recordSize);
     buffer.copy(newBuf, headerSize + idx * recordSize, headerSize + (idx + 1) * recordSize, headerSize + dataSize);
     buffer.copy(newBuf, headerSize + (recordCount - 1) * recordSize, headerSize + dataSize, buffer.length);
-    fs.writeFileSync(filePath, newBuf);
+    fs.writeFileSync(filePath, sortTalentDbcRecords(newBuf));
     return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
@@ -5814,7 +5986,7 @@ ipcMain.handle('dbc:readOutputBlpTexture', async (_, blpPath) => {
 // maskBase64: grayscale buffer (w*h, 1 byte/pixel) ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦Ãƒâ€šÃ‚Â¡ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â >0 = bewerkt (zachte brush-randen tellen ook mee).
 // outRelPath: relatief pad (t.o.v. dataPath) waar de nieuwe BLP komt, bv.
 // "Character\\Human\\Female\\HumanFemaleSkin00_00_custom1.blp".
-ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false) => {
+ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false) => {
   try {
     if (!dataPath || !blpPath || !outRelPath) {
       return { success: false, error: 'dataPath, blpPath of outRelPath ontbreekt' };
@@ -5851,8 +6023,9 @@ ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgb
     const safeRelPath = outRelPath.replace(/\\/g, path.sep);
     if (path.isAbsolute(safeRelPath) || safeRelPath.split(path.sep).includes('..')) return { success: false, error: 'Ongeldig uitvoerpad' };
     const outAbs = stageOutput
-      ? path.join(__dirname, '..', 'output', 'PlayerTextures', safeRelPath)
+      ? path.join(__dirname, '..', 'output', stageOutput === 'mpq-output' ? '' : 'PlayerTextures', safeRelPath)
       : path.join(dataPath, safeRelPath);
+    if (noOverwrite && fs.existsSync(outAbs)) return { success: false, error: 'Output file already exists. Choose another BLP filename.' };
     fs.mkdirSync(path.dirname(outAbs), { recursive: true });
     fs.writeFileSync(outAbs, newBlp);
 
@@ -5906,6 +6079,78 @@ ipcMain.handle('dbc:bakeNpcTexture', async (_, dataPath, extraId, rgbaBase64, ma
   } catch (e) {
     return { success: false, error: e.message };
   }
+});
+
+ipcMain.handle('textureWorkshop:writeSql', async (_, name, sql) => {
+  try {
+    const safeName = String(name || '').replace(/[^a-z0-9_-]+/gi, '_').replace(/^_+|_+$/g, '') || 'texture_workshop_variant';
+    const outPath = path.join(__dirname, '..', 'output', 'TextureWorkshop', `${safeName}.sql`);
+    fs.mkdirSync(path.dirname(outPath), { recursive: true });
+    fs.writeFileSync(outPath, String(sql || ''), 'utf8');
+    return { success: true, path: outPath };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('textureWorkshop:stageDbc', async (_, dbcPath, payload = {}) => {
+  try {
+    const sourceDisplayPath = path.join(dbcPath, 'ItemDisplayInfo.dbc');
+    const sourceSetPath = path.join(dbcPath, 'ItemSet.dbc');
+    if (!fs.existsSync(sourceDisplayPath) || !fs.existsSync(sourceSetPath)) throw new Error('ItemDisplayInfo.dbc and ItemSet.dbc are required in the configured DBC folder.');
+    const outputDir = path.join(__dirname, '..', 'output', 'DBFilesClient');
+    fs.mkdirSync(outputDir, { recursive: true });
+    const appendString = (strings, value) => {
+      const text = Buffer.from(`${value}\0`, 'utf8');
+      const offset = strings.length;
+      return { offset, strings: Buffer.concat([strings, text]) };
+    };
+    const displayRaw = fs.readFileSync(sourceDisplayPath);
+    if (displayRaw.toString('ascii', 0, 4) !== 'WDBC') throw new Error('Invalid ItemDisplayInfo.dbc');
+    const displayCount = displayRaw.readUInt32LE(4), displaySize = displayRaw.readUInt32LE(12), displayRecordsEnd = 20 + displayCount * displaySize;
+    if (displaySize < 100) throw new Error('Unsupported ItemDisplayInfo.dbc layout.');
+    const displayStrings = displayRaw.slice(displayRecordsEnd);
+    const displayById = new Map();
+    for (let i = 0; i < displayCount; i++) displayById.set(displayRaw.readUInt32LE(20 + i * displaySize), 20 + i * displaySize);
+    const textureMap = new Map(Object.entries(payload.textureMap || {}).map(([from, to]) => [path.basename(from).toLowerCase(), path.basename(to)]));
+    let newStrings = Buffer.from(displayStrings), appendedDisplays = [];
+    const displayMap = new Map();
+    for (const item of payload.items || []) if (!displayMap.has(Number(item.sourceDisplayId))) displayMap.set(Number(item.sourceDisplayId), Number(item.newDisplayId));
+    for (const [sourceId, newId] of displayMap) {
+      const sourceOffset = displayById.get(sourceId);
+      if (sourceOffset === undefined) throw new Error(`Source ItemDisplayInfo #${sourceId} was not found.`);
+      const record = Buffer.from(displayRaw.slice(sourceOffset, sourceOffset + displaySize));
+      record.writeUInt32LE(newId, 0);
+      for (const field of [3, 4, 15, 16, 17, 18, 19, 20, 21, 22]) {
+        const stringOffset = record.readUInt32LE(field * 4);
+        const end = displayStrings.indexOf(0, stringOffset);
+        const sourceName = end >= 0 ? displayStrings.toString('utf8', stringOffset, end) : '';
+        const replacement = textureMap.get(path.basename(sourceName).toLowerCase());
+        if (!replacement) continue;
+        const appended = appendString(newStrings, replacement); newStrings = appended.strings; record.writeUInt32LE(appended.offset, field * 4);
+      }
+      appendedDisplays.push(record);
+    }
+    const stagedDisplay = Buffer.concat([Buffer.from(displayRaw.slice(0, 20)), Buffer.concat([displayRaw.slice(20, displayRecordsEnd), ...appendedDisplays]), newStrings]);
+    stagedDisplay.writeUInt32LE(displayCount + appendedDisplays.length, 4);
+    fs.writeFileSync(path.join(outputDir, 'ItemDisplayInfo.dbc'), stagedDisplay);
+
+    const setRaw = fs.readFileSync(sourceSetPath);
+    if (setRaw.toString('ascii', 0, 4) !== 'WDBC') throw new Error('Invalid ItemSet.dbc');
+    const setCount = setRaw.readUInt32LE(4), setSize = setRaw.readUInt32LE(12), setLayout = getItemSetLayout(setSize), setRecordsEnd = 20 + setCount * setSize;
+    if (!setLayout) throw new Error(`Unsupported ItemSet.dbc record size ${setSize}.`);
+    let sourceSetOffset = -1;
+    for (let i = 0; i < setCount; i++) { const offset = 20 + i * setSize; if (setRaw.readUInt32LE(offset) === Number(payload.sourceSetId)) { sourceSetOffset = offset; break; } }
+    if (sourceSetOffset < 0) throw new Error(`Source ItemSet #${payload.sourceSetId} was not found.`);
+    let setStrings = Buffer.from(setRaw.slice(setRecordsEnd));
+    const setRecord = Buffer.from(setRaw.slice(sourceSetOffset, sourceSetOffset + setSize));
+    setRecord.writeUInt32LE(Number(payload.newSetId), 0);
+    const setName = appendString(setStrings, String(payload.newSetName || 'Custom Item Set')); setStrings = setName.strings; setRecord.writeUInt32LE(setName.offset, 4);
+    const itemIds = new Map((payload.items || []).map(item => [Number(item.sourceItemId), Number(item.newItemId)]));
+    for (let index = 0; index < 17; index++) { const offset = setLayout.itemsOffset + index * 4, sourceItemId = setRecord.readUInt32LE(offset); if (itemIds.has(sourceItemId)) setRecord.writeUInt32LE(itemIds.get(sourceItemId), offset); }
+    const stagedSet = Buffer.concat([Buffer.from(setRaw.slice(0, 20)), setRaw.slice(20, setRecordsEnd), setRecord, setStrings]);
+    stagedSet.writeUInt32LE(setCount + 1, 4);
+    fs.writeFileSync(path.join(outputDir, 'ItemSet.dbc'), stagedSet);
+    return { success: true, outputDir, displayCount: appendedDisplays.length, setId: Number(payload.newSetId) };
+  } catch (e) { return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('glue:readTextFile', async (_, dataPath, internalPath) => {

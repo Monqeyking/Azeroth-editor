@@ -77,7 +77,10 @@ const server = net.createServer(client => {
       let result;
       try {
         if (request.action === 'subscribe') {
-          for (const type of ['auth', 'world']) for (const line of history[type]) send(client, { event: 'output', type, line });
+          if (!client.subscribed) {
+            client.subscribed = true;
+            for (const type of ['auth', 'world']) for (const line of history[type]) send(client, { event: 'output', type, line });
+          }
           result = { success: true };
         } else if (request.action === 'start') result = start(request.type, request.exePath);
         else if (request.action === 'command') result = command(request.type, request.command || '');

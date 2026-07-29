@@ -1,4 +1,5 @@
-import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
+import { createHashRouter, RouterProvider, Navigate, useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
 import { ConnectionProvider } from './lib/ConnectionContext';
 import Layout from './components/layout/Layout';
 import ConnectPage from './pages/ConnectPage';
@@ -33,6 +34,12 @@ import NpcMovementPage from './pages/NpcMovementPage';
 import SpellLookup from './components/SpellLookup';
 import EntityLookup from './components/EntityLookup';
 
+function AppLayout() {
+  const navigate = useNavigate();
+  useEffect(() => window.azeroth.window.onOpenSpellEditor?.(spellId => navigate(`/spells?select=${spellId}`)), [navigate]);
+  return <Layout />;
+}
+
 const router = createHashRouter([
   { path: '/connect', element: <ConnectPage /> },
   { path: '/spell-lookup', element: <SpellLookup /> },
@@ -40,10 +47,11 @@ const router = createHashRouter([
   { path: '/item-lookup', element: <EntityLookup kind="item" /> },
   {
     path: '/',
-    element: <Layout />,
+    element: <AppLayout />,
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard',          element: <DashboardPage /> },
+      { path: 'server-config',      element: <DashboardPage /> },
       { path: 'creatures',          element: <CreatureEditorPage /> },
       { path: 'creature-displays',  element: <CreatureDisplaysPage /> },
       { path: 'enemies',            element: <EnemiesPage /> },
