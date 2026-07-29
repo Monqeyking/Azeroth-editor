@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, Plus, Trash2, ArrowRight, Database, Box, Palette, ExternalLink } from 'lucide-react';
+import TextureWorkshopPage from './TextureWorkshopPage';
 import './ItemSetEditorPage.css';
 
 const EMPTY_SET = () => ({
@@ -10,6 +11,7 @@ const EMPTY_SET = () => ({
   thresholds: Array(8).fill(0),
   requiredSkill: 0, requiredSkillRank: 0,
 });
+
 
 const ensureItemSetNamesTable = async (query) => {
   await query(`
@@ -77,7 +79,7 @@ function ItemSearchModal({ onSelect, onClose, query }) {
 }
 
 // ── Tab 1: Set Browser ─────────────────────────────────────────────────────────
-function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
+function SetBrowser({ query, searchItemSets, onEdit, onCreate, onWorkshop }) {
   const [term, setTerm] = useState('');
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -85,6 +87,11 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
   const [armorFilter, setArmorFilter] = useState('');
   const [classFilter, setClassFilter] = useState('');
   const [levelFilter, setLevelFilter] = useState('');
+  const [piecesFilter, setPiecesFilter] = useState('');
+  const [qualityFilter, setQualityFilter] = useState('');
+  const [slotFilter, setSlotFilter] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('');
+  const [usableOnly, setUsableOnly] = useState(false);
 
   const search = useCallback(async (val) => {
     setLoading(true);
@@ -115,7 +122,7 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
       let details = [];
       if (ids.length) {
         const placeholders = ids.map(() => '?').join(',');
-        const detailRes = await query(`SELECT ItemSet, class, subclass, RequiredLevel, AllowableClass FROM item_template WHERE ItemSet IN (${placeholders})`, ids);
+        const detailRes = await query(`SELECT ItemSet, class, subclass, RequiredLevel, AllowableClass, Quality, InventoryType FROM item_template WHERE ItemSet IN (${placeholders})`, ids);
         details = detailRes.data || [];
       }
       const bySet = new Map();
@@ -127,7 +134,7 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
         const armor = [...new Set(items.filter(item => Number(item.class) === 4).map(item => ARMOR_SUBCLASSES[item.subclass] || `Subclass ${item.subclass}`))];
         const levels = items.map(item => Number(item.RequiredLevel)).filter(Boolean);
         const masks = items.map(item => Number(item.AllowableClass)).filter(Boolean);
-        return { ...row, itemCount: items.length, armor, minLevel: levels.length ? Math.min(...levels) : 0, maxLevel: levels.length ? Math.max(...levels) : 0, classMask: masks.reduce((mask, value) => mask | value, 0) };
+        return { ...row, itemCount: items.length, armor, qualities: [...new Set(items.map(item => Number(item.Quality)))], slots: [...new Set(items.map(item => Number(item.InventoryType)))], minLevel: levels.length ? Math.min(...levels) : 0, maxLevel: levels.length ? Math.max(...levels) : 0, classMask: masks.reduce((mask, value) => mask | value, 0) };
       }));
     } finally {
       setLoading(false);
@@ -146,6 +153,14 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
     if (levelFilter === '31-50' && (Number(row.maxLevel) < 31 || Number(row.maxLevel) > 50)) return false;
     if (levelFilter === '51-60' && (Number(row.maxLevel) < 51 || Number(row.maxLevel) > 60)) return false;
     if (levelFilter === '61+' && Number(row.maxLevel) < 61) return false;
+    if (piecesFilter === '2' && Number(row.itemCount) !== 2) return false;
+    if (piecesFilter === '3-4' && (Number(row.itemCount) < 3 || Number(row.itemCount) > 4)) return false;
+    if (piecesFilter === '5-7' && (Number(row.itemCount) < 5 || Number(row.itemCount) > 7)) return false;
+    if (piecesFilter === '8+' && Number(row.itemCount) < 8) return false;
+    if (qualityFilter !== '' && !row.qualities?.includes(Number(qualityFilter))) return false;
+    if (slotFilter !== '' && !row.slots?.includes(Number(slotFilter))) return false;
+    if (sourceFilter && row.source !== sourceFilter) return false;
+    if (usableOnly && !Number(row.itemCount)) return false;
     return true;
   });
 
@@ -163,7 +178,12 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
         <label>Armor<select value={armorFilter} onChange={e => setArmorFilter(e.target.value)}><option value="">All armor</option><option>Cloth</option><option>Leather</option><option>Mail</option><option>Plate</option></select></label>
         <label>Class<select value={classFilter} onChange={e => setClassFilter(e.target.value)}><option value="">All classes</option>{CLASS_NAMES.map((name, index) => <option key={name} value={1 << index}>{name}</option>)}</select></label>
         <label>Level<select value={levelFilter} onChange={e => setLevelFilter(e.target.value)}><option value="">All levels</option><option value="1-30">1–30</option><option value="31-50">31–50</option><option value="51-60">51–60</option><option value="61+">61+</option></select></label>
-        {(armorFilter || classFilter || levelFilter) && <button className="ise-filter-clear" onClick={() => { setArmorFilter(''); setClassFilter(''); setLevelFilter(''); }}>Clear filters</button>}
+        <label>Pieces<select value={piecesFilter} onChange={e => setPiecesFilter(e.target.value)}><option value="">Any count</option><option value="2">2 pieces</option><option value="3-4">3–4 pieces</option><option value="5-7">5–7 pieces</option><option value="8+">8+ pieces</option></select></label>
+        <label>Quality<select value={qualityFilter} onChange={e => setQualityFilter(e.target.value)}><option value="">Any quality</option><option value="2">Uncommon</option><option value="3">Rare</option><option value="4">Epic</option><option value="5">Legendary</option></select></label>
+        <label>Contains slot<select value={slotFilter} onChange={e => setSlotFilter(e.target.value)}><option value="">Any slot</option><option value="1">Head</option><option value="3">Shoulder</option><option value="5">Chest</option><option value="7">Legs</option><option value="10">Hands</option><option value="16">Back</option></select></label>
+        <label>Source<select value={sourceFilter} onChange={e => setSourceFilter(e.target.value)}><option value="">All sources</option><option value="DBC">DBC</option><option value="custom">Custom</option><option value="DBC + custom">DBC + custom</option></select></label>
+        <label className="ise-filter-check"><input type="checkbox" checked={usableOnly} onChange={e => setUsableOnly(e.target.checked)} /> Has items</label>
+        {(armorFilter || classFilter || levelFilter || piecesFilter || qualityFilter || slotFilter || sourceFilter || usableOnly) && <button className="ise-filter-clear" onClick={() => { setArmorFilter(''); setClassFilter(''); setLevelFilter(''); setPiecesFilter(''); setQualityFilter(''); setSlotFilter(''); setSourceFilter(''); setUsableOnly(false); }}>Clear filters</button>}
       </div>
       {loading && <div className="ise-help">Searching...</div>}
       {status && <div className="ise-warning">{status}</div>}
@@ -184,6 +204,9 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate }) {
               <td className="ise-muted ise-source-cell"><Database size={11} /> {r.source}</td>
               <td className="ise-muted">{r.patch}</td>
               <td>
+                <button className="ise-icon-btn" title="Open in Texture Workshop" onClick={(e) => { e.stopPropagation(); onWorkshop(r.entry); }}>
+                  <Palette size={13} />
+                </button>
                 <button className="ise-icon-btn" title="Edit" onClick={(e) => { e.stopPropagation(); onEdit(r.entry); }}>
                   <ArrowRight size={13} />
                 </button>
@@ -442,6 +465,7 @@ export default function ItemSetEditorPage() {
   const [editId, setEditId] = useState(null);
   const [browserKey, setBrowserKey] = useState(0);
   const [createNonce, setCreateNonce] = useState(0);
+  const [workshopSetId, setWorkshopSetId] = useState(null);
 
   const handleEdit = (id) => {
     setEditId(id);
@@ -464,18 +488,20 @@ export default function ItemSetEditorPage() {
       <div className="ise-tabs">
         <button className={`ise-tab ${tab === 'browse' ? 'active' : ''}`} onClick={() => setTab('browse')}>Browse / New</button>
         <button className={`ise-tab ${tab === 'editor' ? 'active' : ''}`} onClick={() => setTab('editor')}>Edit Set</button>
+        <button className={`ise-tab ${tab === 'workshop' ? 'active' : ''}`} onClick={() => setTab('workshop')}>Texture Workshop</button>
       </div>
 
-      {tab === 'browse' && (
+      <div className="ise-tab-content" style={{ display: tab === 'browse' ? 'block' : 'none' }}>
         <SetBrowser
           key={browserKey}
           query={query}
           searchItemSets={searchItemSets}
           onEdit={handleEdit}
           onCreate={handleCreate}
+          onWorkshop={(id) => { setWorkshopSetId(id); setTab('workshop'); }}
         />
-      )}
-      {tab === 'editor' && (
+      </div>
+      <div className="ise-tab-content" style={{ display: tab === 'editor' ? 'block' : 'none' }}>
         <SetEditor
           query={query}
           searchSpellsDbc={searchSpellsDbc}
@@ -491,7 +517,8 @@ export default function ItemSetEditorPage() {
           worldmapMpqPath={worldmapMpqPath}
           onOpenItem={() => { window.location.hash = '#/items'; }}
         />
-      )}
+      </div>
+      <div className="ise-workshop-tab" style={{ display: tab === 'workshop' ? 'flex' : 'none' }}><TextureWorkshopPage embedded initialSetId={workshopSetId} /></div>
     </div>
   );
 }

@@ -843,7 +843,25 @@ export default function TalentEditorPage() {
 					onCancel={() => setConfirmDelete(false)}
 				/>
 			)}
-			<div className="talent-layout fade-in">
+			<div className="talent-page fade-in">
+				<header className="dashboard-header talent-page-header">
+					<div>
+						<h1>Talent Editor</h1>
+						<p>Build, position, and validate class talent trees from Talent.dbc.</p>
+					</div>
+					<div className="dashboard-header-status">
+						<GitBranch size={14} /> {activeTab?.Name_Lang_enUS || 'Select a class'}
+					</div>
+				</header>
+				<div className="dashboard-toolbar talent-page-toolbar">
+					<span>Class: <b>{selectedClass?.name || '—'}</b></span>
+					<span className="dashboard-toolbar-divider" />
+					<span>Tree: <b>{activeTab?.Name_Lang_enUS || '—'}</b></span>
+					<span className="dashboard-toolbar-divider" />
+					<span>{talents.length} talents</span>
+					<span className="dashboard-toolbar-spacer" />
+					<span className="dashboard-toolbar-status online"><i /> Talent.dbc</span>
+				</div>
 			{/* ── Class sidebar ── */}
 			<div className="talent-class-list">
 				<div className="talent-section-label">Classes</div>
@@ -858,7 +876,8 @@ export default function TalentEditorPage() {
 						<span>{cls.name}</span>
 					</div>
 				))}
-			</div>
+				</div>
+				<div className="talent-layout">
 
 			{/* ── Tree canvas ── */}
 			<div className="talent-tree-area">
@@ -1142,6 +1161,9 @@ export default function TalentEditorPage() {
 											{spellNames[primarySpellId] && <span className="field-spell-hint"> — {spellNames[primarySpellId]}</span>}
 											<span className="spell-icon-ranks"> ({ranksWithPrimarySpell.length} rank{ranksWithPrimarySpell.length !== 1 ? 's' : ''})</span>
 										</label>
+										<button className="btn-ghost" type="button" onClick={() => window.azeroth.window.openSpellLookup(primarySpellId)} title={`Open Spell Lookup for spell #${primarySpellId}`}>
+											<Search size={13} /> Lookup spell
+										</button>
 										<div className="spell-icon-input-group">
 											{spellIcons[primarySpellId] && (
 												<img src={spellIcons[primarySpellId]} alt="icon" className="spell-icon-master-preview" />
@@ -1240,6 +1262,7 @@ export default function TalentEditorPage() {
 			</div>
 
 			{/* ── Spell Picker Modal ── */}
+			</div>
 			{showSpellPicker && (
 				<div className="spell-picker-modal">
 					<div className="spell-picker-overlay" onClick={() => setShowSpellPicker(false)} />

@@ -167,10 +167,20 @@ function AttachedM2Pass({ pass, data, texture }) {
   useEffect(() => () => { geometry?.dispose(); material.dispose(); }, [geometry, material]);
   return geometry?.getIndex()?.count ? <mesh geometry={geometry} material={material} renderOrder={pass.order ?? pass.index}/> : null;
 }
+function recolorAttachment(rgba, profile) {
+  if (!profile) return rgba;
+  const out = new Uint8Array(rgba), hue = (Number(profile.hue) || 0) / 360, saturation = 1 + (Number(profile.saturation) || 0) / 100, brightness = (Number(profile.brightness) || 0) / 100, contrast = 1 + (Number(profile.contrast) || 0) / 100, amount = Math.max(0, Math.min(1, Number(profile.paletteStrength ?? 100) / 100));
+  const parse = value => value ? [parseInt(value.slice(1,3),16),parseInt(value.slice(3,5),16),parseInt(value.slice(5,7),16)] : null, colors = [parse(profile.primary),parse(profile.secondary),parse(profile.accent)];
+  const tone = light => { const a=colors[0]||colors[1]||colors[2], b=colors[1]||a, c=colors[2]||b;if(!a)return null;const t=Math.max(0,Math.min(1,light)), from=t<.5?a:b,to=t<.5?b:c,k=t<.5?t*2:(t-.5)*2;return from.map((v,i)=>v*(1-k)+to[i]*k); };
+  const mappings = (profile.colorMappings || []).filter(row => row.enabled && parse(row.source) && parse(row.target));
+  if (mappings.length) { for (let i = 0; i < out.length; i += 4) { if (!out[i + 3]) continue; const source = [out[i], out[i + 1], out[i + 2]], match = mappings.map(row => ({ row, distance: Math.hypot(...source.map((value, index) => value - parse(row.source)[index])) })).sort((a, b) => a.distance - b.distance)[0]; if (!match || match.distance > Number(match.row.tolerance || 74)) continue; const target = parse(match.row.target), lightness = (source[0] + source[1] + source[2]) / 765, scale = .42 + lightness * .78; out[i] = Math.min(255, target[0] * scale); out[i + 1] = Math.min(255, target[1] * scale); out[i + 2] = Math.min(255, target[2] * scale); } return out; }
+  for (let i = 0; i < out.length; i += 4) { if (!out[i + 3]) continue; let r=out[i]/255,g=out[i+1]/255,b=out[i+2]/255,max=Math.max(r,g,b),min=Math.min(r,g,b),d=max-min,h=0,s=max?d/max:0; if(d)h=((max===r?(g-b)/d:max===g?2+(b-r)/d:4+(r-g)/d)/6+1)%1;h=(h+hue+1)%1;s=Math.max(0,Math.min(1,s*saturation));const c=max*s,x=c*(1-Math.abs((h*6)%2-1)),m=max-c;[r,g,b]=h<1/6?[c,x,0]:h<2/6?[x,c,0]:h<3/6?[0,c,x]:h<4/6?[0,x,c]:h<5/6?[x,0,c]:[c,0,x];let next=[r+m,g+m,b+m].map(v=>Math.max(0,Math.min(255,((v-.5)*contrast+.5+brightness)*255))); const light=(next[0]+next[1]+next[2])/765,target=tone(light);if(target)next=next.map((v,index)=>v*(1-amount)+target[index]*amount);out[i]=next[0];out[i+1]=next[1];out[i+2]=next[2]; }
+  return out;
+}
 function AttachedM2({ model, anchor }) {
   const [data, setData] = useState(null);
   useEffect(() => { let cancelled = false; if (!model?.modelPath || !window.azeroth?.m2?.loadModelByPath) { setData(null); return undefined; } window.azeroth.m2.loadModelByPath({ modelPath: model.modelPath, texturePath: model.texturePath || '' }).then(result => { if (!cancelled) setData(result?.success ? result.data : null); }).catch(() => { if (!cancelled) setData(null); }); return () => { cancelled = true; }; }, [model?.modelPath, model?.texturePath]);
-  const texture = useMemo(() => { if (!data?.textureRgba || !data.textureW || !data.textureH) return null; const texture = new THREE.DataTexture(new Uint8Array(data.textureRgba), data.textureW, data.textureH, THREE.RGBAFormat); texture.flipY = false; texture.needsUpdate = true; return texture; }, [data]);
+  const texture = useMemo(() => { if (!data?.textureRgba || !data.textureW || !data.textureH) return null; const texture = new THREE.DataTexture(recolorAttachment(data.textureRgba, model.profile), data.textureW, data.textureH, THREE.RGBAFormat); texture.flipY = false; texture.needsUpdate = true; return texture; }, [data, model.profile]);
   useEffect(() => () => texture?.dispose(), [texture]);
   if (!anchor || !data) return null;
   const offset = model.offset || [0, 0, 0];

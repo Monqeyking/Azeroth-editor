@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box, SwatchBook
+  Layers, ShoppingBag, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -63,7 +63,6 @@ const NAV_GROUPS = [
     items: [
       { to: '/editor3d',        icon: Monitor,    label: '3D Editor' },
       { to: '/asset-editor',    icon: Box,        label: '3D Asset Editor' },
-      { to: '/texture-workshop', icon: SwatchBook, label: 'Texture Workshop' },
       { to: '/ui-editor',       icon: LayoutGrid, label: 'UI Editor' },
       { to: '/worldmap',        icon: Globe,   label: 'World Map' },
       { to: '/expansion-lock',  icon: Lock,    label: 'Expansion Lock' },
@@ -200,6 +199,12 @@ export default function Layout() {
           }>
             <LayoutDashboard size={14} />
             <span>Dashboard</span>
+          </NavLink>
+          <NavLink to="/server-config" className={({ isActive }) =>
+            `nav-item nav-item-child${isActive ? ' active' : ''}`
+          }>
+            <Settings size={13} />
+            <span>Server Config</span>
           </NavLink>
 
           <div className="nav-section-gap" />

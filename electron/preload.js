@@ -70,8 +70,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     readBlpFile: (filePath) => ipcRenderer.invoke('dbc:readBlpFile', filePath),
     readOutputBlpTexture: (blpPath) => ipcRenderer.invoke('dbc:readOutputBlpTexture', blpPath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
-    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false) =>
-      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput),
+    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false) =>
+      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput, noOverwrite),
     bakeNpcTexture: (dataPath, extraId, rgbaBase64, maskBase64) =>
       ipcRenderer.invoke('dbc:bakeNpcTexture', dataPath, extraId, rgbaBase64, maskBase64),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
@@ -81,6 +81,10 @@ contextBridge.exposeInMainWorld('azeroth', {
     searchItemSets: (dbcPath, term) => ipcRenderer.invoke('dbc:searchItemSets', dbcPath, term),
     writeItemSet: (dbcPath, set) => ipcRenderer.invoke('dbc:writeItemSet', dbcPath, set),
     findNextItemSetId: (dbcPath) => ipcRenderer.invoke('dbc:findNextItemSetId', dbcPath),
+  },
+  textureWorkshop: {
+    writeSql: (name, sql) => ipcRenderer.invoke('textureWorkshop:writeSql', name, sql),
+    stageDbc: (dbcPath, payload) => ipcRenderer.invoke('textureWorkshop:stageDbc', dbcPath, payload),
   },
   glue: {
     readTextFile: (dataPath, internalPath) => ipcRenderer.invoke('glue:readTextFile', dataPath, internalPath),
@@ -113,7 +117,26 @@ contextBridge.exposeInMainWorld('azeroth', {
     load: () => ipcRenderer.invoke('config:load'),
     save: (config) => ipcRenderer.invoke('config:save', config),
   },
-  window: { openSpellLookup: () => ipcRenderer.invoke('window:openSpellLookup') },
+  window: {
+    openSpellLookup: (query) => ipcRenderer.invoke('window:openSpellLookup', query),
+    openSpellEditor: (spellId) => ipcRenderer.invoke('window:openSpellEditor', spellId),
+    getSpellLookupQuery: () => ipcRenderer.invoke('window:getSpellLookupQuery'),
+    onSpellLookupQuery: (callback) => {
+      const listener = (_, query) => callback(query);
+      ipcRenderer.on('spell-lookup:query', listener);
+      return () => ipcRenderer.removeListener('spell-lookup:query', listener);
+    },
+    onOpenSpellEditor: (callback) => {
+      const listener = (_, spellId) => callback(spellId);
+      ipcRenderer.on('app:openSpellEditor', listener);
+      return () => ipcRenderer.removeListener('app:openSpellEditor', listener);
+    },
+  },
+  serverConfig: {
+    list: (paths) => ipcRenderer.invoke('serverConfig:list', paths),
+    read: (filePath) => ipcRenderer.invoke('serverConfig:read', { filePath }),
+    save: (filePath, updates) => ipcRenderer.invoke('serverConfig:save', { filePath, updates }),
+  },
   clipboard: { writeText: (value) => ipcRenderer.invoke('clipboard:writeText', value) },
   // Spawn loader (3D editor)
   spawns: {

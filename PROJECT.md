@@ -30,7 +30,7 @@ Elke editor moet dit doel ondersteunen: snel custom content kunnen aanmaken, aan
 | ItemEditorPage | `/items` | `item_template` CRUD met class/quality/bonding dropdowns. Filters + bulk edit, Create tab, Scaling tab. |
 | QuestEditorPage | `/quests` | `quest_template` CRUD. Tekstvelden + getallen. |
 | SpellEditorPage | `/spells` | `Spell.dbc` via IPC. SchoolMask checkboxes, dropdowns, Effect/EffectAura, Attributes flags, Clone Ã¢â€ â€™ Trainer workflow, Ctrl+S, Compare-tab tegen extern Spell.dbc (read-only, copy-to-local). |
-| TalentEditorPage | `/talents` | DBC-based. Visuele 15Ãƒâ€”4 grid per class/tab. Drag-and-drop, prereq-pijlen, icon picker, live preview, Compare-toggle tegen extern Talent.dbc (read-only split-view, zelfde class/tree selectie). |
+| TalentEditorPage | `/talents` | DBC-based. Visuele 15Ãƒâ€”4 grid per class/tab. Drag-and-drop, prereq-pijlen, icon picker, live preview, Compare-toggle tegen extern Talent.dbc (read-only split-view, zelfde class/tree selectie). Talent records are automatically ordered by tab, tier and column after every write. |
 | TrainerSpellPage | `/trainer-spells` | Beheer `trainer_spell` (nieuw systeem) en `npc_trainer` (oud systeem). Zie architectuursectie. |
 | ProfessionEditorPage | `/professions` | Guided profession workflow met presets, relation inspectie, warnings en clone/variant support. |
 | LootEditorPage | `/loot` | `creature_loot_template` + `item_loot_template` + `gameobject_loot_template`. Multi-row editor. |

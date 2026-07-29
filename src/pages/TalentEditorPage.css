@@ -1,21 +1,56 @@
 /* ── Talent Editor Layout ─────────────────────────────────────────────── */
-.talent-layout {
+.talent-page {
 	display: flex;
+	flex-direction: column;
 	height: 100%;
 	overflow: hidden;
+	background: var(--bg-void);
+}
+
+.talent-page-header {
+	padding: 14px 16px 10px;
+	border-bottom: 0;
+}
+
+.talent-page-toolbar {
+	margin: 0 12px 10px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
+}
+
+.talent-page-toolbar b {
+	color: var(--text-primary);
+	font-weight: 600;
+}
+
+.talent-layout {
+	display: flex;
+	flex: 1;
+	min-height: 0;
+	margin: 0 12px 12px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-md);
+	overflow: hidden;
+	background: var(--bg-panel);
 }
 
 /* ── Class sidebar ─────────────────────────────────────────────────────── */
 .talent-class-list {
-	width: 158px;
-	border-right: 1px solid var(--border);
-	overflow-y: auto;
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	border-bottom: 1px solid var(--border);
+	overflow-x: auto;
 	flex-shrink: 0;
-	background: var(--bg-panel);
+	background: var(--bg-raised);
+	padding: 7px 10px;
+	margin: 0 12px 8px;
+	border: 1px solid var(--border);
+	border-radius: var(--radius-sm);
 }
 
 .talent-section-label {
-	padding: 12px 14px 8px;
+	padding: 0 8px 0 2px;
 	font-size: 10px;
 	font-weight: 700;
 	letter-spacing: 1.5px;
@@ -27,7 +62,10 @@
 	display: flex;
 	align-items: center;
 	gap: 9px;
-	padding: 9px 14px;
+	padding: 7px 10px;
+	border: 1px solid transparent;
+	border-radius: var(--radius-sm);
+	white-space: nowrap;
 	cursor: pointer;
 	font-size: 13px;
 	color: var(--text-secondary);
@@ -42,6 +80,7 @@
 .talent-class-item.active {
 	background: var(--bg-active);
 	color: var(--text-white);
+	border-color: var(--border-gold);
 }
 
 .talent-class-dot {
@@ -59,7 +98,7 @@
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
-	background: var(--bg-void);
+	background: var(--bg-dark);
 }
 
 .talent-tabs {

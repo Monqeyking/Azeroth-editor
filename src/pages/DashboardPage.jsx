@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useConnection } from '../lib/ConnectionContext';
-import { Swords, Package, ScrollText, Sparkles, Database, Activity, Server, Play, Square, Terminal, Send, Users, HeartPulse, RefreshCw, Save } from 'lucide-react';
+import { Swords, Package, ScrollText, Sparkles, Database, Activity, Server, Play, Square, Terminal, Send, Users, HeartPulse, RefreshCw, Save, Search, SlidersHorizontal } from 'lucide-react';
 import './DashboardPage.css';
 
 const MAX_LINES = 500;
@@ -22,31 +23,36 @@ function formatUptime(ms) {
   return days ? `${days}d ${hours}h` : hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function ServerConsole({ type, label, serverStatus, exePath, onCommand, liveConsole }) {
+function ServerConsole({ type, label, serverStatus, exePath, onCommand }) {
   const [lines, setLines] = useState([]);
   const [input, setInput] = useState('');
   const bottomRef = useRef(null);
-  const sawLiveOutput = useRef(false);
+  const lastLiveLine = useRef({ text: '', at: 0 });
 
   useEffect(() => {
-    if (liveConsole) return undefined;
-    if (!exePath) return undefined;
+    if (serverStatus !== 'offline' || !exePath) return undefined;
     let active = true;
     const load = async () => {
       const result = await window.azeroth.server.readLog({ type, exePath });
-      if (active && result.success && !sawLiveOutput.current) setLines(result.lines || []);
+      if (active && result.success) setLines(result.lines || []);
     };
     load();
-    const timer = setInterval(load, 1000);
+    const timer = setInterval(load, 1500);
     return () => { active = false; clearInterval(timer); };
-  }, [type, exePath, liveConsole]);
+  }, [type, exePath, serverStatus]);
+
+  useEffect(() => {
+    if (serverStatus !== 'offline') setLines([]);
+  }, [serverStatus]);
 
   useEffect(() => {
     const listener = window.azeroth.server.onOutput(message => {
       if (message.type !== type) return;
-      sawLiveOutput.current = true;
       const line = String(message.line).replace(/\x1B\[[0-?]*[ -\/]*[@-~]/g, '');
       if (!line) return;
+      const now = Date.now();
+      if (lastLiveLine.current.text === line && now - lastLiveLine.current.at < 1000) return;
+      lastLiveLine.current = { text: line, at: now };
       setLines(current => [...current, line].slice(-MAX_LINES));
     });
     return () => window.azeroth.server.offOutput(listener);
@@ -114,8 +120,100 @@ function CustomTotal({ label, value }) {
   return <div className="custom-total"><strong>{value?.toLocaleString() ?? '—'}</strong><small>{label}</small></div>;
 }
 
+function ServerConfigPanel({ serverPaths }) {
+  const [files, setFiles] = useState([]);
+  const [selected, setSelected] = useState('');
+  const [settings, setSettings] = useState([]);
+  const [original, setOriginal] = useState([]);
+  const [filter, setFilter] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [notice, setNotice] = useState('');
+  const changes = settings.filter((item, index) => item.value !== original[index]?.value);
+
+  const loadFiles = useCallback(async () => {
+    setLoading(true); setNotice('');
+    const result = await window.azeroth.serverConfig.list(serverPaths);
+    if (!result.success) { setNotice(result.error); setLoading(false); return; }
+    setFiles(result.files || []);
+    setSelected(current => result.files?.some(file => file.filePath === current) ? current : (result.files?.[0]?.filePath || ''));
+    setLoading(false);
+  }, [serverPaths]);
+
+  const loadSettings = useCallback(async () => {
+    if (!selected) { setSettings([]); setOriginal([]); return; }
+    setLoading(true); setNotice('');
+    const result = await window.azeroth.serverConfig.read(selected);
+    if (result.success) {
+      const ordered = [...(result.settings || [])].sort((a, b) => a.key.localeCompare(b.key, undefined, { sensitivity: 'base' }));
+      setSettings(ordered); setOriginal(ordered);
+    }
+    else setNotice(result.error);
+    setLoading(false);
+  }, [selected]);
+
+  useEffect(() => { loadFiles(); }, [loadFiles]);
+  useEffect(() => { loadSettings(); }, [loadSettings]);
+
+  const save = async () => {
+    if (!changes.length) return;
+    setNotice('Saving...');
+    const result = await window.azeroth.serverConfig.save(selected, changes);
+    if (result.success) { setOriginal(settings); setNotice(`Saved ${changes.length} setting${changes.length === 1 ? '' : 's'}. Backup created beside the config file.`); }
+    else setNotice(result.error || 'Could not save config.');
+  };
+  const visible = settings.filter(item => `${item.key} ${item.value} ${item.description}`.toLowerCase().includes(filter.toLowerCase()));
+
+  const fileName = files.find(file => file.filePath === selected)?.name;
+  return <div className="dashboard fade-in">
+    <header className="dashboard-header">
+      <div><h1>Server Config</h1><p>Tune active AzerothCore settings with the same workflow as the server dashboard.</p></div>
+      <div className="dashboard-header-status"><SlidersHorizontal size={12} /><span>{changes.length ? `${changes.length} unsaved change${changes.length === 1 ? '' : 's'}` : 'All changes saved'}</span></div>
+    </header>
+    <div className="dashboard-toolbar config-toolbar">
+      <span><Server size={14} />{fileName || 'No config selected'}</span>
+      <span className="dashboard-toolbar-divider" />
+      <span><Database size={14} />{settings.length.toLocaleString()} settings</span>
+      <span className="dashboard-toolbar-spacer" />
+      <button className="btn-ghost" onClick={loadSettings} disabled={!selected || loading}><RefreshCw size={13} /> Reload</button>
+      <button className="btn-primary" onClick={save} disabled={!changes.length}><Save size={13} /> Save {changes.length ? `(${changes.length})` : ''}</button>
+    </div>
+    <div className="dashboard-control config-controls">
+      <div className="panel config-file-panel">
+        <div className="panel-header"><Server size={14} /><span>Configuration File</span></div>
+        <div className="panel-content">
+          <label className="config-label">Active file</label>
+          <select value={selected} onChange={e => setSelected(e.target.value)} disabled={!files.length}>
+            {!files.length && <option>No server config found</option>}
+            {files.map(file => <option key={file.filePath} value={file.filePath}>{file.name}</option>)}
+          </select>
+          <small>Files are read from the folders of the configured server executables.</small>
+        </div>
+      </div>
+      <div className="panel config-search-panel">
+        <div className="panel-header"><Search size={14} /><span>Find a Setting</span></div>
+        <div className="panel-content"><div className="config-search"><Search size={14} /><input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search settings, values or comments..." /></div><small>{visible.length.toLocaleString()} matching settings</small></div>
+      </div>
+    </div>
+    {notice && <div className={`config-notice${notice.startsWith('Saved') ? ' success' : ''}`}>{notice}</div>}
+    {!serverPaths.worldExe && !serverPaths.authExe && <div className="panel"><div className="config-empty"><SlidersHorizontal size={24} /><strong>Server paths are not set</strong><span>Set the Worldserver or Authserver executable path in Settings first.</span></div></div>}
+    {loading && selected ? <div className="panel"><div className="loading-text">Loading config...</div></div> : !!selected && <div className="panel config-settings-panel">
+      <div className="panel-header"><SlidersHorizontal size={14} /><span>Settings</span><span className="config-count">{visible.length.toLocaleString()}</span></div>
+      <div className="panel-content config-list">
+        <div className="config-list-header"><span>Setting</span><span>Value</span><span>Description</span></div>
+        {visible.map(item => <div className={`config-row${item.value !== original[settings.indexOf(item)]?.value ? ' changed' : ''}`} key={item.line}>
+          <code>{item.key}</code>
+          { /^(true|false|0|1)$/i.test(item.value) ? <select value={item.value} onChange={e => setSettings(current => current.map(row => row.line === item.line ? { ...row, value: e.target.value } : row))}>{/^(0|1)$/.test(item.value) ? <><option value="1">1 — True</option><option value="0">0 — False</option></> : <><option value="true">true — Enabled</option><option value="false">false — Disabled</option></>}</select> : <input value={item.value} onChange={e => setSettings(current => current.map(row => row.line === item.line ? { ...row, value: e.target.value } : row))} spellCheck={false} />}
+          <span>{item.description || '—'}</span>
+        </div>)}
+        {!visible.length && <div className="config-empty">No settings match this search.</div>}
+      </div>
+    </div>}
+  </div>;
+}
+
 export default function DashboardPage() {
   const { query, dbConfig, serverPaths, soapConfig, idRanges } = useConnection();
+  const location = useLocation();
   const [stats, setStats] = useState({});
   const [customStats, setCustomStats] = useState({});
   const [onlinePlayers, setOnlinePlayers] = useState(null);
@@ -124,7 +222,6 @@ export default function DashboardPage() {
 
   const [serverStatus, setServerStatus] = useState({ auth: 'offline', world: 'offline', soap: 'offline', authUptimeMs: 0, worldUptimeMs: 0 });
   const [serverBusy, setServerBusy] = useState({ auth: false, world: false });
-  const [liveConsole, setLiveConsole] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
   const [actionNotice, setActionNotice] = useState('');
   const pollRef = useRef(null);
@@ -174,8 +271,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     const timer = setTimeout(async () => {
-      const result = await window.azeroth.server.attachConsole();
-      setLiveConsole(!!result?.success);
+      await window.azeroth.server.attachConsole();
     }, 0);
     return () => clearTimeout(timer);
   }, []);
@@ -224,6 +320,8 @@ export default function DashboardPage() {
     setRecentCreatures(recent.data || []);
     setLoading(false);
   }
+
+  if (location.pathname === '/server-config') return <ServerConfigPanel serverPaths={serverPaths} />;
 
   return (
     <div className="dashboard fade-in">
@@ -287,7 +385,7 @@ export default function DashboardPage() {
           ].map(({ type, label, hasPath }) => {
             const status = serverStatus[type];
             const busy = serverBusy[type];
-            const isOnline = status === 'online';
+            const isRunning = status === 'online' || status === 'starting';
             return (
               <div key={type} className="server-row">
                 <div className="server-row-left">
@@ -300,7 +398,7 @@ export default function DashboardPage() {
                 <div className="server-actions">
                   {!hasPath ? (
                     <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pad instellen in Settings</span>
-                  ) : isOnline ? (
+                  ) : isRunning ? (
                     <button className="btn-ghost" style={{ fontSize: 12 }} disabled={busy} onClick={() => handleServer(type, 'stop')}>
                       <Square size={11} /> Stop
                     </button>
@@ -330,8 +428,8 @@ export default function DashboardPage() {
       </div>
 
       <div className="server-consoles">
-        <ServerConsole type="auth"  label="Authserver"  serverStatus={serverStatus.auth} exePath={serverPaths.authExe} onCommand={command => sendServerCommand('auth', command)} liveConsole={liveConsole} />
-        <ServerConsole type="world" label="Worldserver" serverStatus={serverStatus.world} exePath={serverPaths.worldExe} onCommand={command => sendServerCommand('world', command)} liveConsole={liveConsole} />
+        <ServerConsole type="auth"  label="Authserver"  serverStatus={serverStatus.auth} exePath={serverPaths.authExe} onCommand={command => sendServerCommand('auth', command)} />
+        <ServerConsole type="world" label="Worldserver" serverStatus={serverStatus.world} exePath={serverPaths.worldExe} onCommand={command => sendServerCommand('world', command)} />
       </div>
 
       <div className="dashboard-panels">

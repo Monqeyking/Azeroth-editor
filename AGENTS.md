@@ -117,6 +117,10 @@ Beide DBC bestanden moeten naar server EN client gekopieerd worden na wijziginge
 - WotLK single-rank spells (geen subtext): selecteert laagste ID in bereik 25000-65000 met SpellLevel > 1
 - Confirmed (in trainer_spell) wint altijd van niet-confirmed
 
+### Talent.dbc record ordering
+- WoW requires `Talent.dbc` records to be ordered by `TabID`, then `TierID`, then `ColumnIndex` (with Talent ID as the final stable tie-breaker). Appending a new talent record at EOF can make the client render a nearly empty tree.
+- `sortTalentDbcRecords()` in `electron/main.js` is applied after talent insert, copy, edit, and delete. Keep this behavior for every future Talent.dbc write path.
+
 ### Open issues (volgende task)
 - Crusader Strike (#35395) verschijnt nog niet bij paladin trainer ondanks correcte trainer_spell entries (TrainerId=3,5,6) en SkillLineAbility.dbc aanpassing
 - Cross-class spells toevoegen vereist nieuw SkillLineAbility.dbc record (nog niet geÃƒÂ¯mplementeerd)
