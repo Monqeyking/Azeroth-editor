@@ -152,6 +152,7 @@ function CharacterRenderPass({ pass, textureRef, skinExtraTextureRef, hairTextur
 function CharacterPassScene({ passes, textureRef, skinExtraTextureRef, hairTextureRef, colorDebug, textureVersion }) {
   return <>{passes.map(pass => <CharacterRenderPass key={`${pass.index}-${pass.submeshIndex}`} pass={pass} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} />)}</>;
 }
+
 function AttachedM2Pass({ pass, data, texture }) {
   const geometry = useMemo(() => {
     const skinData = data?.skinData;
@@ -181,11 +182,18 @@ function AttachedM2({ model, anchor }) {
   const [data, setData] = useState(null);
   useEffect(() => { let cancelled = false; if (!model?.modelPath || !window.azeroth?.m2?.loadModelByPath) { setData(null); return undefined; } window.azeroth.m2.loadModelByPath({ modelPath: model.modelPath, texturePath: model.texturePath || '' }).then(result => { if (!cancelled) setData(result?.success ? result.data : null); }).catch(() => { if (!cancelled) setData(null); }); return () => { cancelled = true; }; }, [model?.modelPath, model?.texturePath]);
   const texture = useMemo(() => { if (!data?.textureRgba || !data.textureW || !data.textureH) return null; const texture = new THREE.DataTexture(recolorAttachment(data.textureRgba, model.profile), data.textureW, data.textureH, THREE.RGBAFormat); texture.flipY = false; texture.needsUpdate = true; return texture; }, [data, model.profile]);
+  const passTextures = useMemo(() => new Map((data?.passTextures || []).flatMap(entry => {
+    if (!entry?.rgba || !entry.w || !entry.h) return [];
+    const texture = new THREE.DataTexture(recolorAttachment(entry.rgba, model.profile), entry.w, entry.h, THREE.RGBAFormat);
+    texture.flipY = false; texture.needsUpdate = true;
+    return [[entry.passIndex, texture]];
+  })), [data, model.profile]);
   useEffect(() => () => texture?.dispose(), [texture]);
+  useEffect(() => () => passTextures.forEach(value => value.dispose()), [passTextures]);
   if (!anchor || !data) return null;
   const offset = model.offset || [0, 0, 0];
   const passes = data.renderPasses?.length ? data.renderPasses : data.skinData?.submeshes.map((_, submeshIndex) => ({ index: submeshIndex, submeshIndex, blend: 0, order: submeshIndex })) || [];
-  return <group position={[anchor[0] + offset[0], anchor[1] + offset[1], anchor[2] + offset[2]]}>{passes.map(pass => <AttachedM2Pass key={`${pass.index}:${pass.submeshIndex}`} pass={pass} data={data} texture={texture}/>)}</group>;
+  return <group position={[anchor[0] + offset[0], anchor[1] + offset[1], anchor[2] + offset[2]]}>{passes.map(pass => <AttachedM2Pass key={`${pass.index}:${pass.submeshIndex}`} pass={pass} data={data} texture={passTextures.get(pass.index) || texture}/>)}</group>;
 }
 export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = null, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, skinExtraRgba = null, componentTransfer = null, componentPalette = null, preferOutput = false, textureRefreshKey = 0 }) {
   const { worldmapMpqPath } = useConnection();
@@ -339,7 +347,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
               pg.setIndex(new THREE.BufferAttribute(new Uint32Array(buildIndices(res.data.skinData.vertexLookup, res.data.skinData.indexLookup, res.data.skinData.submeshes, [pass.submeshIndex])), 1));
               return { ...pass, geometry: pg };
             }).filter(pass => pass.geometry.getIndex()?.count);
-                        g.computeBoundingBox();
+            g.computeBoundingBox();
             const box = g.boundingBox;
             setHeadAnchor(box ? [
               (box.min.x + box.max.x) / 2,
@@ -373,8 +381,8 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
 
     if (!window.azeroth?.m2?.loadCharModel) return;
 
-    // Alleen hairstyle en facial feature wijzigen geosets; skin, face en colors zijn texture-only.
-    const modelKey = `${race}/${gender}/${appearance.hairStyle || 0}/${appearance.facialHair || 0}/${JSON.stringify(itemGeosets)}`;
+    // Face, hairstyle and facial feature can select different character submeshes; skin and colours are texture-only.
+    const modelKey = `${race}/${gender}/${appearance.face || 0}/${appearance.hairStyle || 0}/${appearance.facialHair || 0}/${JSON.stringify(itemGeosets)}`;
     const subKey = JSON.stringify(enabledSubmeshIndices);
     const fullKey = `${modelKey}|${subKey}`;
 
@@ -430,7 +438,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
               pg.setIndex(new THREE.BufferAttribute(new Uint32Array(buildIndices(res.data.skinData.vertexLookup, res.data.skinData.indexLookup, res.data.skinData.submeshes, [pass.submeshIndex])), 1));
               return { ...pass, geometry: pg };
             }).filter(pass => pass.geometry.getIndex()?.count);
-                        g.computeBoundingBox();
+            g.computeBoundingBox();
             const box = g.boundingBox;
             const points = Object.fromEntries((res.data.attachmentPoints || []).map(point => [point.id, point.position]));
             setAttachmentPoints(points);

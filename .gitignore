@@ -2,6 +2,7 @@
 dist/
 dist-electron/
 island-project-source/
+docs/
 PNG/
 debug-blp/
 output/
@@ -29,3 +30,4 @@ sync_test.txt
 AGENTS.MD
 PROJECT.MD
 sync_test.txt
+EDITOR_STYLE_GUIDE.md

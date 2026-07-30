@@ -351,6 +351,7 @@ export default function CreatureEditorPage() {
   const [editingRouteOption, setEditingRouteOption] = useState(false);
   const [routeOptionDraft, setRouteOptionDraft] = useState(null);
   const [newRouteParentMenu, setNewRouteParentMenu] = useState('');
+  const [newRouteTrainerClass, setNewRouteTrainerClass] = useState('');
   const [newRouteLabel, setNewRouteLabel] = useState('');
   const [newRoutePoiLabel, setNewRoutePoiLabel] = useState('');
   const [newRouteSpeech, setNewRouteSpeech] = useState('');
@@ -702,22 +703,34 @@ export default function CreatureEditorPage() {
     const spawn = directionTargetSpawns.find(row => String(row.guid) === String(directionSpawnGuid));
     const label = newRouteLabel.trim();
     if (!parentOption || !spawn || !directionTarget || !label) { setMsg({ type: 'error', text: 'Choose a category, label, destination template, and spawn.' }); return; }
-    const [optionRes, refsRes, menusRes, poiRes, textRes, leafTextRes] = await Promise.all([
+    const [optionRes, activeRootsRes, menusRes, poiRes, textRes, leafTextRes] = await Promise.all([
       query('SELECT OptionID FROM gossip_menu_option WHERE MenuID = ? ORDER BY OptionID', [parentMenuId]),
-      query('SELECT MenuID, OptionID FROM gossip_menu_option WHERE ActionMenuID = ?', [parentMenuId]),
+      query(`WITH RECURSIVE parent_menus AS (
+        SELECT ? AS MenuID, 0 AS depth
+        UNION ALL
+        SELECT gmo.MenuID, pm.depth + 1
+        FROM parent_menus pm JOIN gossip_menu_option gmo ON gmo.ActionMenuID = pm.MenuID
+        WHERE pm.depth < 8
+      )
+      SELECT DISTINCT ct.entry, ct.gossip_menu_id
+      FROM parent_menus pm JOIN creature_template ct ON ct.gossip_menu_id = pm.MenuID`, [parentMenuId]),
       query('SELECT MenuID FROM gossip_menu WHERE MenuID >= 4000000 ORDER BY MenuID'),
       query('SELECT ID FROM points_of_interest WHERE ID >= 4000000 ORDER BY ID'),
       query('SELECT ID FROM npc_text WHERE ID >= 4000000 ORDER BY ID'),
       query('SELECT TextID FROM gossip_menu WHERE MenuID = 1909 LIMIT 1'),
     ]);
-    const refs = refsRes.data || [];
-    if (refs.length !== 1 || Number(refs[0].MenuID) !== rootMenuId || Number(refs[0].OptionID) !== Number(parentOption.OptionID)) { setMsg({ type: 'error', text: 'This category submenu is shared outside this city root, so the editor will not modify it.' }); return; }
+    const activeRoots = activeRootsRes.data || [];
+    const parentNeedsClone = activeRoots.some(row => Number(row.entry) !== Number(selected?.entry));
+    if (parentNeedsClone && directions.menuRefs.length !== 1) { setMsg({ type: 'error', text: 'This guard root menu is shared too. Copy the root menu for this guard before adding a new city-specific route.' }); return; }
+    const usedMenuIds = new Set((menusRes.data || []).map(row => Number(row.MenuID)));
+    const nextMenuId = () => { let id = 4000000; while (usedMenuIds.has(id)) id++; usedMenuIds.add(id); return id; };
     const free = (rows, field) => { const used = new Set((rows.data || []).map(row => Number(row[field]))); let id = 4000000; while (used.has(id)) id++; return id; };
     const optionId = Math.max(-1, ...(optionRes.data || []).map(row => Number(row.OptionID))) + 1;
     const poiLabel = newRoutePoiLabel.trim() || directionTarget.name;
     const speech = newRouteSpeech.trim() || `You can find ${directionTarget.name} nearby.`;
-    setNewRoutePlan({ parentMenuId, parentLabel: parentOption.OptionText, optionId, leafMenuId: free(menusRes, 'MenuID'), poiId: free(poiRes, 'ID'), textId: free(textRes, 'ID'), leafTextFallback: leafTextRes.data?.[0]?.TextID || 2562, label, poiLabel, speech, target: directionTarget, spawn });
-  }, [directionSpawnGuid, directionTarget, directionTargetSpawns, directions.menus, form.gossip_menu_id, newRouteLabel, newRouteParentMenu, newRoutePoiLabel, newRouteSpeech, query]);
+    const cloneMenuId = parentNeedsClone ? nextMenuId() : null;
+    setNewRoutePlan({ rootMenuId, rootOptionId: parentOption.OptionID, sourceParentMenuId: parentMenuId, parentMenuId: cloneMenuId || parentMenuId, parentNeedsClone, parentLabel: parentOption.OptionText, optionId, leafMenuId: nextMenuId(), poiId: free(poiRes, 'ID'), textId: free(textRes, 'ID'), leafTextFallback: leafTextRes.data?.[0]?.TextID || 2562, label, poiLabel, speech, target: directionTarget, spawn });
+  }, [directionSpawnGuid, directionTarget, directionTargetSpawns, directions.menuRefs.length, directions.menus, form.gossip_menu_id, newRouteLabel, newRouteParentMenu, newRoutePoiLabel, newRouteSpeech, query, selected?.entry]);
 
   const saveNewRoutePlan = useCallback(async () => {
     const p = newRoutePlan;
@@ -732,13 +745,18 @@ export default function CreatureEditorPage() {
         PRIMARY KEY (guard_entry, parent_menu_id, option_id)
       )`);
       await runAtomicWrite([], async () => {
+        if (p.parentNeedsClone) {
+          await run('INSERT INTO gossip_menu (MenuID, TextID) SELECT ?, TextID FROM gossip_menu WHERE MenuID = ?', [p.parentMenuId, p.sourceParentMenuId]);
+          await run('INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) SELECT ?, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild FROM gossip_menu_option WHERE MenuID = ?', [p.parentMenuId, p.sourceParentMenuId]);
+          await run('UPDATE gossip_menu_option SET ActionMenuID = ? WHERE MenuID = ? AND OptionID = ?', [p.parentMenuId, p.rootMenuId, p.rootOptionId]);
+        }
         await run('INSERT INTO npc_text (ID, text0_0, text0_1, BroadcastTextID0, lang0, Probability0) VALUES (?,?,?,?,?,?)', [p.textId, p.speech, '', 0, 0, 1]);
         await run('INSERT INTO gossip_menu (MenuID, TextID) VALUES (?,?)', [p.leafMenuId, p.textId]);
         await run('INSERT INTO points_of_interest (ID, PositionX, PositionY, Icon, Flags, Importance, Name) VALUES (?,?,?,?,?,?,?)', [p.poiId, p.spawn.position_x, p.spawn.position_y, 7, 99, 0, p.poiLabel]);
         await run('INSERT INTO gossip_menu_option (MenuID, OptionID, OptionIcon, OptionText, OptionBroadcastTextID, OptionType, OptionNpcFlag, ActionMenuID, ActionPoiID, BoxCoded, BoxMoney, BoxText, BoxBroadcastTextID, VerifiedBuild) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)', [p.parentMenuId, p.optionId, 0, p.label, 0, 1, 1, p.leafMenuId, p.poiId, 0, 0, '', 0, null]);
         await run('INSERT INTO guard_directions_editor_route (guard_entry, parent_menu_id, option_id, leaf_menu_id, poi_id, npc_text_id, destination_entry, destination_guid) VALUES (?,?,?,?,?,?,?,?)', [selected.entry, p.parentMenuId, p.optionId, p.leafMenuId, p.poiId, p.textId, p.target.entry, p.spawn.guid]);
       });
-      setNewRoutePlan(null); setNewRouteLabel(''); setNewRoutePoiLabel(''); setNewRouteSpeech('');
+      setNewRoutePlan(null); setNewRouteTrainerClass(''); setNewRouteLabel(''); setNewRoutePoiLabel(''); setNewRouteSpeech('');
       setMsg({ type: 'success', text: `Added ${p.label} under ${p.parentLabel}.` });
       await selectCreature(selected.entry);
     } catch (err) { setMsg({ type: 'error', text: err.message || 'Could not add direction.' }); }
@@ -1800,7 +1818,9 @@ export default function CreatureEditorPage() {
     const routesForPoi = (poiId) => [...new Set(optionRows.filter(row => Number(row.ActionPoiID) === Number(poiId)).map(routeForOption))];
     return (
       <div className="creature-section-block directions-panel">
-        <div className="creature-section-head"><h4 className="field-section-title">Gossip Options</h4></div>
+        <details className="directions-panel-collapsible">
+        <summary className="creature-section-head"><h4 className="field-section-title">Gossip Options</h4><span>{directions.pois.length} POIs · {optionRows.length} options</span></summary>
+        <div className="directions-panel-content">
         <p className="field-hint">Shows this creature’s reachable gossip tree. Root options can be removed here; shared root menus are copied for this creature first.</p>
         {!Number(form.gossip_menu_id) ? <p className="field-hint directions-warning">This creature has no gossip menu assigned.</p> : null}
         <div className="directions-summary">
@@ -1823,7 +1843,9 @@ export default function CreatureEditorPage() {
         </div>
         {directions.guardSpawns.length === 0 && <p className="field-hint directions-warning">No live guard spawn was found. A POI has no map column, so its map cannot be verified from this guard.</p>}
         {directions.guardSpawns.length > 0 && <p className="field-hint">Guard spawn context: {directions.guardSpawns.map(s => `#${s.guid} on map ${s.map} (${Number(s.position_x).toFixed(2)}, ${Number(s.position_y).toFixed(2)})`).join(' · ')}</p>}
-        <div className="directions-options">
+        <details className="directions-options-panel">
+          <summary>Reachable gossip options ({optionRows.length})</summary>
+          <div className="directions-options">
           {optionRows.length === 0 ? <p className="field-hint">No reachable gossip options.</p> : optionRows.map((row, index) => (
             <div className={`directions-option ${poiIds.has(Number(row.ActionPoiID)) ? 'has-poi' : ''}`} key={`${row.path}-${row.MenuID}-${row.OptionID}-${index}`}>
               <span className="mono">{row.path}</span>
@@ -1833,8 +1855,11 @@ export default function CreatureEditorPage() {
               {Number(row.MenuID) === Number(form.gossip_menu_id) && <button type="button" className="btn-danger directions-destination" onClick={() => removeRootGossipOption(row)}>Remove option</button>}
             </div>
           ))}
+          </div>
+        </details>
         </div>
-        {directions.pois.length > 0 && <><h5 className="field-subsection-title">Linked points of interest</h5>{directions.pois.map(poi => {
+        </details>
+        {directions.pois.length > 0 && <details className="directions-linked-pois"><summary>Linked points of interest ({directions.pois.length})</summary>{directions.pois.map(poi => {
           const ownedRoute = directions.routes.find(route => Number(route.poi_id) === Number(poi.ID)) || (directions.meta && Number(directions.meta.poi_id) === Number(poi.ID) ? { ...directions.meta, parent_menu_id: directions.meta.class_menu_id, option_id: directions.meta.shaman_option_id, leaf_menu_id: directions.meta.leaf_menu_id, npc_text_id: directions.meta.npc_text_id, destination_entry: directions.meta.destination_entry, destination_guid: directions.meta.destination_guid, legacy: true } : null);
           const poiOptions = optionRows.filter(row => Number(row.ActionPoiID) === Number(poi.ID));
           return <div className="directions-poi-card" key={poi.ID}>
@@ -1856,12 +1881,13 @@ export default function CreatureEditorPage() {
               </button>
             )) : <p className="field-hint directions-warning">No creature template could be resolved by the POI name. The database schema has no explicit POI → creature-entry relation.</p>}
           </div>;
-        })}</>}
+        })}</details>}
         {directions.conditions.length > 0 && <details className="directions-conditions"><summary>Related conditions ({directions.conditions.length})</summary><pre>{JSON.stringify(directions.conditions, null, 2)}</pre></details>}
         <h5 className="field-subsection-title">Add custom direction</h5>
         <p className="field-hint">Add a route below an existing city category such as Class Trainer or Profession Trainer. Custom labels use Broadcast Text ID 0.</p>
         <div className="directions-editor-grid">
           <div className="field-group"><label>Parent category</label><select value={newRouteParentMenu} onChange={e => setNewRouteParentMenu(e.target.value)}><option value="">Select category…</option>{optionRows.filter(row => Number(row.MenuID) === Number(form.gossip_menu_id) && Number(row.ActionMenuID)).map(row => <option key={row.OptionID} value={row.ActionMenuID}>{row.OptionText}</option>)}</select></div>
+          <div className="field-group"><label>Trainer class (optional)</label><select value={newRouteTrainerClass} onChange={e => { const value = e.target.value; setNewRouteTrainerClass(value); const trainer = TRAINER_CLASSES.find(item => String(item.value) === value); if (trainer) setNewRouteLabel(`${trainer.label} Trainer`); }}><option value="">Custom direction</option>{TRAINER_CLASSES.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select><span className="field-hint">Choose Shaman to prefill its guard-route label.</span></div>
           <div className="field-group"><label>New direction label</label><input value={newRouteLabel} onChange={e => setNewRouteLabel(e.target.value)} placeholder="Custom Profession" /></div>
           <div className="field-group"><label>Destination creature entry</label><input type="text" inputMode="numeric" value={directionTargetEntry} onChange={e => setDirectionTargetEntry(e.target.value)} onBlur={() => loadDirectionTarget(directionTargetEntry)} /><span className="field-hint">{directionTarget ? `${directionTarget.name} #${directionTarget.entry}` : 'Load a creature template first'}</span></div>
           <div className="field-group"><label>Live destination spawn</label><select value={directionSpawnGuid} onChange={e => setDirectionSpawnGuid(e.target.value)} disabled={!directionTargetSpawns.length}><option value="">Select spawn…</option>{directionTargetSpawns.map(spawn => <option key={spawn.guid} value={spawn.guid}>#{spawn.guid} · map {spawn.map} · {Number(spawn.position_x).toFixed(2)}, {Number(spawn.position_y).toFixed(2)}</option>)}</select></div>
