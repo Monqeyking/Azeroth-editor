@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
-import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, X } from 'lucide-react';
+import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, X, CircleHelp } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
@@ -72,7 +72,7 @@ const QUEST_FLAGS_BITS = {
 };
 
 // â”€â”€ NameHint component â€” async lookup for creature/GO/item names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function NameHint({ id, type, query }) {
+function NameHint({ id, type, query, dbcPath }) {
   const [name, setName] = useState(null);
   const lookupToken = useRef(0);
 
@@ -84,6 +84,14 @@ function NameHint({ id, type, query }) {
       return;
     }
     setName(null);
+
+    if (type === 'spell' && dbcPath) {
+      window.azeroth.dbc.readSpellFull(dbcPath, n).then(r => {
+        if (token !== lookupToken.current) return;
+        setName(r.success ? (r.data?.Name_Lang_enUS || null) : null);
+      });
+      return;
+    }
 
     let sql, params;
     if (type === 'item') {
@@ -415,8 +423,14 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
   );
 }
 
-const FG = ({ label, children, style = {} }) => (
-  <div className="field-group" style={style}><label>{label}</label>{children}</div>
+const FieldHint = ({ text }) => (
+  <span title={text} aria-label={text} style={{ display: 'inline-flex', marginLeft: 4, verticalAlign: 'text-bottom', cursor: 'help', color: 'var(--text-muted)' }}>
+    <CircleHelp size={12} strokeWidth={1.8} />
+  </span>
+);
+
+const FG = ({ label, hint, children, style = {} }) => (
+  <div className="field-group" style={style}><label>{label}{hint && <FieldHint text={hint} />}</label>{children}</div>
 );
 
 const H5 = ({ children }) => (
@@ -502,6 +516,15 @@ function QuestPoiEditor({ questId, query, dbcPath, soapConfig, soapCommand }) {
 function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNpc, activeField, setActiveField, lookupEpoch, poiProps }) {
   const [expandedFlags, setExpandedFlags] = useState(false);
   const [tab, setTab] = useState('General');
+  const [questSorts, setQuestSorts] = useState([]);
+  const dbcPath = poiProps?.dbcPath;
+
+  useEffect(() => {
+    if (!dbcPath) return;
+    window.azeroth.dbc.readQuestSorts(dbcPath).then(result => {
+      if (result.success) setQuestSorts(result.sorts || []);
+    });
+  }, [dbcPath]);
 
   const isFieldDirty = useCallback((key) => String(form?.[key] ?? '') !== String(baseline?.[key] ?? ''), [form, baseline]);
   const isFieldActive = useCallback((key) => activeField === key, [activeField]);
@@ -661,7 +684,7 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNp
             <FG label="Entry"><input type="number" value={form.ID ?? ''} readOnly style={{ opacity: 0.6 }} /></FG>
             <FG label="Title">{txt('LogTitle')}</FG>
             <FG label="Quest Type">{sel('QuestType', QUEST_TYPE_OPTIONS)}</FG>
-            <FG label="Quest Level">{num('QuestLevel')}</FG>
+            <FG label="Quest Level" hint="The quest's displayed level and XP basis. Set -1 to use the player's level for XP calculation; Min Level still controls when it can be accepted.">{num('QuestLevel')}</FG>
             <FG label="Min Level">{num('MinLevel')}</FG>
             <FG label="Max Level">{num('MaxLevel')}</FG>
             <FG label="Suggested Players">{num('SuggestedGroupNum')}</FG>
@@ -669,14 +692,22 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNp
             <FG label="Req. Player Kills">{num('RequiredPlayerKills')}</FG>
           </div>
           <div>
-            <h4 className="field-section-title">Classification</h4>
-            <FG label="Zone/Sort ID">{num('QuestSortID')}</FG>
-            <FG label="Quest Info ID">{num('QuestInfoID')}</FG>
+            <h4 className="field-section-title">Classification <FieldHint text="Quest-log metadata. These fields determine how the quest is categorised in the client; they do not restrict who can accept it." /></h4>
+            <FG label="Zone/Sort ID" hint="0 = no category. Positive values are AreaTable.dbc zone IDs. Negative values are QuestSort.dbc categories, usually class or profession quests; -82 is Shaman.">
+              <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 112px', gap: 8 }}>
+                <select value={Number(form.QuestSortID) < 0 ? String(form.QuestSortID) : ''} onChange={e => e.target.value && onChange('QuestSortID', Number(e.target.value))}>
+                  <option value="">Quest category…</option>
+                  {questSorts.map(sort => <option key={sort.id} value={-sort.id}>{sort.name}</option>)}
+                </select>
+                {num('QuestSortID', { width: '100%' })}
+              </div>
+            </FG>
+            <FG label="Quest Info ID" hint="Optional client category from QuestInfo.dbc, such as Group, PvP, Raid, Dungeon or Escort. Use 0 for a normal quest.">{num('QuestInfoID')}</FG>
             <FG label="XP Difficulty">{sel('RewardXPDifficulty', XP_DIFFICULTY_OPTIONS)}</FG>
             <FG label="Source Spell ID">
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 {num('SourceSpellID')}
-                <NameHint id={form.SourceSpellID} type="spell" query={query} />
+                <NameHint id={form.SourceSpellID} type="spell" query={query} dbcPath={dbcPath} />
               </div>
             </FG>
           </div>
@@ -772,13 +803,13 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNp
             <FG label="Reward Spell">
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 {num('RewardSpell')}
-                <NameHint id={form.RewardSpell} type="spell" query={query} />
+                <NameHint id={form.RewardSpell} type="spell" query={query} dbcPath={dbcPath} />
               </div>
             </FG>
             <FG label="Reward Display Spell">
               <div style={{ display: 'flex', alignItems: 'center' }}>
                 {num('RewardDisplaySpell')}
-                <NameHint id={form.RewardDisplaySpell} type="spell" query={query} />
+                <NameHint id={form.RewardDisplaySpell} type="spell" query={query} dbcPath={dbcPath} />
               </div>
             </FG>
           </div>
@@ -1376,7 +1407,7 @@ export default function QuestEditorPage() {
                 </div>
               </div>
               {createMsg && <div className={`editor-msg ${createMsg.type}`}>{createMsg.text}</div>}
-              <QuestFormFields form={createForm} baseline={createBaseline} onChange={(k, v) => setCreateForm(f => ({ ...f, [k]: v }))} query={query} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} />
+              <QuestFormFields form={createForm} baseline={createBaseline} onChange={(k, v) => setCreateForm(f => ({ ...f, [k]: v }))} query={query} activeField={activeField} setActiveField={setActiveField} lookupEpoch={lookupEpoch} poiProps={{ dbcPath }} />
             </>
           )}
         </div>

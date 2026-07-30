@@ -11,7 +11,7 @@ const QUICK_ACTIONS = [
   { id: 'reload-scripts', label: 'Reload scripts', command: '.reload scripts', icon: RefreshCw, description: 'Reload server scripts.' },
   { id: 'reload-creatures', label: 'Reload creatures', command: '.reload creature_template', icon: RefreshCw, description: 'Reload creature templates.' },
   { id: 'reload-items', label: 'Reload items', command: '.reload item_template', icon: RefreshCw, description: 'Reload item templates.' },
-  { id: 'reload-quests', label: 'Reload quests', command: '.reload quest_template', icon: RefreshCw, description: 'Reload quest templates.' },
+  { id: 'reload-quests', label: 'Reload all quests', command: '.reload all quest', icon: RefreshCw, description: 'Reload all safely reloadable quest data, including quest givers and relations.' },
 ];
 
 function formatUptime(ms) {

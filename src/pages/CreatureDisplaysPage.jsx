@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, useRef } from 'react';
-import { Plus, Save, RefreshCw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Plus, Copy, Save, RefreshCw, Search, ChevronLeft, ChevronRight } from 'lucide-react';
 import { useConnection } from '../lib/ConnectionContext';
 import CharM2Viewer from '../components/char/CharM2Viewer';
 import SubmeshDebugger from '../components/char/SubmeshDebugger';
@@ -112,12 +112,13 @@ export default function CreatureDisplaysPage() {
     return filtered;
   }, [data.charSections, form.race, form.gender, modelDir, restrictToModelDir]);
   const faceLayers = useMemo(() => {
-    let row = data.charSections.find(s => s.race === number(form.race) && s.gender === number(form.gender) && s.baseSection === 1 && s.variation === number(form.face) && s.color === number(form.skin) && allowSection(s));
-    if (restrictToModelDir && textureRoot && row?.texture && !row.texture.toLowerCase().startsWith(textureRoot.toLowerCase())) {
-      row = data.charSections.find(s => s.race === number(form.race) && s.gender === number(form.gender) && s.baseSection === 1 && s.variation === number(form.face) && s.color === number(form.skin) && s.texture && s.texture.toLowerCase().startsWith(textureRoot.toLowerCase()) && allowSection(s));
-    }
+    let rows = data.charSections.filter(s => s.race === number(form.race) && s.gender === number(form.gender) && s.baseSection === 1 && s.variation === number(form.face) && s.color === number(form.skin) && s.texture && allowSection(s));
+    if (restrictToModelDir && textureRoot) rows = rows.filter(s => s.texture.toLowerCase().startsWith(textureRoot.toLowerCase()));
+    const skin = skins.find(s => s.color === number(form.skin));
+    const expectedFlags = skin?.flags === 5 ? 5 : 1;
+    const row = rows.find(s => s.flags === expectedFlags) || rows[0];
     return [row?.texture && { path: row.texture, region: 'face-lower' }, row?.texture2 && { path: row.texture2, region: 'face-upper' }].filter(Boolean);
-  }, [data.charSections, form.race, form.gender, form.face, form.skin, modelDir, restrictToModelDir]);
+  }, [data.charSections, form.race, form.gender, form.face, form.skin, skins, textureRoot, restrictToModelDir]);
   const skinLayers = useMemo(() => {
     if (number(form.race) !== 12) return [];
     const row = skins.find(s => s.color === number(form.skin));
@@ -139,11 +140,11 @@ export default function CreatureDisplaysPage() {
     return [row?.texture && { path: row.texture, region: 'hair-primary' }, row?.texture2 && { path: row.texture2, region: 'face-lower' }, row?.texture3 && { path: row.texture3, region: 'face-upper' }].filter(Boolean);
   }, [data.charSections, form.race, form.gender, form.hairStyle, form.hairColor]);
   const facialLayers = useMemo(() => {
-    const hairColor = number(form.hairColor);
-    const facialColor = hairColor;
+    if (number(form.race) === 12 && number(form.facialHair) === 0) return [];
+    const facialColor = number(form.race) === 12 ? number(form.skin) : number(form.hairColor);
     const row = data.charSections.find(s => s.race === number(form.race) && s.gender === number(form.gender) && s.baseSection === 2 && s.variation === number(form.facialHair) && s.color === facialColor && allowSection(s));
     return [row?.texture && { path: row.texture, region: 'face-lower', optional: true }, row?.texture2 && { path: row.texture2, region: 'face-upper', optional: true }].filter(Boolean);
-  }, [data.charSections, form.race, form.gender, form.facialHair, form.hairColor]);
+  }, [data.charSections, form.race, form.gender, form.skin, form.facialHair, form.hairColor]);
   // WMV's SLOT_LAYERS: components sharing a region must compose by equipment priority, not NPC slot order.
   const itemTextureLayers = useMemo(() => {
     const priorities = [11, 13, 10, 13, 18, 10, 11, 19, 20, 17, 23];
@@ -193,6 +194,15 @@ export default function CreatureDisplaysPage() {
   const setNpcItemDisplay = (slot, value) => setForm(f => { const npcItemDisplays = [...(f.npcItemDisplays || Array(11).fill(0))]; npcItemDisplays[slot] = number(value); return { ...f, npcItemDisplays }; });
   const open = (d) => { const model = data.models.find(m => m.id === d.modelId); const derived = raceForModel(model); const extra = d.extra || {}; setForm({ id:d.id, extraId:d.extraId, modelId:d.modelId, scale:d.scale, alpha:d.alpha, geosetData:d.geosetData, npcItemDisplays:Array.from({ length:11 }, (_, i) => extra.npcItemDisplays?.[i] || 0), ...(derived || { race:12, gender:0 }), race: extra.race ?? derived?.race ?? 12, gender: extra.gender ?? derived?.gender ?? 0, skin: extra.skin ?? 0, face: extra.face ?? 0, hairStyle: extra.hairStyle ?? 0, hairColor: extra.hairColor ?? 0, facialHair: extra.facialHair ?? 0 }); };
   const create = async () => { const startId = Math.max(1, number(idRanges.display) || 4000000); const ids = await findNextCreatureDisplayId(startId); if (!ids.success) return setNotice(ids.error); const worgen = data.models.find(m => /WorgenMale\.(?:m2|mdx)/i.test(m.path)) || models[0]; const skin = Math.floor(Math.random() * 8); setForm({ ...empty, id: ids.displayId, extraId: ids.extraId, modelId: worgen?.id || 0, skin, face: Math.floor(Math.random() * 8), hairStyle: Math.floor(Math.random() * 6), hairColor: Math.floor(Math.random() * 5), facialHair: Math.floor(Math.random() * 5) }); setNotice('New Worgen display allocated from the custom Display range (' + startId + ').'); };
+  const copyDisplay = async () => {
+    if (!data.displays.some(display => display.id === number(form.id))) return;
+    const startId = Math.max(1, number(idRanges.display) || 4000000);
+    const ids = await findNextCreatureDisplayId(startId);
+    if (!ids.success) return setNotice(ids.error);
+    setForm(current => ({ ...current, id: ids.displayId, extraId: ids.extraId, npcItemDisplays: [...(current.npcItemDisplays || [])] }));
+    setBakeResult(null);
+    setNotice(`Copied display ${form.id} to new Display ${ids.displayId} / Extra ${ids.extraId}. Equipment and appearance were retained; change the race or model, then save.`);
+  };
   const save = async () => {
     if (!form.modelId) return setNotice('Select a valid CreatureModelData model first.');
     setSaving(true);
@@ -213,21 +223,22 @@ export default function CreatureDisplaysPage() {
     setForm(f => ({ ...f, id:r.displayId, extraId:r.extraId }));
   };
   return <div className="editor-page creature-display-page">
-    <div className="page-header"><div><h1>Creature Displays <span className="creature-display-help" title="Preview reads M2 and BLP client assets from Client Data in Settings. Save writes CreatureDisplayInfo.dbc and CreatureDisplayInfoExtra.dbc to Server DBC folder in Settings, and creates matching creature_model_info metadata in the configured world database. CreatureModelData.dbc is read only.">?</span></h1><p>Create a character display, preview it from client assets, and save its DBC records to the configured server data folder.</p></div><div className="header-actions"><button className="btn-secondary" onClick={load} disabled={loading}><RefreshCw size={14}/> Reload</button><button className="btn-primary" onClick={create}><Plus size={14}/> New display</button></div></div>
+    <div className="page-header creature-display-header"><div><h1>Creature Displays <span className="creature-display-help" title="Preview reads M2 and BLP client assets from Client Data in Settings. Save writes CreatureDisplayInfo.dbc and CreatureDisplayInfoExtra.dbc to the configured server data folder, and creates matching creature_model_info metadata in the configured world database. CreatureModelData.dbc is read only.">?</span></h1><p>Create a character display, preview it from client assets, and save its DBC records to the configured server data folder.</p></div><div className="header-actions"><button className="btn-secondary" onClick={load} disabled={loading}><RefreshCw size={14}/> Reload</button><button className="btn-secondary" onClick={copyDisplay} disabled={!data.displays.some(display => display.id === number(form.id))}><Copy size={14}/> Copy display</button><button className="btn-primary" onClick={create}><Plus size={14}/> New display</button></div></div>
+    <div className="creature-display-toolbar"><span>{filtered.length} display{filtered.length === 1 ? '' : 's'} shown</span><i/><span>{data.displays.some(display => display.id === number(form.id)) ? `Editing display ${form.id}` : 'New display draft'}</span><span className="creature-display-toolbar-spacer"/><span className={worldmapMpqPath ? 'online' : ''}><i/>Client assets {worldmapMpqPath ? 'ready' : 'not configured'}</span></div>
     {notice && <div className="alert alert-info">{notice}</div>}
     {bakeResult && <div className="alert alert-info">Baked: <code>{bakeResult.filename}</code><br/><small>{bakeResult.path}</small><br/><strong>Manual required:</strong> set CreatureDisplayInfoExtra BakeName (field 20) to the non-empty value <code>{bakeResult.filename}</code>. An empty BakeName can crash the 3.3.5 client.</div>}
     <div className="creature-display-workspace">
-      <aside className="editor-card creature-display-library"><div className="field-group"><label><Search size={13}/> Search display ID, model ID or path</label><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="4000000 or Worgen"/></div><div className="field-group"><label>Model type</label><select value={pathFilter} onChange={e=>setPathFilter(e.target.value)}><option value="all">All models</option><option value="player">Player characters</option><option value="creature">Creature models</option></select></div><div className="creature-display-results">{filtered.map(d=><button key={d.id} className="list-row creature-display-result" onClick={()=>open(d)}><strong>{d.id} - Model {d.modelId}</strong><small>{d.modelPath || 'Unknown model'} - Extra {d.extraId}</small></button>)}{!loading&&!filtered.length&&<p>No displays found.</p>}</div></aside>
-      <section className="editor-card creature-display-stage"><div className="creature-display-preview"><div className="creature-display-base">Base: {skins.find(s=>s.color===number(form.skin))?.texture || fallbackSkin || 'none'}</div><CharM2Viewer race={number(form.race)} gender={number(form.gender)} skinBlp={skins.find(s=>s.color===number(form.skin))?.texture || fallbackSkin} appearance={form} textureLayers={[...skinLayers, ...faceLayers, ...hairLayers, ...facialLayers, ...itemTextureLayers]} active={!!worldmapMpqPath} modelPath={!isPlayerModel && currentModel?.path ? currentModel.path : null} creatureDisplayId={!isPlayerModel && number(form.id) > 0 ? number(form.id) : null} attachedModels={attachedModels} itemGeosets={itemGeosets}/></div></section>
+      <aside className="editor-card creature-display-library"><div className="creature-display-panel-title">Display library</div><div className="creature-display-panel-body"><div className="field-group"><label><Search size={13}/> Search display ID, model ID or path</label><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="4000000 or Worgen"/></div><div className="field-group"><label>Model type</label><select value={pathFilter} onChange={e=>setPathFilter(e.target.value)}><option value="all">All models</option><option value="player">Player characters</option><option value="creature">Creature models</option></select></div></div><div className="creature-display-results">{filtered.map(d=><button key={d.id} className="list-row creature-display-result" onClick={()=>open(d)}><strong>{d.id} - Model {d.modelId}</strong><small>{d.modelPath || 'Unknown model'} - Extra {d.extraId}</small></button>)}{!loading&&!filtered.length&&<p>No displays found.</p>}</div></aside>
+      <section className="editor-card creature-display-stage"><div className="creature-display-panel-title">3D preview</div><div className="creature-display-preview"><div className="creature-display-base">Base: {skins.find(s=>s.color===number(form.skin))?.texture || fallbackSkin || 'none'}</div><CharM2Viewer race={number(form.race)} gender={number(form.gender)} skinBlp={skins.find(s=>s.color===number(form.skin))?.texture || fallbackSkin} skinExtraBlp={skins.find(s=>s.color===number(form.skin))?.texture2 || null} appearance={form} textureLayers={[...faceLayers, ...hairLayers, ...facialLayers, ...itemTextureLayers]} active={!!worldmapMpqPath} modelPath={!isPlayerModel && currentModel?.path ? currentModel.path : null} creatureDisplayId={!isPlayerModel && number(form.id) > 0 ? number(form.id) : null} attachedModels={attachedModels} itemGeosets={itemGeosets}/></div></section>
       <aside className="editor-card creature-display-controls">
   <div className="creature-display-target"><span>{data.displays.some(d=>d.id===number(form.id)) ? 'Editing display' : 'New NPC display'}</span><strong>Display #{form.id || '-'}</strong><small>Extra #{form.extraId || '-'}</small></div>
-  <h2>Character appearance</h2>
+  <div className="creature-display-panel-title">Character appearance</div>
   <div className="wmv-identity"><label className="field-group"><span>Race</span><select value={form.race} onChange={e=>changeCharacterIdentity(e.target.value, form.gender)}>{PLAYER_RACES.map(r=><option key={r.id} value={r.id}>{r.label} ({r.id})</option>)}</select></label><label className="field-group"><span>Gender</span><select value={form.gender} onChange={e=>changeCharacterIdentity(form.race, e.target.value)}><option value="0">Male</option><option value="1">Female</option></select></label></div>
   <div className="wmv-appearance"><AppearanceStepper label="Skin color" value={form.skin} options={[...new Set(skins.map(s=>s.color))].sort((a,b)=>a-b)} set={v=>set('skin',v)} /><AppearanceStepper label="Face type" value={form.face} options={appearanceOptions.faces} set={v=>set('face',v)} /><AppearanceStepper label="Hair style" value={form.hairStyle} options={appearanceOptions.hairStyles} set={v=>set('hairStyle',v)} /><AppearanceStepper label="Hair color" value={form.hairColor} options={appearanceOptions.hairColors} set={v=>set('hairColor',v)} /><AppearanceStepper label="Facial feature" value={form.facialHair} options={appearanceOptions.facialStyles} set={v=>set('facialHair',v)} /></div>
   <details className="creature-display-data"><summary>Equipment (NPC item displays)</summary><EquipmentEditor values={form.npcItemDisplays} assets={itemAssets} onChange={setNpcItemDisplay} query={dbQuery} setNotice={setNotice}/>{number(form.npcItemDisplays?.[0]) > 0 && <EquipmentOffsetEditor value={helmOffset} onChange={value => setEquipmentOffsets(current => ({ ...current, [equipmentIdentity]: value }))}/>}</details>
   <details className="creature-display-data"><summary>Display data</summary><div className="form-grid"><Field label="Display ID" value={form.id} set={v=>set('id',v)} /><Field label="Extra ID" value={form.extraId} set={v=>set('extraId',v)} /><label className="field-group"><span>Creature model</span><select value={form.modelId} onChange={e=>selectModel(e.target.value)}><option value="">Select model</option>{[...(currentModel ? [currentModel] : []), ...data.models.filter(m => !currentModel || Number(m.id) !== Number(currentModel.id))].slice(0, 500).map(m=><option key={m.id} value={m.id}>{m.id} - {m.path}</option>)}</select></label><Field label="Scale" value={form.scale} set={v=>set('scale',v)} step="0.01"/><Field label="Alpha" value={form.alpha} set={v=>set('alpha',v)} /><Field label="Geoset data" value={form.geosetData} set={v=>set('geosetData',v)} /></div></details>
   <small className="muted">Workflow: Bake texture, copy the BLP to your client patch, then Save. Save always sets the non-empty BakeName for this Extra ID.</small>
-  <div style={{display:'flex',gap:8}}><button className="btn-secondary" onClick={bakeTexture} disabled={!bakeReady || baking}>{baking ? 'Baking texture...' : 'Bake texture'}</button><button className="btn-primary creature-display-save" onClick={save} disabled={saving}><Save size={14}/>{saving?'Saving...':'Save Creature Display'}</button></div>
+  <div className="creature-display-actions"><button className="btn-secondary" onClick={bakeTexture} disabled={!bakeReady || baking}>{baking ? 'Baking texture...' : 'Bake texture'}</button><button className="btn-primary creature-display-save" onClick={save} disabled={saving}><Save size={14}/>{saving?'Saving...':'Save Creature Display'}</button></div>
 </aside>
     </div>
   </div>;

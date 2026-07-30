@@ -35,7 +35,7 @@ const PROFESSION_SKILL_LABELS = PROFESSION_PRESETS.reduce((acc, preset) => {
 
 const PROFESSION_FILTER_OPTIONS = [
   { value: 'all', label: 'All professions' },
-  ...PROFESSION_PRESETS.filter((preset) => preset.id !== 0).map((preset) => ({
+  ...PROFESSION_PRESETS.filter((preset) => preset.id !== 'custom').map((preset) => ({
     value: String(preset.id),
     label: preset.label,
   })),

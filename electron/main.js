@@ -1082,6 +1082,21 @@ async function readDbcFile(filePath) {
   }
 }
 
+ipcMain.handle('dbc:readQuestSorts', async (_, dbcPath) => {
+  try {
+    const dbc = await readDbcFile(path.join(dbcPath, 'QuestSort.dbc'));
+    if (!dbc) throw new Error('QuestSort.dbc unavailable');
+    const sorts = [];
+    for (let i = 0; i < dbc.recordCount; i++) {
+      const offset = i * dbc.recordSize;
+      const id = readUInt32LE(dbc.dataBuffer, offset);
+      const name = getString(dbc.stringBlock, readUInt32LE(dbc.dataBuffer, offset + 4));
+      if (id && name) sorts.push({ id, name });
+    }
+    return { success: true, sorts };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
 async function loadSpellDbc(dbcPath) {
   const filePath = path.join(dbcPath, 'Spell.dbc');
   if (spellDbcCache?.filePath === filePath) return spellDbcCache.dbc;
@@ -4967,14 +4982,21 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
   }
 
   const renderPasses = (geo.skin.textureUnits || []).map((unit, index) => {
+    const textureIndex = geo.textureLookup?.[unit.textureId];
+    const texture = Number.isInteger(textureIndex) ? geo.textures?.[textureIndex] : null;
     const renderFlag = geo.renderFlags?.[unit.flagsIndex] || { flags: 0, blend: 0 };
-    return { index, submeshIndex: unit.submeshIndex, blend: renderFlag.blend, renderFlags: renderFlag.flags, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16) };
+    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : null, blend: renderFlag.blend, renderFlags: renderFlag.flags, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16) };
   }).filter(pass => geo.skin.submeshes[pass.submeshIndex]);
   const modelDir = modelPath.includes('\\') ? modelPath.slice(0, modelPath.lastIndexOf('\\') + 1) : '';
   const discovered = reader.discoverCreatureBlps ? await reader.discoverCreatureBlps(dataPath, modelDir, m2ModelStem(modelPath)) : [];
   const candidates = [...new Set([textureOverride, ...candidateModelTextures(modelPath, geo, discovered)].filter(Boolean))];
   pushStep('textures', 'candidates=' + candidates.length + ' passes=' + renderPasses.length);
   const tex = await loadFirstCreatureBlp(reader, dataPath, candidates, log);
+  const passPaths = [...new Set(renderPasses.map(pass => pass.texturePath).filter(Boolean))];
+  const decodedPassTextures = passPaths.length
+    ? await runM2AssetWorker('decodeBlps', { dataPath, entries: passPaths.map((path, textureIdx) => ({ textureIdx, path })) })
+    : [];
+  const passTextureByPath = new Map(decodedPassTextures.filter(row => row.data).map(row => [passPaths[row.textureIdx].toLowerCase(), { rgba: new Uint8Array(row.data), w: row.w, h: row.h, path: passPaths[row.textureIdx] }]));
   pushStep('texture-load', tex?.blpPath ? ('hit ' + tex.blpPath) : 'miss');
 
   return {
@@ -4986,6 +5008,7 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
       indices: new Uint32Array(indexList),
       submeshes: geo.skin.submeshes,
       renderPasses,
+      passTextures: renderPasses.map(pass => pass.texturePath ? { passIndex: pass.index, ...(passTextureByPath.get(pass.texturePath.toLowerCase()) || {}) } : { passIndex: pass.index }),
       skinData: { vertexLookup: geo.skin.vertexLookup, indexLookup: geo.skin.indexLookup, submeshes: geo.skin.submeshes },
       texturePaths: geo.textures.map(t => t.filename).filter(Boolean),
       textureRgba: tex?.textureRgba ?? null,

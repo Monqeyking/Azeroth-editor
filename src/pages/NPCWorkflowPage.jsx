@@ -499,7 +499,7 @@ export default function NPCWorkflowPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header npcwf-page-header">
         <h2 className="editor-page-title">NPC Workflow</h2>
         <p className="editor-page-subtitle">Assemble creature templates, trainer links, and role presets in one guided flow</p>
       </div>

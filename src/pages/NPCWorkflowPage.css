@@ -280,3 +280,75 @@
 .npcwf-filter-grid select {
   width: 100%;
 }
+
+/* Compact Dashboard workspace language. */
+.npcwf-page-header {
+  padding: 16px 20px 12px;
+  border: 0;
+  background: #12131b;
+}
+.npcwf-page-header .editor-page-title { color: #e2e6f0; font-family: inherit; font-size: 20px; }
+.npcwf-page-header .editor-page-subtitle { color: #8d92a5; }
+.npcwf-layout { min-height: calc(100vh - 64px); background: #12131b; }
+.npcwf-layout .editor-list { background: #191b27; border-color: #2a2e40; }
+.npcwf-layout .editor-list-header { border-color: #2a2e40; background: #1a1c28; }
+.npcwf-layout .search-box { margin: 10px; border-color: #353b50; border-radius: 3px; background: #10121a; color: #8993ab; }
+.npcwf-layout .search-box input,
+.npcwf-layout select,
+.npcwf-layout input,
+.npcwf-layout textarea { background: #10121a; border-color: #353b50; border-radius: 3px; color: #dbe2f4; }
+.npcwf-layout .list-item { border-color: #292d3d; }
+.npcwf-layout .list-item:hover { background: #22283a; }
+.npcwf-layout .list-item.active { border-left-color: #5c75ae; background: #28334e; }
+.npcwf-layout .list-item.active .list-item-arrow { color: #b9c9ef; }
+.npcwf-layout .list-item-name { color: #dce3f5; }
+.npcwf-layout .list-item-meta { color: #8993ab; font-size: 10px; }
+
+.npcwf-filter-grid { margin: 0 10px 10px; gap: 6px; }
+.npcwf-filter-grid select,
+.npcwf-create-card select,
+.npcwf-create-card input { padding: 6px 8px; font-size: 11px; }
+.npcwf-create-card { margin: 0 10px 10px; padding: 10px; border-color: #2a2e40; border-radius: 4px; background: #1b1e2a; gap: 7px; }
+.npcwf-create-card label { color: #9ba8c9; font-size: 10px; }
+.npcwf-layout .btn-primary { background: #344267; border-color: #5c75ae; color: #e6edff; }
+.npcwf-layout .btn-ghost { background: #242838; border-color: #34394e; color: #bfc5d8; }
+.npcwf-layout .btn-ghost:hover { background: #28334e; border-color: #405581; color: #e6edff; }
+
+.npcwf-form { background: #12131b; padding-bottom: 20px; }
+.npcwf-header { margin: 0; padding: 12px 20px; border-block: 1px solid #2a2e40; background: #1a1c28; }
+.npcwf-header .page-title { color: #e2e6f0; font-family: inherit; font-size: 17px; }
+.npcwf-header .page-sub { color: #8993ab; }
+.npcwf-header .header-actions { gap: 5px; }
+.npcwf-header .header-actions button { padding: 6px 8px; font-size: 11px; }
+.npcwf-form .editor-msg { margin: 8px 12px 0; border-radius: 4px; }
+
+.npcwf-summary-grid { gap: 1px; padding: 12px 12px 0; background: #2a2e40; }
+.npcwf-summary-card,
+.npcwf-check-card { gap: 4px; border: 0; border-radius: 0; background: #1b1e2a; padding: 11px 12px; }
+.npcwf-summary-card strong,
+.npcwf-check-card strong { color: #dce3f5; font-size: 15px; }
+.npcwf-summary-label,
+.npcwf-check-card span { color: #8e97ae; font-size: 10px; }
+.npcwf-fields { gap: 8px; padding: 8px 12px 0; }
+.npcwf-fields .field-section { border: 1px solid #2a2e40; border-radius: 4px; background: #191b27; padding: 12px; }
+.npcwf-fields .field-section-title { margin: -12px -12px 12px; padding: 8px 10px; border-bottom: 1px solid #2a2e40; background: #1a1c28; color: #9ba8c9; font-size: 11px; letter-spacing: .06em; }
+.npcwf-fields .field-group label { color: #929bb2; font-size: 10px; }
+.npcwf-two-col { gap: 8px; }
+.npcwf-role-row { gap: 1px; margin: 0 0 12px; background: #2a2e40; }
+.npcwf-preset { border: 0; border-radius: 0; background: #1b1e2a; color: #bfc5d8; padding: 8px 10px; font-size: 11px; }
+.npcwf-preset.active { border: 0; background: #28334e; color: #e6edff; }
+
+.npcwf-flag-box,
+.npcwf-warning-box { border-color: #2a2e40; border-radius: 4px; background: #171923; padding: 10px; }
+.npcwf-flag-toprow { margin-bottom: 8px; color: #8993ab; }
+.npcwf-flag-toprow strong { color: #b9c9ef; font-size: 16px; }
+.npcwf-flag-grid,
+.npcwf-check-grid { gap: 1px; background: #2a2e40; }
+.npcwf-flag-item { border: 0; border-radius: 0; background: #1b1e2a; color: #cbd1e2; padding: 8px 10px; font-size: 11px; }
+.npcwf-flag-item.active { border: 0; background: #28334e; }
+.npcwf-note { margin-top: 10px; color: #8790a7; font-size: 11px; }
+.npcwf-plan-note { border-left-color: #5c75ae; background: #202536; padding: 8px 10px; }
+.npcwf-warning-head { color: #b9c9ef; font-size: 11px; }
+.npcwf-warning-item { border-radius: 3px; background: #1b1e2a; padding: 8px 10px; }
+.npcwf-warning-item p,
+.npcwf-warning-empty { color: #cbd1e2; font-size: 11px; }

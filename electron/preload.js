@@ -19,6 +19,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // DBC files
   dbc: {
+    readQuestSorts: (dbcPath) => ipcRenderer.invoke('dbc:readQuestSorts', dbcPath),
     readAchievementsOverview: (dbcPath) => ipcRenderer.invoke('dbc:readAchievementsOverview', dbcPath),
     writeAchievement: (dbcPath, achievement) => ipcRenderer.invoke('dbc:writeAchievement', dbcPath, achievement),
     createAchievement: (dbcPath, payload) => ipcRenderer.invoke('dbc:createAchievement', dbcPath, payload),
