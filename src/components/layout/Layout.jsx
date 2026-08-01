@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box
+  Layers, ShoppingBag, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box, Castle
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -65,6 +65,8 @@ const NAV_GROUPS = [
       { to: '/asset-editor',    icon: Box,        label: '3D Asset Editor' },
       { to: '/ui-editor',       icon: LayoutGrid, label: 'UI Editor' },
       { to: '/worldmap',        icon: Globe,   label: 'World Map' },
+      { to: '/game-objects',    icon: Box,     label: 'Game Objects' },
+      { to: '/dungeons',        icon: Castle,  label: 'Dungeons' },
       { to: '/expansion-lock',  icon: Lock,    label: 'Expansion Lock' },
     ],
   },
@@ -193,7 +195,7 @@ export default function Layout() {
           <span className="db-name">{dbConfig.database}</span>
         </div>
 
-        <nav className="sidebar-nav">
+        <div className="sidebar-nav-fixed">
           <NavLink to="/dashboard" className={({ isActive }) =>
             `nav-item${isActive ? ' active' : ''}`
           }>
@@ -206,9 +208,9 @@ export default function Layout() {
             <Settings size={13} />
             <span>Server Config</span>
           </NavLink>
+        </div>
 
-          <div className="nav-section-gap" />
-
+        <nav className="sidebar-nav">
           {NAV_GROUPS.map(group => (
             <NavGroup key={group.id} group={group} collapsed={collapsed} onToggle={toggleGroup} />
           ))}

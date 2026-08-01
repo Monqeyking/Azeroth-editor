@@ -117,10 +117,6 @@ export default function ConnectPage() {
             {isConnecting ? 'Connecting...' : 'Connect'}
           </button>
         </form>
-
-        <div className="connect-hint">
-          Make sure your AzerothCore server is running
-        </div>
       </div>
     </div>
   );

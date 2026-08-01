@@ -31,6 +31,8 @@ import UIEditorPage from './pages/UIEditorPage';
 import AssetEditorPage from './pages/AssetEditorPage';
 import AchievementEditorPage from './pages/AchievementEditorPage';
 import NpcMovementPage from './pages/NpcMovementPage';
+import DungeonEditorPage from './pages/DungeonEditorPage';
+import GameObjectEditorPage from './pages/GameObjectEditorPage';
 import SpellLookup from './components/SpellLookup';
 import EntityLookup from './components/EntityLookup';
 
@@ -67,6 +69,8 @@ const router = createHashRouter([
       { path: 'trainer-spells',     element: <TrainerSpellPage /> },
       { path: 'npc-workflow',       element: <NPCWorkflowPage /> },
       { path: 'npc-movement',       element: <NpcMovementPage /> },
+      { path: 'dungeons',           element: <DungeonEditorPage /> },
+      { path: 'game-objects',       element: <GameObjectEditorPage /> },
       { path: 'char-customization', element: <CharCustomizationPage /> },
       { path: 'loot',               element: <LootEditorPage /> },
       { path: 'item-sets',          element: <ItemSetEditorPage /> },
