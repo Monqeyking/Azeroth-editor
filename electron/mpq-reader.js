@@ -545,6 +545,89 @@ async function readBlpFromMpqs(dataPath, blpPath) {
   return await readFileFromMpqs(dataPath, blpPath);
 }
 
+// ── M2/MDX pre-index: Map<lowerModelPath, mpqAbsPath> zodat modelreads O(1) zijn.
+// Zonder deze index valt readFileFromMpqs terug op een full MPQ scan per model,
+// wat het main process blokkeert en de hele app bevriest.
+const m2IndexCache = new Map();
+const m2IndexBuildInFlight = new Map();
+
+function _indexM2FromListfile(dataPath) {
+  return new Promise((resolve) => {
+    const idx = new Map();
+    const mpqs = findMpqFiles(dataPath);
+    let i = 0;
+    const next = () => {
+      if (i >= mpqs.length) { resolve(idx); return; }
+      const mpqPath = mpqs[i++];
+      let stat;
+      try { stat = fs.statSync(mpqPath); } catch (_) { return next(); }
+      if (stat.isDirectory()) {
+        const set = new Set();
+        walkDirFiles(mpqPath, '', set, '.m2');
+        walkDirFiles(mpqPath, '', set, '.mdx');
+        for (const p of set) {
+          const k = p.toLowerCase();
+          if (!idx.has(k)) idx.set(k, mpqPath);
+        }
+        return setImmediate(next);
+      }
+      (async () => {
+        let archive;
+        try { archive = await MPQ.open(toStormPath(dataPath, mpqPath), 'r'); }
+        catch (_) { return next(); }
+        try {
+          if (archive.hasFile('(listfile)')) {
+            const f = archive.openFile('(listfile)');
+            const raw = f.read();
+            f.close();
+            const text = Buffer.from(raw).toString('utf8');
+            for (const line of text.split(/\r?\n/)) {
+              const t = line.trim();
+              if (!t) continue;
+              if (!/\.(m2|mdx)$/i.test(t)) continue;
+              const k = t.replace(/\//g, '\\').toLowerCase();
+              if (!idx.has(k)) idx.set(k, mpqPath);
+            }
+          }
+        } catch (_) {}
+        archive.close();
+        next();
+      })();
+    };
+    next();
+  });
+}
+
+async function buildM2Index(dataPath) {
+  if (m2IndexCache.has(dataPath)) return m2IndexCache.get(dataPath);
+  if (m2IndexBuildInFlight.has(dataPath)) return m2IndexBuildInFlight.get(dataPath);
+  const p = _indexM2FromListfile(dataPath).then(idx => { m2IndexCache.set(dataPath, idx); return idx; });
+  m2IndexBuildInFlight.set(dataPath, p);
+  return p;
+}
+
+// Snelle M2/MDX-read via listfile-index; valt terug op full scan (bounded).
+async function readM2FromMpqs(dataPath, m2Path) {
+  const index = await buildM2Index(dataPath);
+  const key = m2Path.replace(/\//g, '\\').toLowerCase();
+  const mpqAbsPath = index.get(key);
+  if (mpqAbsPath) return await readFileFromMpqEntry(dataPath, mpqAbsPath, m2Path);
+  return await readFileFromMpqs(dataPath, m2Path);
+}
+
+// Companion-bestand (bijv. .skin) lezen. Prefereert de archive waarin het M2 zit,
+// zodat we geen full MPQ scan per skin hoeven te doen.
+async function readM2Companion(dataPath, m2Path, companionPath) {
+  const index = await buildM2Index(dataPath);
+  const key = m2Path.replace(/\//g, '\\').toLowerCase();
+  const mpqAbsPath = index.get(key);
+  if (mpqAbsPath) {
+    const buf = await readFileFromMpqEntry(dataPath, mpqAbsPath, companionPath);
+    if (buf) return buf;
+  }
+  return await readFileFromMpqs(dataPath, companionPath);
+}
+
 // Open een MPQ-archief één keer en geef een sync read-interface terug.
 // Bedoeld voor batch-gebruik waar je meerdere bestanden uit dezelfde MPQ nodig hebt
 // zonder steeds opnieuw te openen/sluiten.
@@ -698,4 +781,5 @@ module.exports = {
   isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readMinimapBlp, readWdlBuffer, readWdtBuffer,
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
+  buildM2Index, readM2FromMpqs, readM2Companion,
 };

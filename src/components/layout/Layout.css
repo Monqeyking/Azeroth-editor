@@ -13,6 +13,7 @@
   flex-shrink: 0;
   min-width: 160px;
   max-width: 340px;
+  min-height: 0;
   background: var(--bg-panel);
   border-right: 1px solid var(--border);
   display: flex;
@@ -92,19 +93,34 @@
 
 .db-name {
   font-size: 11px;
-  color: var(--text-secondary);
+  color: #8790a7;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 /* Nav */
-.sidebar-nav {
-  flex: 1;
+.sidebar-nav-fixed {
+  flex: 0 0 auto;
   padding: 8px 8px 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+.sidebar-nav-fixed > .nav-item + .nav-item {
+  margin-top: 4px;
+}
+
+.sidebar-nav {
+  flex: 1;
+  min-height: 0;
+  padding: 8px 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  overflow-x: hidden;
 }
 
 .nav-item {
@@ -113,7 +129,7 @@
   gap: 9px;
   padding: 7px 10px;
   border-radius: var(--radius-sm);
-  color: var(--text-secondary);
+  color: #aeb8cc;
   font-size: 13px;
   font-weight: 500;
   letter-spacing: 0.3px;
@@ -135,18 +151,14 @@
 }
 
 .nav-item:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: #202536;
+  color: #e6edff;
 }
 
 .nav-item.active {
-  background: linear-gradient(90deg, rgba(200,169,110,0.1), transparent);
-  color: var(--gold);
-  box-shadow: inset 3px 0 0 var(--gold);
-}
-
-.nav-section-gap {
-  height: 4px;
+  background: linear-gradient(90deg, rgba(99,128,186,0.18), transparent);
+  color: #dbe7ff;
+  box-shadow: inset 3px 0 0 #6380ba;
 }
 
 .nav-divider {
@@ -175,7 +187,7 @@
   gap: 7px;
   padding: 5px 10px;
   border-radius: var(--radius-sm);
-  color: var(--text-muted);
+  color: #78849b;
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.6px;
@@ -198,12 +210,12 @@
 }
 
 .nav-group-header:hover {
-  background: var(--bg-hover);
-  color: var(--text-secondary);
+  background: #202536;
+  color: #aeb8cc;
 }
 
 .nav-group-header.has-active {
-  color: var(--gold);
+  color: #9eb9ed;
 }
 
 .nav-group-header .chevron {
@@ -233,7 +245,7 @@
 }
 
 .nav-item.disconnect {
-  color: var(--text-muted);
+  color: #7d879c;
 }
 .nav-item.disconnect:hover {
   color: var(--accent-red);
@@ -241,6 +253,7 @@
 }
 
 .sidebar-footer {
+  flex: 0 0 auto;
   padding: 8px;
   border-top: 1px solid var(--border);
   display: flex;

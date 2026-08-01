@@ -285,6 +285,11 @@ export function ConnectionProvider({ children }) {
     return window.azeroth.dbc.readScalingStatValues(dbcPath);
   }, [dbcPath]);
 
+  const readDungeonMaps = useCallback(async () => window.azeroth.dbc.readDungeonMaps(dbcPath), [dbcPath]);
+  const writeMapDifficultyCap = useCallback(async (payload) => window.azeroth.dbc.writeMapDifficultyCap(dbcPath, payload), [dbcPath]);
+  const addMapDifficulty = useCallback(async (payload) => window.azeroth.dbc.addMapDifficulty(dbcPath, payload), [dbcPath]);
+  const deleteMapDifficulty = useCallback(async (payload) => window.azeroth.dbc.deleteMapDifficulty(dbcPath, payload), [dbcPath]);
+
   return (
     <ConnectionContext.Provider value={{
       dbConfig, setDbConfig,
@@ -309,6 +314,7 @@ export function ConnectionProvider({ children }) {
       readItemSet, searchItemSets, writeItemSet, findNextItemSetId,
       readScalingStatDistribution, writeScalingStatDistribution, addScalingStatDistribution,
       findNextScalingStatDistributionId, readScalingStatValues,
+      readDungeonMaps, writeMapDifficultyCap, addMapDifficulty, deleteMapDifficulty,
       idRanges, setIdRanges,
       serverPaths, setServerPaths,
       expansionsFolder, setExpansionsFolder,
