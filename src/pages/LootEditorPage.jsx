@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Plus, Trash2, Save, Search } from 'lucide-react';
 import './LootEditorPage.css';
+import './LootEditorWarm.css';
 
 const LOOT_TABLES = {
   Creature:   'creature_loot_template',
@@ -72,7 +73,7 @@ function EntrySearch({ lootType, query, onLoad }) {
         <Search size={13} className="loot-entry-icon" />
         <input
           className="loot-entry-input"
-          placeholder={`Zoek ${lootType} op naam of ID…`}
+          placeholder={`Search ${lootType} by name or ID…`}
           value={term}
           onChange={e => { setTerm(e.target.value); setLabel(''); }}
           onKeyDown={handleKey}
@@ -122,14 +123,14 @@ function ItemSearchModal({ onSelect, onClose, query }) {
           <Search size={13} />
           <input
             ref={inputRef}
-            placeholder="Naam of item ID..."
+            placeholder="Item name or ID..."
             value={term}
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => e.key === 'Escape' && onClose()}
           />
         </div>
         <div className="loot-modal-results">
-          {results.length === 0 && term && <div className="loot-modal-empty">Geen resultaten</div>}
+          {results.length === 0 && term && <div className="loot-modal-empty">No results</div>}
           {results.map(r => (
             <div key={r.entry} className="loot-modal-row" onClick={() => onSelect(r.entry, r.name)}>
               <span className="loot-modal-id">{r.entry}</span>
@@ -202,9 +203,9 @@ export default function LootEditorPage() {
           [entryId, row.Item, row.Reference, row.Chance, row.QuestRequired, row.LootMode, row.GroupId, row.MinCount, row.MaxCount]
         );
       }
-      setStatus('Opgeslagen.');
+      setStatus('Saved.');
     } catch (e) {
-      setStatus('Fout: ' + e.message);
+      setStatus('Error: ' + e.message);
     }
     setSaving(false);
   };
@@ -219,7 +220,7 @@ export default function LootEditorPage() {
   return (
     <div className="loot-editor">
       <h1 className="loot-editor-title">Loot Editor</h1>
-      <p className="loot-editor-subtitle">Beheer loot tabellen voor creatures, items en gameobjects</p>
+      <p className="loot-editor-subtitle">Manage loot tables for creatures, items, and gameobjects</p>
 
       <div className="loot-toolbar">
         <div className="loot-segmented">
@@ -241,7 +242,7 @@ export default function LootEditorPage() {
               <thead>
                 <tr>
                   <th>Item</th>
-                  <th className="loot-th-name">Naam</th>
+                  <th className="loot-th-name">Name</th>
                   <th>Reference</th>
                   <th>Chance</th>
                   <th>QuestReq</th>
@@ -267,7 +268,7 @@ export default function LootEditorPage() {
                     </td>
                     <td className="loot-td-name">
                       <span className="loot-item-name">{itemNames[Number(row.Item)] || ''}</span>
-                      <button className="btn-ghost icon-btn loot-search-btn" type="button" onClick={() => setSearchFor(i)} title="Zoek item">
+                      <button className="btn-ghost icon-btn loot-search-btn" type="button" onClick={() => setSearchFor(i)} title="Search item">
                         <Search size={11} />
                       </button>
                     </td>
@@ -296,19 +297,19 @@ export default function LootEditorPage() {
           {overGroups.length > 0 && (
             <div className="loot-group-totals">
               {overGroups.map(g => (
-                <span key={g} className="loot-warning">⚠ GroupId {g}: {groupTotals[g].toFixed(2)}% &gt; 100%</span>
+                <span key={g} className="loot-warning">Warning: GroupId {g}: {groupTotals[g].toFixed(2)}% &gt; 100%</span>
               ))}
             </div>
           )}
 
           <div className="loot-footer">
             <button className="btn-ghost" type="button" onClick={addRow}>
-              <Plus size={13} /> Rij toevoegen
+              <Plus size={13} /> Add row
             </button>
             <button className="btn-primary" type="button" onClick={save} disabled={saving}>
-              <Save size={13} /> {saving ? 'Opslaan...' : 'Opslaan'}
+              <Save size={13} /> {saving ? 'Saving...' : 'Save'}
             </button>
-            <span className="loot-row-count">{rows.length} rijen</span>
+            <span className="loot-row-count">{rows.length} rows</span>
             {status && <span className="loot-row-count">{status}</span>}
           </div>
         </>

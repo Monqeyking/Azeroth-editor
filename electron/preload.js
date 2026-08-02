@@ -94,6 +94,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     saveAccess: (payload) => ipcRenderer.invoke('dungeons:saveAccess', payload),
     deleteAccess: (id) => ipcRenderer.invoke('dungeons:deleteAccess', id),
     setCustomHeroicCreatureSpawns: (payload) => ipcRenderer.invoke('dungeons:setCustomHeroicCreatureSpawns', payload),
+    resolveHeroicPortal: (payload) => ipcRenderer.invoke('dungeons:resolveHeroicPortal', payload),
     setCustomHeroicPortal: (payload) => ipcRenderer.invoke('dungeons:setCustomHeroicPortal', payload),
   },
   textureWorkshop: {

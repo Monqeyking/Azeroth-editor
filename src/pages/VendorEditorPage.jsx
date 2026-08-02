@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Trash2, Save } from 'lucide-react';
 import './VendorEditorPage.css';
+import './VendorEditorWarm.css';
 
 const QUALITY_COLOR = {
   0: '#9d9d9d', // Poor
@@ -142,7 +143,7 @@ function NpcSearch({ query, onLoad }) {
             <Search size={13} className="vendor-entry-icon" />
             <input
               className="vendor-entry-input"
-              placeholder="Naam of entry ID…"
+              placeholder="Name or entry ID…"
               value={term}
               onChange={e => { setTerm(e.target.value); setLabel(''); }}
               onKeyDown={handleKey}
@@ -215,14 +216,14 @@ function ItemSearchModal({ onSelect, onClose, query }) {
           <Search size={13} />
           <input
             ref={inputRef}
-            placeholder="Naam of item ID..."
+            placeholder="Item name or ID..."
             value={term}
             onChange={e => setTerm(e.target.value)}
             onKeyDown={e => e.key === 'Escape' && onClose()}
           />
         </div>
         <div className="vendor-modal-results">
-          {results.length === 0 && term && <div className="vendor-modal-empty">Geen resultaten</div>}
+          {results.length === 0 && term && <div className="vendor-modal-empty">No results</div>}
           {results.map(r => (
             <div key={r.entry} className="vendor-modal-row" onClick={() => onSelect(r.entry, r.name)}>
               <span className="vendor-modal-id">{r.entry}</span>
@@ -311,9 +312,9 @@ export default function VendorEditorPage() {
           [entryId, row.slot ?? 0, row.item, row.maxcount ?? 0, row.incrtime ?? 0, row.ExtendedCost ?? 0, row.type ?? 1, row.VerifiedBuild ?? 0]
         );
       }
-      setStatus('Opgeslagen.');
+      setStatus('Saved.');
     } catch (e) {
-      setStatus('Fout: ' + e.message);
+      setStatus('Error: ' + e.message);
     }
     setSaving(false);
   };
@@ -321,7 +322,7 @@ export default function VendorEditorPage() {
   return (
     <div className="vendor-editor">
       <h1 className="vendor-editor-title">Vendor Editor</h1>
-      <p className="vendor-editor-subtitle">Beheer vendor-items voor NPCs via npc_vendor</p>
+      <p className="vendor-editor-subtitle">Manage vendor items for NPCs via npc_vendor</p>
 
       <div className="vendor-toolbar">
         <NpcSearch query={query} onLoad={load} />
@@ -334,7 +335,7 @@ export default function VendorEditorPage() {
               <thead>
                 <tr>
                   <th>Item</th>
-                  <th className="vendor-td-name">Naam</th>
+                  <th className="vendor-td-name">Name</th>
                   <th>Slot</th>
                   <th>MaxCount</th>
                   <th>IncrTime</th>
@@ -360,7 +361,7 @@ export default function VendorEditorPage() {
                     <td className="vendor-td-name">
                       <div className="vendor-td-name-cell">
                         <span className="vendor-item-name" style={{ color: QUALITY_COLOR[itemQualities[Number(row.item)]] }}>{itemNames[Number(row.item)] || ''}</span>
-                        <button className="btn-ghost icon-btn vendor-search-btn" type="button" onClick={() => setSearchFor(i)} title="Zoek item">
+                        <button className="btn-ghost icon-btn vendor-search-btn" type="button" onClick={() => setSearchFor(i)} title="Search item">
                           <Search size={11} />
                         </button>
                       </div>
@@ -395,7 +396,7 @@ export default function VendorEditorPage() {
                       />
                     </td>
                     <td>
-                      <button className="btn-ghost icon-btn" onClick={() => deleteRow(i)} title="Verwijder">
+                      <button className="btn-ghost icon-btn" onClick={() => deleteRow(i)} title="Remove">
                         <Trash2 size={13} />
                       </button>
                     </td>
@@ -407,10 +408,10 @@ export default function VendorEditorPage() {
 
           <div className="vendor-footer">
             <button className="btn-ghost icon-btn" onClick={addRow}>
-              <Plus size={14} /> Item toevoegen
+              <Plus size={14} /> Add item
             </button>
             <button className="btn-primary" onClick={save} disabled={saving}>
-              <Save size={14} /> {saving ? 'Opslaan…' : 'Opslaan'}
+              <Save size={14} /> {saving ? 'Saving…' : 'Save'}
             </button>
             <span className="vendor-row-count">{rows.length} item{rows.length !== 1 ? 's' : ''}</span>
             {status && <span className="vendor-status">{status}</span>}

@@ -49,7 +49,7 @@ const GO_TYPES = [
   { value: 35, label: '35 · Counter' },
 ];
 
-const DATA_FIELD_COUNT = 32;
+const DATA_FIELD_COUNT = 24;
 const TEMPLATE_LIST_LIMIT = 100;
 
 function num(value, fallback = 0) {
@@ -87,7 +87,7 @@ function SpawnRow({ spawn, mapName, active, onSelect }) {
         <span>{fmtCoord(spawn.position_x)}</span>
         <span>{fmtCoord(spawn.position_y)}</span>
         <span>{fmtCoord(spawn.position_z)}</span>
-        <span>{Math.round((num(spawn.orientation, 0) * 180 / Math.PI) * 10) / 10}°</span>
+        <span>{num(spawn.orientation, 0).toFixed(6)} rad</span>
       </div>
     </div>
   );
@@ -262,7 +262,7 @@ export default function GameObjectEditorPage() {
   const previewOrientation = spawnDraft
     ? num(spawnDraft.orientation, 0)
     : selectedSpawn
-      ? num(selectedSpawn.orientation, 0) * 180 / Math.PI
+      ? num(selectedSpawn.orientation, 0)
       : 0;
 
   const selectSpawn = useCallback((spawn) => {
@@ -271,7 +271,7 @@ export default function GameObjectEditorPage() {
       position_x: fmtCoord(spawn.position_x),
       position_y: fmtCoord(spawn.position_y),
       position_z: fmtCoord(spawn.position_z),
-      orientation: String(Math.round((num(spawn.orientation, 0) * 180 / Math.PI) * 3) / 3),
+      orientation: num(spawn.orientation, 0).toFixed(6),
       spawntimesecs: text(spawn.spawntimesecs),
       animprogress: text(spawn.animprogress),
       state: text(spawn.state),
@@ -322,15 +322,22 @@ export default function GameObjectEditorPage() {
       ];
       const verified = draft.VerifiedBuild === '' || draft.VerifiedBuild == null ? null : num(draft.VerifiedBuild, 0);
       const dataSet = dataValues.map((_, i) => `Data${i}=?`).join(', ');
-      await query(
+      const writeRes = await query(
         `UPDATE gameobject_template SET name=?, type=?, displayId=?, size=?, ${dataSet}, VerifiedBuild=? WHERE entry=?`,
         [...params, verified, entry]
       );
+      if (writeRes?.success === false) throw new Error(writeRes.error || 'Template opslaan mislukt');
+      const verifyRes = await query('SELECT * FROM gameobject_template WHERE entry = ?', [entry]);
+      if (verifyRes?.success === false) throw new Error(verifyRes.error || 'Opgeslagen template kon niet worden gelezen');
+      const savedTemplate = verifyRes.data?.[0];
+      if (!savedTemplate) throw new Error(`Template #${entry} kon niet worden teruggelezen`);
+      setTemplate(savedTemplate);
+      setDraft(buildTemplateDraft(savedTemplate));
       setTemplateDirty(false);
       setTemplates(prev => prev.map(r => r.entry === entry
-        ? { ...r, name, type: num(draft.type, 0), displayId: num(draft.displayId, 0), size: num(draft.size, 1) }
+        ? { ...r, name: savedTemplate.name, type: num(savedTemplate.type, 0), displayId: num(savedTemplate.displayId, 0), size: num(savedTemplate.size, 1) }
         : r));
-      setMsg({ type: 'success', text: `Template #${entry} opgeslagen (scale ${num(draft.size, 1).toFixed(2)})` });
+      setMsg({ type: 'success', text: `Template #${entry} opgeslagen (scale ${num(savedTemplate.size, 1).toFixed(2)})` });
       return true;
     } catch (err) {
       setMsg({ type: 'error', text: err.message });
@@ -346,8 +353,8 @@ export default function GameObjectEditorPage() {
     setMsg(null);
     try {
       const guid = selectedSpawn.guid;
-      const o = num(spawnDraft.orientation, 0) * Math.PI / 180;
-      await query(
+      const o = num(spawnDraft.orientation, 0);
+      const writeRes = await query(
         `UPDATE gameobject SET position_x=?, position_y=?, position_z=?, orientation=?, rotation0=0, rotation1=0, rotation2=?, rotation3=?, spawntimesecs=?, animprogress=?, state=?, spawnMask=?, phaseMask=? WHERE guid=?`,
         [
           num(spawnDraft.position_x, 0),
@@ -364,17 +371,22 @@ export default function GameObjectEditorPage() {
           guid,
         ]
       );
+      if (writeRes?.success === false) throw new Error(writeRes.error || 'Spawn opslaan mislukt');
+      const verifyRes = await query('SELECT * FROM gameobject WHERE guid = ?', [guid]);
+      if (verifyRes?.success === false) throw new Error(verifyRes.error || 'Opgeslagen spawn kon niet worden gelezen');
+      const savedSpawn = verifyRes.data?.[0];
+      if (!savedSpawn) throw new Error(`Spawn #${guid} kon niet worden teruggelezen`);
       setSpawnDirty(false);
-      const next = {
-        ...selectedSpawn,
-        position_x: num(spawnDraft.position_x, 0),
-        position_y: num(spawnDraft.position_y, 0),
-        position_z: num(spawnDraft.position_z, 0),
-        orientation: o,
-      };
-      setSelectedSpawn(next);
-      setSpawns(prev => prev.map(s => s.guid === guid ? next : s));
-      setMsg({ type: 'success', text: `Spawn #${guid} opgeslagen` });
+      setSelectedSpawn(savedSpawn);
+      setSpawnDraft(prev => ({
+        ...prev,
+        position_x: fmtCoord(savedSpawn.position_x),
+        position_y: fmtCoord(savedSpawn.position_y),
+        position_z: fmtCoord(savedSpawn.position_z),
+        orientation: num(savedSpawn.orientation, 0).toFixed(6),
+      }));
+      setSpawns(prev => prev.map(s => s.guid === guid ? savedSpawn : s));
+      setMsg({ type: 'success', text: `Spawn #${guid} opgeslagen (${num(savedSpawn.orientation, 0).toFixed(6)} rad)` });
       return true;
     } catch (err) {
       setMsg({ type: 'error', text: err.message });
@@ -424,8 +436,8 @@ export default function GameObjectEditorPage() {
     }
     const playerFacing = Number(match[1]);
     const portalFacing = ((playerFacing + Math.PI) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
-    updateSpawnDraft('orientation', (portalFacing * 180 / Math.PI).toFixed(1));
-    setMsg({ type: 'success', text: `Portalrichting ingesteld op ${(portalFacing * 180 / Math.PI).toFixed(1)}Â° (player facing + 180Â°)` });
+    updateSpawnDraft('orientation', portalFacing.toFixed(6));
+    setMsg({ type: 'success', text: `Portalrichting ingesteld op ${portalFacing.toFixed(6)} rad (player facing + pi)` });
   }, [selectedSpawn, spawnDraft, soapCommand]);
 
   const copyCoords = useCallback(async () => {
@@ -461,7 +473,7 @@ export default function GameObjectEditorPage() {
     const idRes = await window.azeroth.db.findNextId({ table: 'gameobject', idColumn: 'guid', startId: 1 });
     if (!idRes.success) { setMsg({ type: 'error', text: idRes.error }); return; }
     const guid = idRes.nextId;
-    const o = num(addForm.orientation, 0) * Math.PI / 180;
+    const o = num(addForm.orientation, 0);
     const res = await query(
       `INSERT INTO gameobject (guid, id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, VerifiedBuild)
        VALUES (?,?,?,0,0,1,1,?,?,?,?,0,0,?,?,300,0,1,NULL)`,
@@ -571,7 +583,7 @@ export default function GameObjectEditorPage() {
                   <GameObjectPreview
                     modelPath={displayInfo?.modelPath}
                     scale={scale}
-                    orientation={previewOrientation * Math.PI / 180}
+                    orientation={previewOrientation}
                     height={300}
                   />
                   <div className="go-scale-row">
@@ -614,7 +626,7 @@ export default function GameObjectEditorPage() {
 
                   <details className="go-data-fields" open={dataOpen} onToggle={e => setDataOpen(e.target.open)}>
                     <summary>
-                      <span>Data fields (Data0–31)</span>
+                      <span>Data fields (Data0–23)</span>
                       <span className="go-data-toggle">{dataOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</span>
                     </summary>
                     <div className="go-data-grid">
@@ -657,7 +669,7 @@ export default function GameObjectEditorPage() {
                       <span><Crosshair size={12} /> Spawn #{(selectedSpawn || {}).guid}</span>
                       <div className="go-spawn-actions">
                         <button type="button" className="btn-ghost go-small-btn" onClick={teleportToSpawn} title="Teleporteer naar spawn (.go xyz)"><MapPin size={12} /></button>
-                        <button type="button" className="btn-ghost go-small-btn" onClick={usePlayerFacing} title="Gebruik player facing + 180 graden via .gps"><Compass size={12} /></button>
+                        <button type="button" className="btn-ghost go-small-btn" onClick={usePlayerFacing} title="Gebruik player facing + pi via .gps"><Compass size={12} /></button>
                         <button type="button" className="btn-ghost go-small-btn" onClick={copyCoords} title="Coördinaten kopiëren"><Copy size={12} /></button>
                         <button type="button" className="btn-danger go-small-btn" onClick={deleteSpawn} title="Spawn verwijderen"><Trash2 size={12} /></button>
                       </div>
@@ -695,10 +707,10 @@ export default function GameObjectEditorPage() {
                         </div>
                       </div>
                       <div className="go-pos-head">
-                        <span className="go-pos-axis">Orient °</span>
+                        <span className="go-pos-axis">Orient rad</span>
                         <div className="go-pos-inputs">
-                          <NudgeButtons onNudge={delta => updateSpawnDraft('orientation', (num(spawnDraft.orientation, 0) + delta * 5).toFixed(1))} />
-                          <input type="number" step="1" value={spawnDraft.orientation} onChange={e => updateSpawnDraft('orientation', e.target.value)} onWheel={e => e.target.blur()} />
+                          <NudgeButtons step={0.1} onNudge={delta => updateSpawnDraft('orientation', (num(spawnDraft.orientation, 0) + delta).toFixed(6))} />
+                          <input type="number" step="0.000001" value={spawnDraft.orientation} onChange={e => updateSpawnDraft('orientation', e.target.value)} onWheel={e => e.target.blur()} />
                         </div>
                       </div>
 
@@ -752,7 +764,7 @@ export default function GameObjectEditorPage() {
             </div>
             {['position_x', 'position_y', 'position_z', 'orientation'].map(field => (
               <div className="modal-field" key={field}>
-                <label className="modal-label">{field}</label>
+                <label className="modal-label">{field === 'orientation' ? 'orientation (rad)' : field}</label>
                 <input type="number" className="modal-input" value={addForm[field]} onChange={e => setAddForm(f => ({ ...f, [field]: e.target.value }))} />
               </div>
             ))}

@@ -16,6 +16,7 @@ const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
 const http = require('http');
 const AdmZip = require('adm-zip');
+const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 let mpqReader = null;
 const MPQ_STUB = {
   isDataPath: () => false,
@@ -1129,7 +1130,7 @@ ipcMain.handle('dbc:writeMapDifficultyCap', async (_, dbcPath, payload = {}) => 
 });
 
 const MAP_DIFFICULTY_CUSTOM_ID_START = 10000;
-const CUSTOM_HEROIC_PORTAL_ENTRY_START = 9000000;
+const CUSTOM_HEROIC_PORTAL_ENTRY_START = 4000000;
 const CUSTOM_HEROIC_PORTAL_COMMENT_PREFIX = 'Azeroth Editor custom heroic portal';
 const RFC_PORTAL_POSITION = { x: 1815.207, y: -4429.847, z: -10.246, o: 5.184496 };
 const RFC_PORTAL_DISPLAY_IDS = { normal: 8243, heroic: 8196, skull: 8197 };
@@ -1256,13 +1257,29 @@ ipcMain.handle('dungeons:setCustomHeroicCreatureSpawns', async (_, payload = {})
   } catch (err) { try { await dbConnection.rollback(); } catch {} return { success: false, error: err.message }; }
 });
 
+ipcMain.handle('dungeons:resolveHeroicPortal', async (_, payload = {}) => {
+  if (!dbConnection) return { success: false, error: 'Not connected' };
+  try {
+    const result = await resolveHeroicPortalTransform({
+      dbConnection,
+      mpqReader: getMpqReader(),
+      dataPath: payload.dataPath,
+      mapId: Number(payload.mapId),
+      mapDirectory: payload.mapDirectory,
+      expansion: Number(payload.expansion) || 0,
+    });
+    return { success: true, ...result };
+  } catch (err) { return { success: false, error: err.message }; }
+});
+
 ipcMain.handle('dungeons:setCustomHeroicPortal', async (_, payload = {}) => {
   if (!dbConnection) return { success: false, error: 'Not connected' };
   try {
     const mapId = Number(payload.mapId), enabled = Boolean(payload.enabled);
-    if (mapId !== 389) return { success: true, created: false, removed: false };
     const comment = `${CUSTOM_HEROIC_PORTAL_COMMENT_PREFIX} for map ${mapId}`;
     const nameLike = `Azeroth Editor: Heroic Portal ${mapId}%`;
+    const portalTransform = payload.portalTransform || (mapId === 389 ? RFC_PORTAL_POSITION : null);
+    if (enabled && !portalTransform) return { success: true, created: false, removed: false, reason: 'No portal transform was found.' };
     await dbConnection.beginTransaction();
     if (!enabled) {
       const [spawns] = await dbConnection.execute('SELECT g.guid, g.id FROM gameobject g JOIN gameobject_template gt ON gt.entry = g.id WHERE g.Comment = ? OR gt.name LIKE ?', [comment, nameLike]);
@@ -1283,11 +1300,18 @@ ipcMain.handle('dungeons:setCustomHeroicPortal', async (_, payload = {}) => {
       [comment, nameLike]
     );
     const nextEntry = async () => {
-      const [[maxRow]] = await dbConnection.execute('SELECT MAX(entry) AS maxEntry FROM gameobject_template WHERE entry >= ?', [CUSTOM_HEROIC_PORTAL_ENTRY_START]);
-      return Math.max(CUSTOM_HEROIC_PORTAL_ENTRY_START - 1, Number(maxRow.maxEntry) || 0) + 1;
+      const entryStart = Math.max(1, Number(payload.entryStart) || CUSTOM_HEROIC_PORTAL_ENTRY_START);
+      const [rows] = await dbConnection.execute('SELECT entry FROM gameobject_template WHERE entry >= ? ORDER BY entry', [entryStart]);
+      const used = new Set(rows.map(row => Number(row.entry)));
+      let entry = entryStart;
+      while (used.has(entry)) entry++;
+      return entry;
     };
-    const base = existing[0] || RFC_PORTAL_POSITION;
+    const base = existing[0] || portalTransform;
     const p = { x: Number(base.position_x ?? base.x), y: Number(base.position_y ?? base.y), z: Number(base.position_z ?? base.z), o: Number(base.orientation ?? base.o) };
+    const sourceMapId = Number(portalTransform.mapId ?? payload.sourceMapId ?? 1);
+    const sourceZoneId = Number(portalTransform.zoneId ?? payload.sourceZoneId ?? 0);
+    const sourceAreaId = Number(portalTransform.areaId ?? payload.sourceAreaId ?? 0);
     const rotation2 = Math.sin(p.o / 2), rotation3 = Math.cos(p.o / 2);
     let normal = existing.find(row => Number(row.Data1) === 0) || existing[0] || null;
     let heroic = existing.find(row => Number(row.Data1) === 1 && row.guid !== normal?.guid) || existing.find(row => row.guid !== normal?.guid) || null;
@@ -1295,7 +1319,7 @@ ipcMain.handle('dungeons:setCustomHeroicPortal', async (_, payload = {}) => {
     let normalEntry = Number(normal?.id) || 0;
     let heroicEntry = Number(heroic?.id) || 0;
     let skullEntry = Number(skull?.id) || 0;
-    const size = Math.max(0.01, Number(normal?.size || heroic?.size || 1.23));
+    const size = Math.max(0.01, Number(normal?.size || heroic?.size || portalTransform.scale || 1.23));
 
     if (!normal) {
       normalEntry = await nextEntry();
@@ -1317,13 +1341,13 @@ ipcMain.handle('dungeons:setCustomHeroicPortal', async (_, payload = {}) => {
     }
     const spawnValues = [p.x, p.y, p.z, p.o, rotation2, rotation3, comment];
     if (normal) await dbConnection.execute('UPDATE gameobject SET spawnMask=1, position_x=?, position_y=?, position_z=?, orientation=?, rotation0=0, rotation1=0, rotation2=?, rotation3=?, Comment=? WHERE guid=?', [...spawnValues.slice(0, 6), comment, normal.guid]);
-    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, 1, 1637, 1637, 1, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [normalEntry, ...spawnValues]);
+    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, ?, ?, ?, 1, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [normalEntry, sourceMapId, sourceZoneId, sourceAreaId, ...spawnValues]);
     if (heroic) await dbConnection.execute('UPDATE gameobject SET spawnMask=2, position_x=?, position_y=?, position_z=?, orientation=?, rotation0=0, rotation1=0, rotation2=?, rotation3=?, Comment=? WHERE guid=?', [...spawnValues.slice(0, 6), comment, heroic.guid]);
-    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, 1, 1637, 1637, 2, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [heroicEntry, ...spawnValues]);
+    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, ?, ?, ?, 2, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [heroicEntry, sourceMapId, sourceZoneId, sourceAreaId, ...spawnValues]);
     if (skull) await dbConnection.execute('UPDATE gameobject SET spawnMask=2, position_x=?, position_y=?, position_z=?, orientation=?, rotation0=0, rotation1=0, rotation2=?, rotation3=?, Comment=? WHERE guid=?', [...spawnValues.slice(0, 6), comment, skull.guid]);
-    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, 1, 1637, 1637, 2, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [skullEntry, ...spawnValues]);
+    else await dbConnection.execute('INSERT INTO gameobject (id, map, zoneId, areaId, spawnMask, phaseMask, position_x, position_y, position_z, orientation, rotation0, rotation1, rotation2, rotation3, spawntimesecs, animprogress, state, ScriptName, VerifiedBuild, Comment) VALUES (?, ?, ?, ?, 2, 1, ?, ?, ?, ?, 0, 0, ?, ?, 120, 100, 1, \'\', NULL, ?)', [skullEntry, sourceMapId, sourceZoneId, sourceAreaId, ...spawnValues]);
     await dbConnection.commit();
-    return { success: true, created: !existing.length, existing: !!existing.length, repaired: !!existing.length, entries: [normalEntry, heroicEntry, skullEntry] };
+    return { success: true, created: !existing.length, existing: !!existing.length, repaired: !!existing.length, source: portalTransform.source || 'fallback', entries: [normalEntry, heroicEntry, skullEntry] };
   } catch (err) { try { await dbConnection.rollback(); } catch {} return { success: false, error: err.message }; }
 });
 

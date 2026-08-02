@@ -4,6 +4,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Wand2, X } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import './SpellEditorWarm.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 
@@ -501,7 +502,7 @@ export default function SpellEditorPage() {
   const [clonePanel, setClonePanel] = useState(null);
   const [cloneSaving, setCloneSaving] = useState(false);
   const [trainerList, setTrainerList] = useState([]);
-  const [slaData, setSlaData] = useState(null);   // SkillLineAbility record voor geselecteerde spell
+  const [slaData, setSlaData] = useState(null);   // SkillLineAbility record for the selected spell
   const [expandedFlags, setExpandedFlags] = useState({});
   const [castTimes, setCastTimes] = useState({});
   const [durations, setDurations] = useState({});
@@ -1036,11 +1037,11 @@ export default function SpellEditorPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header spell-editor-header">
         <h2 className="editor-page-title">Spell Editor</h2>
         <p className="editor-page-subtitle">Manage spell data and properties</p>
       </div>
-      <div className="editor-layout">
+      <div className="editor-layout spell-editor-layout">
         <div className="editor-list" style={activeView === 'compare' ? { flex: '2 1 0', minWidth: '520px' } : undefined}>
           <div className="editor-list-header">
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', marginBottom: '6px' }}>

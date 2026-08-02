@@ -3,6 +3,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import { AlertTriangle, X, Plus, Trash2, Save } from 'lucide-react';
 import './EditorPage.css';
 import './RaceClassPage.css';
+import './RaceClassWarm.css';
 
 const RACES = [
   { id: 1,  name: 'Human',     faction: 'alliance', icon: 'race_human_male' },
@@ -138,7 +139,7 @@ function DetailPanel({ raceId, classId, query, dbcPath, readSkillLineTree, readC
           spellIds
         );
         (dbNames.data || []).forEach(s => { map[Number(s.ID)] = s.Name_Lang_enUS; });
-        // 2. Spell.dbc fallback voor IDs niet in DB
+        // 2. Spell.dbc fallback for IDs not in the database
         const missing = spellIds.filter(id => !map[id]);
         if (missing.length) {
           const dbcNames = await window.azeroth.dbc.readSpells(dbcPath, missing);
@@ -1178,8 +1179,6 @@ export default function RaceClassPage() {
     </div>
   );
 }
-
-
 
 
 

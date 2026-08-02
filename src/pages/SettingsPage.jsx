@@ -3,10 +3,12 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Save, Zap, Hash, Server, FolderOpen } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import './SettingsPage.css';
 
 const ID_RANGE_EDITORS = [
   { key: 'creature', label: 'Creature' },
   { key: 'display',  label: 'Creature Display' },
+  { key: 'gameobject', label: 'GameObject' },
   { key: 'item',     label: 'Item' },
   { key: 'spell',    label: 'Spell' },
   { key: 'quest',    label: 'Quest' },
@@ -259,7 +261,7 @@ export default function SettingsPage() {
               </div>
             ))}
             <button className="btn-primary" onClick={handleServerPathsSave}>
-              <Save size={13} /> {serverPathsSaved ? 'Opgeslagen!' : 'Save Server Paths'}
+              <Save size={13} /> {serverPathsSaved ? 'Saved!' : 'Save Server Paths'}
             </button>
           </div>
         </div>
@@ -307,7 +309,7 @@ export default function SettingsPage() {
               ))}
             </div>
             <button className="btn-primary" onClick={handleIdRangesSave}>
-              <Save size={13} /> {idRangesSaved ? 'Opgeslagen!' : 'Save ID Ranges'}
+              <Save size={13} /> {idRangesSaved ? 'Saved!' : 'Save ID Ranges'}
             </button>
           </div>
         </div>
@@ -316,7 +318,7 @@ export default function SettingsPage() {
         <div className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <Zap size={13} />
-            <span>Minimap Tiles — Spawn Map achtergrond</span>
+            <span>Minimap Tiles — Spawn Map Background</span>
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
@@ -337,7 +339,7 @@ export default function SettingsPage() {
               </div>
             )}
             <button className="btn-primary" onClick={handleMinimapSave}>
-              <Save size={13} /> {minimapSaved ? 'Opgeslagen!' : 'Save Minimap Path'}
+              <Save size={13} /> {minimapSaved ? 'Saved!' : 'Save Minimap Path'}
             </button>
           </div>
         </div>
@@ -410,19 +412,19 @@ export default function SettingsPage() {
               </div>
             )}
             <button className="btn-primary" onClick={handleMapsSave}>
-              <Save size={13} /> {mapsSaved ? 'Opgeslagen!' : 'Save Maps Path'}
+              <Save size={13} /> {mapsSaved ? 'Saved!' : 'Save Maps Path'}
             </button>
           </div>
         </div>
         <div className="panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <FolderOpen size={13} />
-            <span>Expansion Snapshots — DBC versie beheer</span>
+            <span>Expansion Snapshots — DBC Version Management</span>
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Base folder containing the <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Classic/</code>,{' '}
-              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>TBC/</code> en{' '}
+              <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>TBC/</code> and{' '}
               <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Wotlk/</code> subfolders.
               Used by Expansion Lock to switch DBC files.
             </p>
@@ -448,7 +450,7 @@ export default function SettingsPage() {
               </div>
             </div>
             <button className="btn-primary" onClick={handleExpansionsFolderSave}>
-              <Save size={13} /> {expansionsFolderSaved ? 'Opgeslagen!' : 'Save Expansions Folder'}
+              <Save size={13} /> {expansionsFolderSaved ? 'Saved!' : 'Save Expansions Folder'}
             </button>
           </div>
         </div>

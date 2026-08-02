@@ -33,6 +33,7 @@ export function ConnectionProvider({ children }) {
     quest: 4000000,
     talent: 4000000,
     display: 4000000,
+    gameobject: 4000000,
     achievement: 4000000,
   });
 

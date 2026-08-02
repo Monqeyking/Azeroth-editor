@@ -89,7 +89,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
   const loadAllDists = async () => {
     if (allDists) return;
     const r = await readScalingStatDistribution();
-    if (!r.success) { setMsg({ type:'error', text:`Bladeren mislukt: ${r.error}` }); setAllDists([]); return; }
+    if (!r.success) { setMsg({ type:'error', text:`Browse failed: ${r.error}` }); setAllDists([]); return; }
     setAllDists((r.data || []).slice().sort((a, b) => b.ID - a.ID));
   };
 
@@ -144,7 +144,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
     if (!r.success) { setMsg({ type:'error', text: r.error }); return; }
     setAllDists(null);
     onItemFieldChange('ScalingStatDistribution', newId);
-    setMsg({ type:'success', text:`Distributie #${newId} aangemaakt` });
+    setMsg({ type:'success', text:`Distribution #${newId} created` });
   };
 
   const handleSaveDist = async () => {
@@ -161,7 +161,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
     setDistDirty(false);
     setAllDists(null);
     loadAllDists();
-    setMsg({ type:'success', text:'Distributie opgeslagen in ScalingStatDistribution.dbc' });
+    setMsg({ type:'success', text:'Distribution saved to ScalingStatDistribution.dbc' });
     setDistSaving(false);
   };
 
@@ -176,7 +176,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
     if (distForm) handleDistChange('Maxlevel', 60);
     setAllDists(null);
     loadAllDists();
-    setMsg({ type:'success', text:'✓ Alle distributies: Maxlevel → 60' });
+    setMsg({ type:'success', text:'✓ All distributions: Maxlevel → 60' });
   };
 
   // ── Derived preview values ─────────────────────────────────────────────
@@ -192,7 +192,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
 
   // ── Render ────────────────────────────────────────────────────────────
   return (
-    <div style={{ padding:'20px 28px', overflowY:'auto', height:'100%' }}>
+    <div className="item-scaling-tab" style={{ padding:'20px 28px', overflowY:'auto', height:'100%' }}>
 
       {/* ── Header row ── */}
       <div style={{ display:'flex', gap:'12px', alignItems:'flex-end', flexWrap:'wrap', marginBottom:'20px' }}>
@@ -209,18 +209,18 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
         </div>
 
         <div className="field-group" style={{ marginBottom:0 }}>
-          <label>Armor budget kolom</label>
+          <label>Armor budget column</label>
           <code style={{ padding:'6px 10px', background:'var(--bg-panel)', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)', fontSize:'12px', color: armorCol ? 'var(--gold)' : 'var(--text-muted)' }}>
-            {armorCol || '— n.v.t. —'}
+            {armorCol || '— N/A —'}
           </code>
         </div>
 
         <div style={{ marginLeft:'auto', display:'flex', gap:'8px', alignItems:'center', flexWrap:'wrap' }}>
           <button className="btn-ghost" onClick={handleNewDist}>
-            <Plus size={13}/> Nieuwe distributie
+            <Plus size={13}/> New distribution
           </button>
           <button className="btn-ghost" style={{ color:'var(--gold)' }} onClick={handleSetAllMaxlevel60}>
-            Alle Maxlevel → 60
+            Set all Maxlevel → 60
           </button>
         </div>
       </div>
@@ -231,19 +231,19 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
           onClick={() => { const next = !browseOpen; setBrowseOpen(next); if (next) loadAllDists(); }}
           style={{ width:'100%', display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'var(--bg-panel)', border:'none', cursor:'pointer', color:'var(--text-primary)', fontSize:'12px', fontWeight:600 }}>
           {browseOpen ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-          Bestaande distributies bladeren ({allDists ? allDists.length : '...'})
-          <span style={{ fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>kies een bestaande set stats i.p.v. een ID te raden</span>
+          Browse existing distributions ({allDists ? allDists.length : '...'})
+          <span style={{ fontWeight:400, color:'var(--text-muted)', marginLeft:'auto' }}>choose an existing stat set instead of guessing an ID</span>
         </button>
         {browseOpen && (
           <div style={{ padding:'12px 14px', borderTop:'1px solid var(--border)' }}>
             <div className="search-box" style={{ marginBottom:'10px' }}>
               <Search size={13} />
-              <input placeholder="Zoek op ID of stat (bijv. 'Stamina')" value={browseSearch}
+              <input placeholder="Search by ID or stat (for example, 'Stamina')" value={browseSearch}
                 onChange={e => setBrowseSearch(e.target.value)} style={{ width:'100%' }} />
             </div>
             <div style={{ maxHeight:'260px', overflowY:'auto', display:'flex', flexDirection:'column', gap:'4px' }}>
-              {allDists === null && <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>Laden...</div>}
-              {allDists && filteredDists.length === 0 && <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>Geen resultaten</div>}
+              {allDists === null && <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>Loading...</div>}
+              {allDists && filteredDists.length === 0 && <div style={{ fontSize:'11px', color:'var(--text-muted)' }}>No results</div>}
               {filteredDists.map(d => {
                 const summary = distSummary(d);
                 const isActive = d.ID === distId;
@@ -256,7 +256,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
                       borderRadius:'var(--radius-sm)', cursor:'pointer', color:'var(--text-primary)', fontSize:'11px' }}>
                     <span style={{ fontWeight:700, color: isActive ? 'var(--gold)' : 'var(--text-primary)', minWidth:'36px' }}>#{d.ID}</span>
                     <span style={{ color:'var(--text-muted)', minWidth:'70px' }}>Lvl 1-{d.Maxlevel}</span>
-                    <span style={{ flex:1 }}>{summary.length ? summary.join(', ') : <span style={{ color:'var(--text-muted)' }}>geen stats</span>}</span>
+                    <span style={{ flex:1 }}>{summary.length ? summary.join(', ') : <span style={{ color:'var(--text-muted)' }}>no stats</span>}</span>
                     {isActive && <CheckCircle size={13} style={{ color:'var(--gold)' }}/>}
                   </button>
                 );
@@ -273,13 +273,13 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
       {/* ── No distribution ── */}
       {!distId && (
         <div className="editor-empty" style={{ minHeight:'160px' }}>
-          <p>Stel een ScalingStatDistribution ID in of maak een nieuwe aan.</p>
+        <p>Enter a ScalingStatDistribution ID or create a new one.</p>
         </div>
       )}
 
       {distId > 0 && !distForm && (
         <div className="editor-empty" style={{ minHeight:'160px' }}>
-          <p>Distributie #{distId} niet gevonden in ScalingStatDistribution.dbc.</p>
+        <p>Distribution #{distId} was not found in ScalingStatDistribution.dbc.</p>
         </div>
       )}
 
@@ -288,13 +288,13 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
           {/* ── Distribution editor ── */}
           <div style={{ display:'flex', alignItems:'center', gap:'16px', marginBottom:'14px', flexWrap:'wrap' }}>
             <h4 className="field-section-title" style={{ margin:0 }}>
-              Distributie #{distForm.ID}{distDirty && <span style={{ color:'var(--gold)', marginLeft:'6px' }}>●</span>}
+              Distribution #{distForm.ID}{distDirty && <span style={{ color:'var(--gold)', marginLeft:'6px' }}>●</span>}
             </h4>
             <div style={{ display:'flex', alignItems:'center', gap:'8px' }}>
               <label style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', color:'var(--text-muted)' }}>Maxlevel</label>
               <input type="number" value={distForm.Maxlevel ?? 60} style={{ width:'70px' }}
                 onChange={e => handleDistChange('Maxlevel', Number(e.target.value))} />
-              <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>(bovengrens van "Levels 1-X" in de tooltip)</span>
+              <span style={{ fontSize:'11px', color:'var(--text-muted)' }}>(upper bound of "Levels 1-X" in the tooltip)</span>
               {[60, 70, 80].map(lvl => (
                 <button key={lvl} className="btn-ghost" style={{ padding:'4px 8px', fontSize:'11px', opacity: Number(distForm.Maxlevel)===lvl ? 1 : 0.6 }}
                   onClick={() => handleDistChange('Maxlevel', lvl)}>
@@ -304,7 +304,7 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
             </div>
             <button className="btn-primary" style={{ marginLeft:'auto' }}
               onClick={handleSaveDist} disabled={distSaving || !distDirty}>
-              <Save size={13}/> {distSaving ? 'Opslaan...' : 'Opslaan'}
+              <Save size={13}/> {distSaving ? 'Saving...' : 'Save'}
             </button>
           </div>
 
@@ -338,9 +338,9 @@ export default function ItemScalingTab({ editForm, onItemFieldChange }) {
           {previewFiltered.length > 0 && (
             <>
               <h4 className="field-section-title" style={{ borderTop:'1px solid var(--border)', paddingTop:'16px', marginBottom:'12px' }}>
-                Stat preview — level 1 t/m {maxLevel}
+                Stat preview — levels 1-{maxLevel}
                 <span style={{ marginLeft:'8px', fontWeight:400, color:'var(--text-muted)', textTransform:'none', letterSpacing:0 }}>
-                  (stats via PrimaryBudget, armor via {armorCol || '—'})
+                  (stats via PrimaryBudget, armor via {armorCol || '— N/A'})
                 </span>
               </h4>
               <div style={{ overflowX:'auto', maxHeight:'320px', overflowY:'auto', border:'1px solid var(--border)', borderRadius:'var(--radius-sm)' }}>
