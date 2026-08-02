@@ -172,7 +172,7 @@ export default function TrainerSpellPage() {
         deduplicated.push(...(confirmed.length ? confirmed : group));
       }
     } else {
-      // WotLK single-rank spell: toon Ã©Ã©n entry
+      // WotLK single-rank spell: show one entry
       const confirmed = unranked.filter(r => inTrainer.has(r.ID));
       if (confirmed.length > 0) {
         deduplicated.push(...confirmed);
@@ -270,9 +270,9 @@ export default function TrainerSpellPage() {
           : rank
       ));
       setRankEdits(e => { const next = { ...e }; delete next[rankId]; return next; });
-      setMsg({ type: 'success', text: `âœ“ Spell #${rankId} opgeslagen in Spell.dbc` });
+      setMsg({ type: 'success', text: `\u2713 Spell #${rankId} saved to Spell.dbc` });
     } catch (err) {
-      setMsg({ type: 'error', text: `âœ— ${err.message}` });
+      setMsg({ type: 'error', text: `\u2715 ${err.message}` });
     }
     setSaving(false);
   };
@@ -316,15 +316,15 @@ export default function TrainerSpellPage() {
           AcquireMethod: 1,
         });
         if (!slaResult.success) {
-          console.warn('SkillLineAbility.dbc: kon geen entry toevoegen voor spell', rankId, slaResult.error);
+          console.warn('SkillLineAbility.dbc: could not add entry for spell', rankId, slaResult.error);
         }
       }
       const newTrainers = await loadTrainers(rankId);
       setTrainersMap(m => ({ ...m, [rankId]: newTrainers }));
       setTrainerDraft({ trainerId: '', moneyCost: '0', reqLevel: '0', search: '' });
-      setMsg({ type: 'success', text: `âœ“ Trainer ${trainerId} toegevoegd aan spell #${rankId}` });
+      setMsg({ type: 'success', text: `\u2713 Trainer ${trainerId} added to spell #${rankId}` });
     } catch (err) {
-      setMsg({ type: 'error', text: `âœ— ${err.message}` });
+      setMsg({ type: 'error', text: `\u2715 ${err.message}` });
     }
     setSaving(false);
   };
@@ -341,7 +341,7 @@ export default function TrainerSpellPage() {
       const newTrainers = await loadTrainers(rankId);
       setTrainersMap(m => ({ ...m, [rankId]: newTrainers }));
     } catch (err) {
-      setMsg({ type: 'error', text: `âœ— ${err.message}` });
+      setMsg({ type: 'error', text: `\u2715 ${err.message}` });
     }
     setSaving(false);
   };
@@ -349,7 +349,7 @@ export default function TrainerSpellPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header trainer-spell-header">
         <h2 className="editor-page-title">Trainer Spell Editor</h2>
         <p className="editor-page-subtitle">Manage spell ranks and trainer assignments</p>
       </div>
@@ -358,7 +358,7 @@ export default function TrainerSpellPage() {
         <button className={`tsv-mode-btn ${uiMode === 'advanced' ? 'active' : ''}`} onClick={() => setUiMode('advanced')}>Advanced</button>
       </div>
       {uiMode === 'visual' && <TrainerSpellVisualPanel />}
-      <div className="editor-layout" style={{ display: uiMode === 'advanced' ? 'flex' : 'none' }}>
+      <div className="editor-layout trainer-spell-layout" style={{ display: uiMode === 'advanced' ? 'flex' : 'none' }}>
 
         <div className="editor-list">
           <div className="editor-list-header">
@@ -404,7 +404,7 @@ export default function TrainerSpellPage() {
               <div className="page-header">
                 <div>
                   <h1 className="page-title">{selectedName}</h1>
-                  <p className="page-sub">{ranks.length} rank{ranks.length !== 1 ? 's' : ''} Â· Spell.dbc + trainer_spell</p>
+                  <p className="page-sub">{ranks.length} rank{ranks.length !== 1 ? 's' : ''} \u00B7 Spell.dbc + trainer_spell</p>
                 </div>
               </div>
 
@@ -439,16 +439,16 @@ export default function TrainerSpellPage() {
                         >
                           <td>
                             <span className="mono">{rank.rankLabel || `Rank ${idx + 1}`}</span>
-                            {rank.confirmed && <span className="ts-confirmed" title="In npc_trainer"> â—</span>}
+                            {rank.confirmed && <span className="ts-confirmed" title="In npc_trainer"> \u25CF</span>}
                           </td>
                           <td><span className="mono">#{rank.ID}</span></td>
                           <td>{rank.SpellLevel}</td>
                           <td>
                             {rank.EffectBasePoints_1}
-                            {isDirty && <span className="ts-dirty-dot">â—</span>}
+                            {isDirty && <span className="ts-dirty-dot">\u25CF</span>}
                           </td>
                           <td className={trainers.length ? '' : 'ts-muted'}>
-                            {trainers.length ? `${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}` : 'â€”'}
+                            {trainers.length ? `${trainers.length} trainer${trainers.length !== 1 ? 's' : ''}` : '\u2014'}
                           </td>
                           <td>
                             {isExpanded
@@ -501,7 +501,7 @@ export default function TrainerSpellPage() {
                                       <div className="ts-trainer-info">
                                         <span className="mono ts-trainer-id">ID {t.TrainerId}</span>
                                         <span className="ts-trainer-name">{tInfo?.label || t.trainerNames || '(unknown)'}</span>
-                                        <span className="ts-trainer-meta">{t.MoneyCost}c Â· Req {t.ReqLevel}</span>
+                                        <span className="ts-trainer-meta">{t.MoneyCost}c \u00B7 Req {t.ReqLevel}</span>
                                       </div>
                                       <button
                                         className="btn-ghost ts-remove-btn"
@@ -518,7 +518,7 @@ export default function TrainerSpellPage() {
                                   <div className="ts-trainer-search-wrap">
                                     <input
                                       type="text"
-                                      placeholder="Zoek op klasse (bijv. Paladin)..."
+                                      placeholder="Search by class (for example, Paladin)..."
                                       value={trainerDraft.search}
                                       onChange={e => setTrainerDraft(d => ({ ...d, search: e.target.value, trainerId: '' }))}
                                       className="ts-draft-input ts-trainer-search"

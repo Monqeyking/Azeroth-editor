@@ -1,0 +1,402 @@
+/* Warm Vanilla skin for the trainer spell workspace. */
+.trainer-spell-header,
+.trainer-spell-layout,
+.tsv-shell {
+  --bg-dark: #18130e;
+  --bg-panel: #282016;
+  --bg-hover: #332619;
+  --text-primary: #e3d6bc;
+  --text-secondary: #c1ad8d;
+  --text-muted: #aa987b;
+  --border: #594127;
+  --gold: #c99a3d;
+  --gold-dim: #8f6530;
+  --accent-green: #5cb878;
+  --accent-red: #d06b58;
+  color: var(--text-primary);
+}
+
+.trainer-spell-header {
+  margin: 16px 16px 0;
+  padding: 18px 22px;
+  border: 1px solid var(--border);
+  border-bottom-color: #75552d;
+  background: linear-gradient(180deg, #302317 0%, #21170f 100%);
+  box-shadow: inset 0 1px rgba(255, 219, 145, 0.06), 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.trainer-spell-header .editor-page-title,
+.trainer-spell-header h2 {
+  color: #e7c77e;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trainer-spell-header .editor-page-subtitle {
+  color: var(--text-muted);
+}
+
+.tsv-mode-switch {
+  padding: 12px 28px 10px;
+  gap: 6px;
+  background: #1b140d;
+  border-bottom: 1px solid var(--border);
+}
+
+.tsv-mode-btn,
+.tsv-view-btn {
+  border: 1px solid var(--border) !important;
+  border-radius: 3px !important;
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+  box-shadow: inset 0 1px rgba(255, 224, 157, 0.04);
+}
+
+.tsv-mode-btn:hover,
+.tsv-view-btn:hover,
+.tsv-mode-btn.active,
+.tsv-view-btn.active {
+  border-color: var(--gold) !important;
+  background: #392817 !important;
+  color: #f0d18b !important;
+}
+
+.trainer-spell-layout {
+  min-height: 520px;
+  margin: 0 16px 16px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  background: #1b140d;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+}
+
+.trainer-spell-layout .editor-list,
+.trainer-spell-layout .editor-form {
+  background: #21170f !important;
+  border-color: var(--border) !important;
+}
+
+.trainer-spell-layout .editor-list {
+  min-width: 260px;
+}
+
+.trainer-spell-layout .editor-list-header,
+.trainer-spell-layout .page-header {
+  background: #2a1e14 !important;
+  border-color: var(--border) !important;
+}
+
+.trainer-spell-layout .search-box,
+.trainer-spell-layout input,
+.trainer-spell-layout select {
+  border-color: var(--border) !important;
+  background: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.trainer-spell-layout .search-box:focus-within,
+.trainer-spell-layout input:focus,
+.trainer-spell-layout select:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.16);
+}
+
+.trainer-spell-layout .list-item {
+  border-color: rgba(89, 65, 39, 0.72) !important;
+  background: #21170f !important;
+  color: var(--text-primary) !important;
+}
+
+.trainer-spell-layout .list-item:hover,
+.trainer-spell-layout .list-item.active {
+  background: #392817 !important;
+  border-left-color: var(--gold) !important;
+}
+
+.trainer-spell-layout .list-item-name,
+.trainer-spell-layout .page-title {
+  color: #e7c77e !important;
+}
+
+.trainer-spell-layout .list-item-meta,
+.trainer-spell-layout .page-sub,
+.trainer-spell-layout .loading-text,
+.trainer-spell-layout .editor-empty,
+.trainer-spell-layout .ts-muted,
+.trainer-spell-layout .ts-no-trainers {
+  color: var(--text-muted) !important;
+}
+
+.trainer-spell-layout .editor-empty svg {
+  color: var(--gold-dim);
+}
+
+.trainer-spell-layout .ts-table-wrap {
+  padding: 18px 22px 28px;
+}
+
+.trainer-spell-layout .creature-data-table,
+.trainer-spell-layout .creature-data-table th,
+.trainer-spell-layout .creature-data-table td {
+  border-color: var(--border) !important;
+}
+
+.trainer-spell-layout .creature-data-table th {
+  background: #302317 !important;
+  color: #d4b774 !important;
+}
+
+.trainer-spell-layout .creature-data-table td {
+  background: #21170f !important;
+  color: var(--text-primary) !important;
+}
+
+.trainer-spell-layout .ts-rank-row:hover td,
+.trainer-spell-layout .ts-rank-row--open td {
+  background: #332619 !important;
+}
+
+.trainer-spell-layout .ts-expand-row td,
+.trainer-spell-layout .ts-expand-panel,
+.trainer-spell-layout .ts-expand-col {
+  background: #1d160f !important;
+  border-color: var(--border) !important;
+}
+
+.trainer-spell-layout .field-section-title {
+  color: #d4b774 !important;
+  border-color: var(--border) !important;
+}
+
+.trainer-spell-layout .ts-field-row label {
+  color: var(--text-muted) !important;
+}
+
+.trainer-spell-layout .ts-trainer-row {
+  border-bottom-color: rgba(89, 65, 39, 0.64) !important;
+}
+
+.trainer-spell-layout .ts-trainer-name {
+  color: var(--text-primary) !important;
+}
+
+.trainer-spell-layout .ts-trainer-meta,
+.trainer-spell-layout .ts-trainer-id {
+  color: var(--text-muted) !important;
+}
+
+.trainer-spell-layout .ts-draft-input,
+.trainer-spell-layout .ts-draft-select,
+.trainer-spell-layout .ts-field-row input {
+  border-radius: 3px;
+}
+
+.trainer-spell-layout .ts-trainer-dropdown {
+  border-color: var(--border) !important;
+  background: #241a11 !important;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.32);
+}
+
+.trainer-spell-layout .ts-trainer-option {
+  border-bottom-color: rgba(89, 65, 39, 0.6) !important;
+  color: var(--text-primary);
+}
+
+.trainer-spell-layout .ts-trainer-option:hover {
+  background: #392817 !important;
+}
+
+.trainer-spell-layout .ts-selected-trainer,
+.trainer-spell-layout .ts-confirmed,
+.trainer-spell-layout .ts-dirty-dot {
+  color: var(--gold) !important;
+}
+
+.trainer-spell-layout .btn-primary,
+.trainer-spell-layout .btn-ghost,
+.tsv-shell button {
+  border-color: var(--border) !important;
+  border-radius: 3px;
+  color: var(--text-primary);
+}
+
+.trainer-spell-layout .btn-primary,
+.tsv-shell .btn-primary {
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.trainer-spell-layout .btn-primary:hover,
+.tsv-shell .btn-primary:hover {
+  background: #765225 !important;
+}
+
+.trainer-spell-layout .btn-ghost,
+.tsv-shell .btn-ghost {
+  background: #21170f !important;
+}
+
+.trainer-spell-layout .btn-ghost:hover,
+.tsv-shell .btn-ghost:hover {
+  background: #392817 !important;
+}
+
+.tsv-shell {
+  margin: 0 16px 16px;
+  padding: 16px 20px 28px;
+  border: 1px solid var(--border);
+  background: #1b140d !important;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+}
+
+.tsv-hero,
+.tsv-filters,
+.tsv-side-pane,
+.tsv-modal-panel {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #282016 !important;
+  box-shadow: inset 0 1px rgba(255, 219, 145, 0.035), 0 12px 24px rgba(0, 0, 0, 0.16);
+}
+
+.tsv-hero {
+  background: linear-gradient(180deg, #302317 0%, #21170f 100%) !important;
+}
+
+.tsv-kicker,
+.tsv-title,
+.tsv-expand-title,
+.tsv-detail-head h4,
+.tsv-modal-head h4 {
+  color: #e7c77e !important;
+}
+
+.tsv-subtitle,
+.tsv-muted,
+.tsv-group-badge,
+.tsv-card-sub,
+.tsv-detail-sub,
+.tsv-source-row-2,
+.tsv-add-item-sub,
+.tsv-legacy-label,
+.tsv-field span,
+.tsv-detail-group span,
+.tsv-recipe-label {
+  color: var(--text-muted) !important;
+}
+
+.tsv-chip,
+.tsv-group-card,
+.tsv-legacy-chip,
+.tsv-tier-chip,
+.tsv-card,
+.tsv-add-item,
+.tsv-selection-bar,
+.tsv-recipe-panel,
+.tsv-reagent,
+.tsv-detail-group > div,
+.tsv-diag,
+.tsv-source-pill,
+.tsv-icon-wrap,
+.tsv-recipe-icon,
+.tsv-reagent-icon,
+.tsv-remove-check {
+  border-color: var(--border) !important;
+  background: #21170f !important;
+}
+
+.tsv-chip:hover,
+.tsv-group-card:hover,
+.tsv-legacy-chip:hover,
+.tsv-tier-chip:hover,
+.tsv-card:hover,
+.tsv-add-item:hover,
+.tsv-chip.active,
+.tsv-group-card.active,
+.tsv-legacy-chip.active,
+.tsv-tier-chip.active,
+.tsv-card.active,
+.tsv-add-item.active {
+  border-color: var(--gold) !important;
+  background: #392817 !important;
+}
+
+.tsv-field input,
+.tsv-field select,
+.tsv-mini-input,
+.tsv-modal-filters input,
+.tsv-modal-filters select {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.tsv-field input:focus,
+.tsv-field select:focus,
+.tsv-mini-input:focus,
+.tsv-modal-filters input:focus,
+.tsv-modal-filters select:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.16);
+}
+
+.tsv-card-name,
+.tsv-recipe-value,
+.tsv-reagent-name,
+.tsv-add-item-name {
+  color: var(--text-primary);
+}
+
+.tsv-status,
+.tsv-source-pill,
+.tsv-diag {
+  border-radius: 3px !important;
+  background: #2c2116 !important;
+}
+
+.tsv-status--learned { color: #8bc29a !important; }
+.tsv-status--hidden { color: #d0a96b !important; }
+.tsv-status--blocked { color: #db8270 !important; }
+.tsv-status--too-low { color: #e1b65e !important; }
+.tsv-status--trainable { color: #7fca8d !important; }
+
+.tsv-diag.ok { border-color: rgba(92, 184, 120, 0.42) !important; }
+.tsv-diag.warn { border-color: rgba(201, 154, 61, 0.52) !important; }
+
+.tsv-modal-backdrop {
+  background: rgba(9, 6, 3, 0.78) !important;
+}
+
+.tsv-modal-actions {
+  border-top-color: var(--border) !important;
+}
+
+.tsv-source-pill button,
+.tsv-source-actions button.danger {
+  color: var(--accent-red) !important;
+}
+
+@media (max-width: 900px) {
+  .trainer-spell-header,
+  .trainer-spell-layout,
+  .tsv-shell {
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+
+  .trainer-spell-layout {
+    flex-direction: column;
+  }
+
+  .trainer-spell-layout .editor-list {
+    min-height: 220px;
+  }
+
+  .tsv-shell {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+}

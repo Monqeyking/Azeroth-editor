@@ -792,3 +792,254 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Classic Vanilla theme experiment: warm leather chrome, restrained gold states. */
+.go-editor-page {
+  --go-vanilla-bg: #1b140d;
+  --go-vanilla-panel: #282016;
+  --go-vanilla-panel-dark: #18130e;
+  --go-vanilla-field: #211a13;
+  --go-vanilla-border: #594127;
+  --go-vanilla-border-soft: #3e2f20;
+  --go-vanilla-text: #e3d6bc;
+  --go-vanilla-muted: #aa987b;
+  --go-vanilla-gold: #c99a3d;
+  background-color: var(--go-vanilla-bg);
+  background-image:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 87, 30, 0.18), transparent 38%),
+    radial-gradient(ellipse at 92% 28%, rgba(91, 57, 23, 0.14), transparent 42%),
+    repeating-linear-gradient(105deg, rgba(255, 224, 166, 0.025) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #24180d 0%, #17110c 42%, #120e0a 100%);
+  color: var(--go-vanilla-text);
+}
+
+.go-editor-header {
+  background: linear-gradient(180deg, rgba(22, 16, 10, 0.98), rgba(31, 22, 14, 0.96));
+  border-bottom: 1px solid var(--go-vanilla-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.24);
+}
+
+.go-editor-header .editor-page-title {
+  color: #eadbbd;
+  text-shadow: 0 1px 2px #000;
+}
+
+.go-editor-header .editor-page-subtitle,
+.go-editor-page .editor-page-subtitle {
+  color: var(--go-vanilla-muted);
+}
+
+.go-editor-page .field-group label,
+.go-only-spawned,
+.go-scale-label,
+.go-pos-axis,
+.go-nudge-settings,
+.go-nudge-settings label,
+.go-spawn-meta .field-group label {
+  color: #c1ae8b;
+}
+
+.go-editor-header .btn-ghost,
+.go-editor-header .btn-primary {
+  background: #332619;
+  border-color: var(--go-vanilla-border);
+  color: #e0cda8;
+}
+
+.go-editor-header .btn-ghost:hover,
+.go-editor-header .btn-primary:hover {
+  background: #4a351f;
+  border-color: #9a7434;
+  color: #fff0c9;
+}
+
+.go-editor-header .btn-primary {
+  background: linear-gradient(180deg, #8a672c, #654718);
+  border-color: #b58a3b;
+}
+
+.go-editor-layout,
+.go-editor-layout .editor-form {
+  background: transparent;
+}
+
+.go-editor-layout .editor-list {
+  background: rgba(27, 20, 13, 0.96);
+  border-color: var(--go-vanilla-border);
+  box-shadow: inset -1px 0 rgba(0, 0, 0, 0.35);
+}
+
+.go-list-header,
+.go-editor-layout .editor-card,
+.go-scale-row,
+.go-scale-presets {
+  background: var(--go-vanilla-panel);
+  border-color: var(--go-vanilla-border);
+}
+
+.go-list-header {
+  background: linear-gradient(180deg, #302319, #241b13) !important;
+}
+
+.go-list-header .search-box,
+.go-filter-row .field-group select,
+.go-form-fields .field-group input,
+.go-form-fields .field-group select,
+.go-data-grid .field-group input,
+.go-scale-row input[type="number"],
+.go-nudge-settings select,
+.go-pos-inputs input,
+.go-spawn-meta .field-group input,
+.modal-input {
+  background: var(--go-vanilla-field);
+  border-color: var(--go-vanilla-border-soft);
+  color: var(--go-vanilla-text);
+}
+
+.go-list-header .search-box:focus-within,
+.go-filter-row .field-group select:focus,
+.go-form-fields .field-group input:focus,
+.go-form-fields .field-group select:focus,
+.go-data-grid .field-group input:focus,
+.go-scale-row input[type="number"]:focus,
+.go-nudge-settings select:focus,
+.go-pos-inputs input:focus,
+.go-spawn-meta .field-group input:focus,
+.modal-input:focus {
+  border-color: #927034;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.15);
+}
+
+.go-editor-layout .list-item {
+  border-color: var(--go-vanilla-border-soft);
+}
+
+.go-editor-layout .list-item:hover,
+.go-data-fields summary:hover,
+.go-spawn-row:hover {
+  background: #342619;
+}
+
+.go-editor-layout .list-item.active,
+.go-spawn-row.active {
+  background: linear-gradient(90deg, #5a4022, #3e2e1d);
+  border-left-color: var(--go-vanilla-gold);
+  box-shadow: inset 0 0 14px rgba(201, 154, 61, 0.08);
+}
+
+.go-editor-layout .list-item-name,
+.go-spawn-guid {
+  color: #e7d9bf;
+}
+
+.go-editor-layout .list-item-meta,
+.go-entry-badge,
+.go-spawn-pos span,
+.go-spawn-map,
+.go-model-path,
+.go-scale-presets > span {
+  color: var(--go-vanilla-muted);
+}
+
+.go-panel-title,
+.go-data-fields summary {
+  background: linear-gradient(180deg, #211810, #18130e);
+  border-color: var(--go-vanilla-border);
+  color: #d9c398;
+  text-shadow: 0 1px 1px #000;
+}
+
+.go-model-path {
+  border-color: var(--go-vanilla-border-soft);
+}
+
+.go-preview-canvas {
+  background: #0d0e13;
+  border-top: 1px solid #100d09;
+}
+
+.go-preview-overlay {
+  background: #0d0e13;
+  color: #aa987b;
+}
+
+.go-scale-row input[type="range"] {
+  accent-color: var(--go-vanilla-gold);
+}
+
+.go-scale-preset,
+.go-small-btn,
+.go-nudge-btn,
+.go-action-row .btn-ghost,
+.go-pending-actions .btn-ghost,
+.modal-btn-cancel {
+  background: #332619;
+  border-color: var(--go-vanilla-border);
+  color: #d4c29f;
+}
+
+.go-scale-preset:hover,
+.go-small-btn:hover,
+.go-nudge-btn:hover,
+.go-action-row .btn-ghost:hover,
+.go-pending-actions .btn-ghost:hover,
+.modal-btn-cancel:hover {
+  background: #48331f;
+  border-color: #9a7434;
+  color: #f0dfbd;
+}
+
+.go-scale-preset.active {
+  background: #745323;
+  border-color: var(--go-vanilla-gold);
+  color: #fff0c9;
+}
+
+.go-action-row .btn-primary,
+.go-pending-actions .btn-primary,
+.modal-btn-ok {
+  background: linear-gradient(180deg, #8a672c, #654718);
+  border-color: #b58a3b;
+  color: #fff0c9;
+  text-shadow: 0 1px 1px #2a1b08;
+}
+
+.go-action-row .btn-primary:hover,
+.go-pending-actions .btn-primary:hover,
+.modal-btn-ok:hover:not(:disabled) {
+  background: linear-gradient(180deg, #a27a31, #795521);
+}
+
+.go-spawn-row {
+  border-color: var(--go-vanilla-border-soft);
+}
+
+.go-data-fields,
+.go-spawn-list {
+  border-color: var(--go-vanilla-border);
+}
+
+.go-pending-warning,
+.modal-box {
+  background: #241a11;
+  border-color: #81612f;
+  color: var(--go-vanilla-text);
+}
+
+.modal-overlay {
+  background: rgba(7, 5, 3, 0.7);
+}
+
+.go-editor-page ::-webkit-scrollbar,
+.go-editor-page ::-webkit-scrollbar-track {
+  background: #17110c;
+}
+
+.go-editor-page ::-webkit-scrollbar-thumb {
+  background: #634723;
+  border: 2px solid #17110c;
+}
+
+.go-editor-page ::-webkit-scrollbar-thumb:hover {
+  background: #8b682e;
+}

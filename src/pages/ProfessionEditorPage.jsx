@@ -9,6 +9,7 @@ import '../pages/DashboardPage.css';
 import './EditorPage.css';
 import './NPCWorkflowPage.css';
 import './ProfessionEditorPage.css';
+import './ProfessionEditorWarm.css';
 
 const PROFESSION_PRESETS = [
   { id: 'alchemy', label: 'Alchemy', skillLine: 171, subname: 'Master Alchemist', npcflag: 83, greeting: 'I can teach you the secrets of alchemy.', color: '#9AD8B8' },
@@ -220,7 +221,7 @@ export default function ProfessionEditorPage() {
     const parts = [];
     if (professionFilter !== 'all') parts.push(`Profession: ${activeProfessionFilter.label}`);
     if (search.trim()) parts.push(`Search: "${search.trim()}"`);
-    return parts.length ? `Filtered by ${parts.join(' � ')}` : 'Showing profession NPCs';
+    return parts.length ? `Filtered by ${parts.join(' / ')}` : 'Showing profession NPCs';
   }, [activeProfessionFilter.label, professionFilter, search]);
   const hasSearchFilter = search.trim().length > 0 || professionFilter !== 'all';
   const filteredCount = entries.length;
@@ -368,7 +369,7 @@ export default function ProfessionEditorPage() {
   return (
     <>
       {unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
-      <div className="editor-page-header">
+      <div className="editor-page-header prof-page-header">
         <h2 className="editor-page-title">Profession Editor</h2>
         <p className="editor-page-subtitle">A guided profession workflow for fast NPC setup, relation inspection, and clone-based authoring.</p>
       </div>
@@ -427,7 +428,7 @@ export default function ProfessionEditorPage() {
                 <div>
                   <div className="prof-kicker">Profession workflow</div>
                   <h1 className="page-title">{form.name || selected.name}</h1>
-                  <p className="page-sub">Entry #{form.entry} � creature_template + trainer + trainer_spell</p>
+                  <p className="page-sub">Entry #{form.entry} · creature_template + trainer + trainer_spell</p>
                 </div>
                 <div className="header-actions prof-actions">
                   <button type="button" className="btn-ghost" onClick={openNpcWorkflow}><GitBranch size={13} /> NPC Workflow</button>
@@ -492,7 +493,7 @@ export default function ProfessionEditorPage() {
                 <div className="field-section prof-section">
                   <div className="field-section-title">Relation inspection</div>
                   <div className="prof-relation-grid">
-                    <div className="prof-relation-card"><span>Trainer row</span><strong>{trainer.trainerId || 'New'}</strong><small>Type {trainer.type} � Req {trainer.requirement}</small></div>
+                    <div className="prof-relation-card"><span>Trainer row</span><strong>{trainer.trainerId || 'New'}</strong><small>Type {trainer.type} · Req {trainer.requirement}</small></div>
                     <div className="prof-relation-card"><span>Trainer spells</span><strong>{formatCount(trainerSpellCount)}</strong><small>Linked through trainer_spell</small></div>
                     <div className="prof-relation-card"><span>Legacy rows</span><strong>{formatCount(legacy.total)}</strong><small>{legacy.templateRefs > 0 ? `${legacy.templateRefs} template refs` : `${legacy.directRows} direct rows`}</small></div>
                     <div className="prof-relation-card"><span>Distinct gates</span><strong>{skillLineCount}</strong><small>{skillLineSummary ? `${skillLineSummary.minLevel}-${skillLineSummary.maxLevel} req level` : 'No skill gates yet'}</small></div>

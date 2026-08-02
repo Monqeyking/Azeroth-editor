@@ -1,0 +1,105 @@
+.spell-editor-header,
+.spell-editor-layout {
+  --vanilla-bg: #1b140d;
+  --vanilla-panel: #282016;
+  --vanilla-panel-dark: #18130e;
+  --vanilla-field: #211a13;
+  --vanilla-border: #594127;
+  --vanilla-border-soft: #3e2f20;
+  --vanilla-text: #e3d6bc;
+  --vanilla-muted: #aa987b;
+  --vanilla-gold: #c99a3d;
+}
+
+.spell-editor-header {
+  padding: 16px 20px 12px;
+  background: linear-gradient(180deg, rgba(55, 39, 24, 0.96), rgba(29, 21, 14, 0.98));
+  border-bottom: 1px solid var(--vanilla-border);
+}
+.spell-editor-header .editor-page-title { color: var(--vanilla-text); font-family: Georgia, 'Times New Roman', serif; font-size: 20px; }
+.spell-editor-header .editor-page-subtitle { color: var(--vanilla-muted); }
+
+.spell-editor-layout {
+  height: calc(100vh - 73px);
+  min-height: 0;
+  background: radial-gradient(circle at 70% 0%, rgba(116, 75, 27, 0.08), transparent 34%), var(--vanilla-bg);
+  color: var(--vanilla-text);
+}
+
+.spell-editor-layout .editor-list {
+  background: linear-gradient(180deg, rgba(40, 32, 22, 0.98), rgba(27, 20, 13, 0.98));
+  border-color: var(--vanilla-border);
+}
+.spell-editor-layout .editor-list-header {
+  background: rgba(24, 19, 14, 0.92);
+  border-color: var(--vanilla-border-soft);
+}
+.spell-editor-layout .search-box,
+.spell-editor-layout .editor-list-header select,
+.spell-editor-layout .editor-list-header input {
+  background: var(--vanilla-field) !important;
+  border-color: var(--vanilla-border-soft) !important;
+  color: var(--vanilla-text) !important;
+}
+.spell-editor-layout .search-box input::placeholder,
+.spell-editor-layout input::placeholder { color: #85745d; }
+.spell-editor-layout .list-item { border-color: rgba(89, 65, 39, 0.55); }
+.spell-editor-layout .list-item:hover { background: rgba(126, 87, 32, 0.2); }
+.spell-editor-layout .list-item.active { background: linear-gradient(90deg, rgba(126, 87, 32, 0.34), rgba(126, 87, 32, 0.12)); border-left-color: var(--vanilla-gold); }
+.spell-editor-layout .list-item-name { color: var(--vanilla-text); }
+.spell-editor-layout .list-item-meta,
+.spell-editor-layout .loading-text { color: var(--vanilla-muted); }
+
+.spell-editor-layout .editor-form { min-width: 0; background: transparent; }
+.spell-editor-layout .page-header { background: linear-gradient(180deg, rgba(48, 37, 25, 0.98), rgba(34, 26, 18, 0.98)); border-color: var(--vanilla-border); }
+.spell-editor-layout .page-title { color: var(--vanilla-text); font-family: Georgia, 'Times New Roman', serif; }
+.spell-editor-layout .page-sub { color: var(--vanilla-muted); }
+.spell-editor-layout .field-section-title { color: #d1ad69; border-color: var(--vanilla-border-soft); letter-spacing: .05em; }
+
+.spell-editor-layout .btn-ghost {
+  background: rgba(54, 39, 24, 0.8) !important;
+  border-color: var(--vanilla-border) !important;
+  color: var(--vanilla-text) !important;
+}
+.spell-editor-layout .btn-ghost:hover:not(:disabled) { background: rgba(126, 87, 32, 0.28) !important; border-color: var(--vanilla-gold) !important; color: #f0dfbd !important; }
+.spell-editor-layout .btn-primary { background: linear-gradient(180deg, #a7792c, #78531f) !important; border-color: #d0a353 !important; color: #fff1d0 !important; }
+.spell-editor-layout .btn-primary:hover:not(:disabled) { background: linear-gradient(180deg, #bd8c37, #896126) !important; }
+
+.spell-editor-layout .field-group label { color: var(--vanilla-muted); }
+.spell-editor-layout .field-group input,
+.spell-editor-layout .field-group select,
+.spell-editor-layout .field-group textarea,
+.spell-editor-layout input,
+.spell-editor-layout select,
+.spell-editor-layout textarea {
+  background: var(--vanilla-field);
+  border-color: var(--vanilla-border-soft);
+  color: var(--vanilla-text);
+}
+.spell-editor-layout .field-group input:focus,
+.spell-editor-layout .field-group select:focus,
+.spell-editor-layout .field-group textarea:focus,
+.spell-editor-layout input:focus,
+.spell-editor-layout select:focus,
+.spell-editor-layout textarea:focus { border-color: var(--vanilla-gold); box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.14); }
+.spell-editor-layout input[type='checkbox'] { accent-color: var(--vanilla-gold); }
+
+.spell-editor-layout .editor-msg.info { background: rgba(126, 87, 32, 0.14) !important; border-color: var(--vanilla-border) !important; color: #dec58e !important; }
+.spell-editor-layout .editor-msg.success { background: rgba(62, 107, 55, 0.18); border-color: #547a42; color: #b8d89c; }
+.spell-editor-layout .editor-msg.error { background: rgba(116, 42, 30, 0.2); border-color: #854735; color: #e2a48e; }
+
+.spell-editor-layout .creature-subtabs,
+.spell-editor-layout .spell-subtabs { background: rgba(40, 32, 22, 0.92) !important; border-color: var(--vanilla-border) !important; }
+.spell-editor-layout .creature-subtab { color: var(--vanilla-muted); }
+.spell-editor-layout .creature-subtab.active { color: var(--vanilla-gold); border-bottom-color: var(--vanilla-gold); }
+
+.spell-editor-layout [style*='background: var(--bg-darker)'],
+.spell-editor-layout [style*='background: var(--bg-panel)'] { background: var(--vanilla-panel-dark) !important; border-color: var(--vanilla-border) !important; }
+.spell-editor-layout [style*='borderTop:'] { border-top-color: var(--vanilla-border-soft) !important; }
+.spell-editor-layout [style*='borderRight:'] { border-right-color: var(--vanilla-border-soft) !important; }
+
+@media (max-width: 900px) {
+  .spell-editor-layout { display: block; height: auto; overflow: visible; }
+  .spell-editor-layout .editor-list { max-height: 420px; }
+  .spell-editor-layout .editor-form { min-height: 680px; }
+}

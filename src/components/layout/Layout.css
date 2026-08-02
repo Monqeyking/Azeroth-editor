@@ -267,3 +267,117 @@
   overflow: auto;
   background: var(--bg-dark);
 }
+
+/* Warm Vanilla application chrome. */
+.layout {
+  --vanilla-bg: #1b140d;
+  --vanilla-panel: #282016;
+  --vanilla-panel-dark: #18130e;
+  --vanilla-field: #211a13;
+  --vanilla-border: #594127;
+  --vanilla-border-soft: #3e2f20;
+  --vanilla-text: #e3d6bc;
+  --vanilla-muted: #aa987b;
+  --vanilla-gold: #c99a3d;
+  background: var(--vanilla-bg);
+}
+
+.sidebar {
+  background: rgba(24, 19, 14, 0.98);
+  border-right-color: var(--vanilla-border);
+  box-shadow: 4px 0 18px rgba(0, 0, 0, 0.16);
+}
+
+.sidebar-resizer:hover {
+  background: #9a7434;
+}
+
+.sidebar-header {
+  background: linear-gradient(180deg, #211810, #18130e);
+  border-bottom-color: var(--vanilla-border);
+}
+
+.logo-title {
+  color: #eadbbd;
+  text-shadow: 0 1px 2px #000;
+}
+
+.logo-sub,
+.db-name {
+  color: var(--vanilla-muted);
+}
+
+.db-badge {
+  background: var(--vanilla-field);
+  border-color: var(--vanilla-border-soft);
+}
+
+.sidebar-nav-fixed,
+.sidebar-nav,
+.sidebar-footer {
+  background: transparent;
+}
+
+.nav-item {
+  color: #c1ae8b;
+}
+
+.nav-item:hover,
+.nav-group-header:hover {
+  background: #342619;
+  color: #f0dfbd;
+}
+
+.nav-item.active {
+  background: linear-gradient(90deg, #5a4022, #3e2e1d);
+  color: #fff0c9;
+  box-shadow: inset 3px 0 0 var(--vanilla-gold), inset 0 0 14px rgba(201, 154, 61, 0.08);
+}
+
+.nav-group-header {
+  color: #aa987b;
+}
+
+.nav-group-header.has-active {
+  color: #d9c398;
+}
+
+.nav-group-header .chevron {
+  color: #806f58;
+}
+
+.nav-divider,
+.sidebar-footer {
+  border-color: var(--vanilla-border);
+}
+
+.nav-item.disconnect {
+  color: #aa987b;
+}
+
+.nav-item.disconnect:hover {
+  color: #e89b84;
+  background: rgba(130, 49, 35, 0.18);
+}
+
+.main-content {
+  background-color: var(--vanilla-bg);
+  background-image:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 87, 30, 0.12), transparent 38%),
+    repeating-linear-gradient(105deg, rgba(255, 224, 166, 0.018) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #24180d 0%, #17110c 42%, #120e0a 100%);
+}
+
+.layout ::-webkit-scrollbar,
+.layout ::-webkit-scrollbar-track {
+  background: #17110c;
+}
+
+.layout ::-webkit-scrollbar-thumb {
+  background: #634723;
+  border: 2px solid #17110c;
+}
+
+.layout ::-webkit-scrollbar-thumb:hover {
+  background: #8b682e;
+}

@@ -397,7 +397,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="server-actions">
                   {!hasPath ? (
-                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Pad instellen in Settings</span>
+                    <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Set the path in Settings</span>
                   ) : isRunning ? (
                     <button className="btn-ghost" style={{ fontSize: 12 }} disabled={busy} onClick={() => handleServer(type, 'stop')}>
                       <Square size={11} /> Stop

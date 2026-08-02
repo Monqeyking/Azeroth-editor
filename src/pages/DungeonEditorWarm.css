@@ -1,0 +1,88 @@
+.dungeon-page {
+  --vanilla-bg: #1b140d;
+  --vanilla-panel: #282016;
+  --vanilla-panel-dark: #18130e;
+  --vanilla-field: #211a13;
+  --vanilla-border: #594127;
+  --vanilla-border-soft: #3e2f20;
+  --vanilla-text: #e3d6bc;
+  --vanilla-muted: #aa987b;
+  --vanilla-gold: #c99a3d;
+  background: radial-gradient(circle at 72% 0%, rgba(116, 75, 27, 0.1), transparent 34%), var(--vanilla-bg) !important;
+  color: var(--vanilla-text) !important;
+}
+
+.dungeon-header {
+  background: linear-gradient(180deg, rgba(55, 39, 24, 0.96), rgba(29, 21, 14, 0.98));
+  border-bottom: 1px solid var(--vanilla-border);
+}
+.dungeon-header h1 { color: var(--vanilla-text); font-family: Georgia, 'Times New Roman', serif; }
+.dungeon-header h1 svg { color: var(--vanilla-gold); }
+.dungeon-header p { color: var(--vanilla-muted); }
+.dungeon-notice { background: rgba(126, 87, 32, 0.16); border-color: var(--vanilla-border); color: #e1bd77; }
+
+.dungeon-workspace { border-color: var(--vanilla-border); }
+.dungeon-library,
+.dungeon-detail { background: transparent; }
+.dungeon-library { border-color: var(--vanilla-border); }
+.dungeon-search,
+.dungeon-page select,
+.dungeon-page input {
+  background: var(--vanilla-field) !important;
+  border-color: var(--vanilla-border-soft) !important;
+  color: var(--vanilla-text) !important;
+}
+.dungeon-search:focus-within,
+.dungeon-page select:focus,
+.dungeon-page input:focus { border-color: var(--vanilla-gold) !important; box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.14); }
+.dungeon-page input::placeholder { color: #85745d !important; }
+.dungeon-filters select { color: var(--vanilla-text) !important; }
+
+.dungeon-results button { border-color: rgba(89, 65, 39, 0.55); color: var(--vanilla-text); }
+.dungeon-results button:hover { background: rgba(126, 87, 32, 0.2); }
+.dungeon-results button.active { background: linear-gradient(90deg, rgba(126, 87, 32, 0.34), rgba(126, 87, 32, 0.12)); border-left-color: var(--vanilla-gold); }
+.dungeon-results small { color: var(--vanilla-muted); }
+
+.dungeon-title,
+.dungeon-tabs { background: rgba(40, 32, 22, 0.94); border-color: var(--vanilla-border); }
+.dungeon-title strong { color: var(--vanilla-text); font-family: Georgia, 'Times New Roman', serif; }
+.dungeon-title span { color: var(--vanilla-muted); }
+.dungeon-tabs button { color: var(--vanilla-muted); }
+.dungeon-tabs button.active,
+.dungeon-tabs button:hover { color: var(--vanilla-gold); border-bottom-color: var(--vanilla-gold); }
+
+.dungeon-panel-grid { background: transparent; }
+.dungeon-panel { background: linear-gradient(180deg, rgba(40, 32, 22, 0.98), rgba(27, 20, 13, 0.98)); border-color: var(--vanilla-border); }
+.dungeon-panel h3 { background: rgba(24, 19, 14, 0.92); border-color: var(--vanilla-border); color: #d1ad69; }
+.dungeon-panel h4 { color: #d1ad69; }
+.dungeon-panel table th { background: var(--vanilla-panel-dark); color: var(--vanilla-muted); }
+.dungeon-panel table td,
+.dungeon-panel table th,
+.info,
+.access-row,
+.content-link { border-color: rgba(89, 65, 39, 0.5); }
+.info span,
+.access-row span:nth-child(2),
+.dungeon-form label,
+.heroic-add label { color: var(--vanilla-muted); }
+.info strong,
+.access-row,
+.content-link { color: var(--vanilla-text); }
+.content-link:hover { background: rgba(126, 87, 32, 0.16); }
+.content-link span { color: var(--vanilla-muted); }
+.dungeon-panel ul { color: var(--vanilla-text); }
+
+.dungeon-callout { background: rgba(126, 87, 32, 0.15); border-color: var(--vanilla-border); color: #e1c995; }
+.dungeon-callout.warn { background: rgba(116, 75, 27, 0.22); border-color: #806031; color: #e5c984; }
+.dungeon-callout svg { color: var(--vanilla-gold); }
+
+.dungeon-page .btn-ghost { background: rgba(54, 39, 24, 0.82) !important; border-color: var(--vanilla-border) !important; color: var(--vanilla-text) !important; }
+.dungeon-page .btn-ghost:hover { background: rgba(126, 87, 32, 0.28) !important; border-color: var(--vanilla-gold) !important; color: #f0dfbd !important; }
+.dungeon-page .btn-primary { background: linear-gradient(180deg, #a7792c, #78531f) !important; border-color: #d0a353 !important; color: #fff1d0 !important; }
+.dungeon-page .requirement-row button { background: rgba(54, 39, 24, 0.82); border-color: var(--vanilla-border); color: var(--vanilla-text); }
+.dungeon-page .loading-text { color: var(--vanilla-muted); }
+
+@media (max-width: 850px) {
+  .dungeon-header { padding: 12px; }
+  .dungeon-notice { max-width: 55%; }
+}

@@ -4,6 +4,7 @@ import { Save, RotateCcw, GitBranch, GitCompare, X, Search, Copy, Trash2, Plus }
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
+import './TalentEditorWarm.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';
@@ -33,13 +34,13 @@ function canMoveTalent(talent, newTier, allTalents) {
 		if (!prereqId) continue;
 		const prereq = allTalents.find(t => t.ID === prereqId);
 		if (prereq && (prereq.TierID || 0) >= newTier)
-			return { ok: false, reason: `Prereq talent #${prereqId} staat op rij ${prereq.TierID}, moet lager zijn dan rij ${newTier}.` };
+			return { ok: false, reason: `Prerequisite talent #${prereqId} is on row ${prereq.TierID}; it must be above row ${newTier}.` };
 	}
 	for (const other of allTalents) {
 		if (other.ID === talent.ID) continue;
 		for (let i = 1; i <= 3; i++) {
 			if (other[`PrereqTalent_${i}`] === talent.ID && (other.TierID || 0) <= newTier)
-				return { ok: false, reason: `Talent #${other.ID} gebruikt dit als prereq en staat op rij ${other.TierID} (moet hoger zijn dan rij ${newTier}).` };
+				return { ok: false, reason: `Talent #${other.ID} uses this as a prerequisite and is on row ${other.TierID}; it must be below row ${newTier}.` };
 		}
 	}
 	return { ok: true };
@@ -135,7 +136,7 @@ function TalentTreeGrid({
 								onDragLeave={readOnly ? undefined : onDragLeave}
 								onDrop={readOnly ? undefined : e => onDrop(e, row, col)}
 								onClick={onSelectTalent ? () => onSelectTalent(t) : undefined}
-								title={`${name} (${maxRank} ranks) — Tier ${row}, Kolom ${col}`}
+								title={`${name} (${maxRank} ranks) — Tier ${row}, Column ${col}`}
 							>
 								<span className="talent-node-rank">{maxRank}</span>
 								{!icon && <span className="talent-node-name">
@@ -158,7 +159,7 @@ function TalentTreeGrid({
 								onDragLeave={readOnly ? undefined : onDragLeave}
 								onDrop={readOnly ? undefined : e => onDrop(e, row, col)}
 								onClick={readOnly ? undefined : () => onSelectEmpty(row, col)}
-								title={readOnly ? '' : `Leeg slot — Tier ${row}, Kolom ${col}`}
+								title={readOnly ? '' : `Empty slot — Tier ${row}, Column ${col}`}
 							>
 								{!readOnly && <span className="grid-cell-plus">+</span>}
 							</div>
@@ -366,10 +367,10 @@ export default function TalentEditorPage() {
 			if (isStale()) return;
 			if (extInfo.success && localInfo.success && extInfo.recordSize !== localInfo.recordSize) {
 				setCompareSpellSchemaWarning(
-					`Extern Spell.dbc heeft een ander recordformaat (recordSize ${extInfo.recordSize} vs lokaal ${localInfo.recordSize}) — veldoffsets komen niet overeen, namen en tooltips kunnen fout of leeg zijn.`
+					`External Spell.dbc has a different record format (recordSize ${extInfo.recordSize} vs local ${localInfo.recordSize}); field offsets do not match, so names and tooltips may be wrong or empty.`
 				);
 			} else if (!extInfo.success) {
-				setCompareSpellSchemaWarning(`Extern Spell.dbc kon niet gelezen worden: ${extInfo.error}`);
+				setCompareSpellSchemaWarning(`External Spell.dbc could not be read: ${extInfo.error}`);
 			} else {
 				setCompareSpellSchemaWarning(null);
 			}
@@ -680,7 +681,7 @@ export default function TalentEditorPage() {
 
 		const occupied = talents.find(t => t.ID !== src.ID && (t.TierID || 0) === dstRow && (t.ColumnIndex || 0) === dstCol);
 		if (occupied) {
-			setMsg({ type: 'error', text: `Positie (rij ${dstRow}, kolom ${dstCol}) is al bezet door talent #${occupied.ID}.` });
+			setMsg({ type: 'error', text: `Position (row ${dstRow}, column ${dstCol}) is already occupied by talent #${occupied.ID}.` });
 			return;
 		}
 
@@ -690,7 +691,7 @@ export default function TalentEditorPage() {
 		const updated = { ...src, TierID: dstRow, ColumnIndex: dstCol };
 		const result = await saveTalent(updated);
 		if (result.success) {
-			setMsg({ type: 'success', text: `✓ Talent #${src.ID} verplaatst naar rij ${dstRow}, kolom ${dstCol}.` });
+			setMsg({ type: 'success', text: `✓ Talent #${src.ID} moved to row ${dstRow}, column ${dstCol}.` });
 			await loadTalents(activeTab.ID);
 		} else {
 			setMsg({ type: 'error', text: result.error });
@@ -812,7 +813,7 @@ export default function TalentEditorPage() {
 						description: result.data.Description_Lang_enUS,
 						auraDescription: result.data.AuraDescription_Lang_enUS,
 					}
-					: { error: result.error || 'Niet gevonden' };
+					: { error: result.error || 'Not found' };
 			}
 			if (!cancelled) { setCompareRankTooltips(entries); setCompareTooltipsLoading(false); }
 		})();
@@ -837,8 +838,8 @@ export default function TalentEditorPage() {
 			{unsavedGuard.blocked && <UnsavedChangesModal onConfirm={unsavedGuard.confirm} onCancel={unsavedGuard.cancel} />}
 			{confirmDelete && selected && (
 				<DeleteConfirmModal
-					title="Talent verwijderen"
-					message={`Talent #${selected.ID} verwijderen uit Talent.dbc? Dit kan niet ongedaan worden gemaakt.`}
+					title="Delete talent"
+					message={`Delete talent #${selected.ID} from Talent.dbc? This cannot be undone.`}
 					onConfirm={handleDelete}
 					onCancel={() => setConfirmDelete(false)}
 				/>
@@ -887,7 +888,7 @@ export default function TalentEditorPage() {
 					</div>
 				)}
 				{!selectedClass ? (
-					<div className="editor-empty"><p>Selecteer een class</p></div>
+					<div className="editor-empty"><p>Select a class</p></div>
 				) : (
 					<>
 						<div className="talent-tabs">
@@ -900,20 +901,20 @@ export default function TalentEditorPage() {
 									{tab.Name_Lang_enUS}
 								</button>
 							))}
-							{tabs.length === 0 && <span className="talent-no-tabs">Geen talent tabs gevonden</span>}
+							{tabs.length === 0 && <span className="talent-no-tabs">No talent tabs found</span>}
 
 							<div className="talent-compare-toggle">
 								<button
 									className={`talent-tab-btn ${compareVisible ? 'active' : ''}`}
 									onClick={toggleCompare}
-									title={compareDbcFolder ? 'Compare paneel tonen/verbergen' : 'Selecteer extern Talent.dbc om te vergelijken'}
+									title={compareDbcFolder ? 'Show/hide compare pane' : 'Select an external Talent.dbc to compare'}
 								>
 									<GitCompare size={13} /> Compare
 								</button>
 								{compareDbcFolder && (
 									<span className="compare-file-label">
 										Talent: {compareDbcFolder.split(/[\\/]/).pop()}
-										<button type="button" className="btn-ghost" style={{ fontSize: '10px', padding: '1px 5px' }} title="Compare bestanden wissen" onClick={handleClearCompareFile}>
+										<button type="button" className="btn-ghost" style={{ fontSize: '10px', padding: '1px 5px' }} title="Clear compare files" onClick={handleClearCompareFile}>
 											<X size={11} />
 										</button>
 									</span>
@@ -923,9 +924,9 @@ export default function TalentEditorPage() {
 										type="button"
 										className={`talent-tab-btn ${compareSpellFolder ? 'active' : ''}`}
 										onClick={handlePickCompareSpellFile}
-										title="Selecteer extern Spell.dbc (nodig om externe talent-IDs aan namen te koppelen)"
+										title="Select an external Spell.dbc (needed to resolve external talent IDs)"
 									>
-										Spell: {compareSpellFolder ? compareSpellFolder.split(/[\\/]/).pop() : '— selecteer —'}
+											Spell: {compareSpellFolder ? compareSpellFolder.split(/[\\/]/).pop() : '— select —'}
 									</button>
 								)}
 							</div>
@@ -953,7 +954,7 @@ export default function TalentEditorPage() {
 										onDrop={handleDrop}
 									/>
 								)}
-								{!activeTab && <div className="editor-empty"><p>Geen talent tab geselecteerd</p></div>}
+								{!activeTab && <div className="editor-empty"><p>No talent tab selected</p></div>}
 							</div>
 
 							{compareDbcFolder && compareVisible && (
@@ -986,12 +987,12 @@ export default function TalentEditorPage() {
 													selected={compareSelected}
 													onSelectTalent={selectCompareTalent}
 												/>
-											) : !compareLoadError && <div className="editor-empty"><p>Geen talent tab geselecteerd</p></div>}
+											) : !compareLoadError && <div className="editor-empty"><p>No talent tab selected</p></div>}
 										</div>
 
 										<div className="talent-edit-panel">
 											{!compareSelected ? (
-												<div className="editor-empty"><p>Klik op een talent om te bekijken</p></div>
+												<div className="editor-empty"><p>Select a talent to inspect</p></div>
 											) : (
 												<>
 													<div className="panel-header">
@@ -1017,13 +1018,13 @@ export default function TalentEditorPage() {
 													)}
 
 													<div className="talent-edit-fields">
-														<div className="talent-edit-section">Positie</div>
+														<div className="talent-edit-section">Position</div>
 														<div className="field-group">
 															<label>Tier (Rij)</label>
 															<span>{compareSelected.TierID ?? 0}</span>
 														</div>
 														<div className="field-group">
-															<label>Kolom</label>
+															<label>Column</label>
 															<span>{compareSelected.ColumnIndex ?? 0}</span>
 														</div>
 
@@ -1059,7 +1060,7 @@ export default function TalentEditorPage() {
 
 														{compareRanksAny.length > 0 && (
 															<>
-																<div className="talent-edit-section">Tooltip{compareTooltipsLoading ? ' (laden…)' : ''}</div>
+										<div className="talent-edit-section">Tooltip{compareTooltipsLoading ? ' (loading…)' : ''}</div>
 																{compareRanksAny.map(i => {
 																	const spellId = compareSelected[`SpellRank_${i}`];
 																	const tt = compareRankTooltips[spellId];
@@ -1080,8 +1081,8 @@ export default function TalentEditorPage() {
 																				whiteSpace: 'pre-wrap',
 																			}}>
 																				{tt.error
-																					? <em>Geen tooltip gevonden in extern Spell.dbc ({tt.error})</em>
-																					: (tt.description || <em>Geen description tekst</em>)}
+																					? <em>Tooltip not found in external Spell.dbc ({tt.error})</em>
+																					: (tt.description || <em>No description text</em>)}
 																				{tt.auraDescription && (
 																					<div style={{ marginTop: 4, opacity: 0.8 }}>{tt.auraDescription}</div>
 																				)}
@@ -1106,7 +1107,7 @@ export default function TalentEditorPage() {
 			{/* ── Edit panel ── */}
 			<div className="talent-edit-panel">
 				{!selected ? (
-					<div className="editor-empty"><p>Klik op een talent of leeg slot om te bewerken</p></div>
+					<div className="editor-empty"><p>Select a talent or empty slot to edit</p></div>
 				) : (
 					<>
 						<div className="panel-header">
@@ -1141,7 +1142,7 @@ export default function TalentEditorPage() {
 							{/* Delete — uiterst rechts */}
 							{!isNew && (
 								<div className="talent-delete-inline">
-									<button className="btn-ghost" onClick={() => setConfirmDelete(true)} title="Delete this talent (Delete-toets)">
+									<button className="btn-ghost" onClick={() => setConfirmDelete(true)} title="Delete this talent (Delete key)">
 										<Trash2 size={13} /> Delete
 									</button>
 								</div>
@@ -1181,13 +1182,13 @@ export default function TalentEditorPage() {
 							)}
 
 							{/* Positie */}
-							<div className="talent-edit-section">Positie</div>
+										<div className="talent-edit-section">Position</div>
 							<div className="field-group">
 								<label>Tier (Rij)</label>
 								<input type="number" min="0" max="14" value={form.TierID ?? ''} onChange={e => handleChange('TierID', +e.target.value)} />
 							</div>
 							<div className="field-group">
-								<label>Kolom</label>
+								<label>Column</label>
 								<input type="number" min="0" max="3" value={form.ColumnIndex ?? ''} onChange={e => handleChange('ColumnIndex', +e.target.value)} />
 							</div>
 
@@ -1226,7 +1227,7 @@ export default function TalentEditorPage() {
 							{/* Tooltips per rank */}
 							{Object.keys(rankTooltips).length > 0 && (
 								<>
-									<div className="talent-edit-section">Tooltip{tooltipsLoading ? ' (laden…)' : ''}</div>
+									<div className="talent-edit-section">Tooltip{tooltipsLoading ? ' (loading…)' : ''}</div>
 									{[1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => {
 										const spellId = form[`SpellRank_${i}`];
 										const tt = spellId > 0 ? rankTooltips[spellId] : null;
@@ -1246,7 +1247,7 @@ export default function TalentEditorPage() {
 													padding: '6px 8px',
 													whiteSpace: 'pre-wrap',
 												}}>
-													{tt.description || <em>Geen description tekst</em>}
+													{tt.description || <em>No description text</em>}
 													{tt.auraDescription && (
 														<div style={{ marginTop: 4, opacity: 0.8 }}>{tt.auraDescription}</div>
 													)}
@@ -1268,14 +1269,14 @@ export default function TalentEditorPage() {
 					<div className="spell-picker-overlay" onClick={() => setShowSpellPicker(false)} />
 					<div className="spell-picker-panel">
 						<div className="spell-picker-header">
-							<h3>Selecteer Spell voor Rank {pickingRank}</h3>
+							<h3>Select a spell for rank {pickingRank}</h3>
 							<button className="spell-picker-close" onClick={() => setShowSpellPicker(false)}><X size={16} /></button>
 						</div>
 						<div className="spell-picker-search">
 							<Search size={14} />
 							<input
 								type="text"
-								placeholder="Zoek op naam of spell ID..."
+								placeholder="Search by name or spell ID..."
 								value={spellSearchTerm}
 								onChange={e => setSpellSearchTerm(e.target.value)}
 								autoFocus
@@ -1291,7 +1292,7 @@ export default function TalentEditorPage() {
 									</div>
 								</div>
 							))}
-							{availableSpells.length === 0 && <div className="spell-picker-empty">Geen spells gevonden</div>}
+							{availableSpells.length === 0 && <div className="spell-picker-empty">No spells found</div>}
 						</div>
 					</div>
 				</div>

@@ -5,13 +5,14 @@ import { useConnection } from '../lib/ConnectionContext';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import './DungeonEditorPage.css';
+import './DungeonEditorWarm.css';
 
 const difficultyNames = { 0: 'Normal', 1: 'Heroic', 2: '10 Normal', 3: '25 Normal', 4: '10 Heroic', 5: '25 Heroic' };
 const expansionNames = ['Classic', 'The Burning Crusade', 'Wrath of the Lich King'];
 const blankRequirement = () => ({ requirement_type: 0, requirement_id: '', faction: 2, priority: 0, leader_only: false, requirement_note: '' });
 
 export default function DungeonEditorPage() {
-  const { readDungeonMaps, writeMapDifficultyCap, addMapDifficulty, deleteMapDifficulty, runAtomicWrite } = useConnection();
+  const { readDungeonMaps, writeMapDifficultyCap, addMapDifficulty, deleteMapDifficulty, runAtomicWrite, worldmapMpqPath, idRanges } = useConnection();
   const navigate = useNavigate();
   const [library, setLibrary] = useState({ maps: [], difficulties: [] });
   const [workspace, setWorkspace] = useState(null); const [selected, setSelected] = useState(null);
@@ -45,7 +46,7 @@ export default function DungeonEditorPage() {
     const cap = Number(heroicCap || selected.maxPlayers || 5);
     if (!Number.isInteger(cap) || cap < 1 || cap > 100) return setNotice('Heroic record was not added: enter a player cap from 1 to 100.');
     if (!window.confirm(`Add Heroic (difficulty 1) for ${selected.name} with a ${cap}-player cap? Normal-only creature and gameobject spawns will also be enabled for Heroic.`)) return;
-    try { let changed = { creatures: 0, gameobjects: 0 }, portal = null; await runAtomicWrite(['MapDifficulty.dbc'], async () => { const r = await addMapDifficulty({ mapId: selected.id, difficulty: 1, maxPlayers: cap }); if (!r.success) throw new Error(r.error); const spawns = await window.azeroth.dungeons.setCustomHeroicCreatureSpawns({ mapId: selected.id, enabled: true }); if (!spawns.success) throw new Error(spawns.error); changed = spawns; portal = await window.azeroth.dungeons.setCustomHeroicPortal({ mapId: selected.id, enabled: true }); if (!portal.success) throw new Error(portal.error); }); setNotice(`Heroic record added; ${changed.creatures} creature and ${changed.gameobjects} gameobject spawns enabled for Heroic.${portal?.created ? ' RFC difficulty portal and skull overlay created.' : ''} Copy MapDifficulty.dbc to client and server, then restart worldserver.`); setHeroicCap(''); await loadLibrary(); }
+    try { let changed = { creatures: 0, gameobjects: 0 }, portal = null; setNotice('Searching database and client WMO/ADT data for the portal transform…'); const resolved = await window.azeroth.dungeons.resolveHeroicPortal({ dataPath: worldmapMpqPath, mapId: selected.id, mapDirectory: selected.directory, expansion: selected.expansion }); await runAtomicWrite(['MapDifficulty.dbc'], async () => { const r = await addMapDifficulty({ mapId: selected.id, difficulty: 1, maxPlayers: cap }); if (!r.success) throw new Error(r.error); const spawns = await window.azeroth.dungeons.setCustomHeroicCreatureSpawns({ mapId: selected.id, enabled: true }); if (!spawns.success) throw new Error(spawns.error); changed = spawns; portal = await window.azeroth.dungeons.setCustomHeroicPortal({ mapId: selected.id, enabled: true, entryStart: idRanges.gameobject, portalTransform: resolved.transform }); if (!portal.success) throw new Error(portal.error); }); const portalText = portal?.created ? ` Portal transform loaded from ${resolved.source === 'database' ? 'database' : 'WMO/ADT'} and visual records created.` : resolved.source === 'none' ? ' No portal transform was found; the Heroic record was still added.' : ''; setNotice(`Heroic record added; ${changed.creatures} creature and ${changed.gameobjects} gameobject spawns enabled for Heroic.${portalText} Copy MapDifficulty.dbc to client and server, then restart worldserver.`); setHeroicCap(''); await loadLibrary(); }
     catch (e) { setNotice(`Could not add Heroic record: ${e.message}`); }
   };
   const deleteHeroicDifficulty = async () => {
@@ -56,7 +57,8 @@ export default function DungeonEditorPage() {
     catch (e) { setNotice(`Could not delete custom Heroic record: ${e.message}`); }
   };
   const addRfcPortalVisual = async () => {
-    const r = await window.azeroth.dungeons.setCustomHeroicPortal({ mapId: selected.id, enabled: true });
+    const resolved = await window.azeroth.dungeons.resolveHeroicPortal({ dataPath: worldmapMpqPath, mapId: selected.id, mapDirectory: selected.directory, expansion: selected.expansion });
+    const r = await window.azeroth.dungeons.setCustomHeroicPortal({ mapId: selected.id, enabled: true, entryStart: idRanges.gameobject, portalTransform: resolved.transform });
     setNotice(!r.success ? `Could not create RFC portal visual: ${r.error}` : r.repaired ? 'RFC portal displays repaired: blue Normal, purple Heroic portal and skull. Restart worldserver to load them.' : 'RFC blue Normal portal and purple Heroic portal plus skull created. Restart worldserver to load them.');
   };
   const removeRfcPortalVisual = async () => {

@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Lock, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box, Castle
+  Layers, ShoppingBag, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box, Castle
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
@@ -67,7 +67,6 @@ const NAV_GROUPS = [
       { to: '/worldmap',        icon: Globe,   label: 'World Map' },
       { to: '/game-objects',    icon: Box,     label: 'Game Objects' },
       { to: '/dungeons',        icon: Castle,  label: 'Dungeons' },
-      { to: '/expansion-lock',  icon: Lock,    label: 'Expansion Lock' },
     ],
   },
   {

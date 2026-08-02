@@ -1,0 +1,174 @@
+/* Warm Vanilla skin for the loot editor. */
+.loot-editor {
+  --bg-dark: #18130e;
+  --bg-panel: #282016;
+  --bg-hover: #332619;
+  --text-primary: #e3d6bc;
+  --text-secondary: #c1ad8d;
+  --text-muted: #aa987b;
+  --border: #594127;
+  --gold: #c99a3d;
+  --gold-bright: #e7c77e;
+  max-width: none;
+  min-height: 100%;
+  padding: 16px;
+  background: #1b140d !important;
+  color: var(--text-primary) !important;
+}
+
+.loot-editor-title {
+  padding: 18px 22px 0;
+  color: var(--gold-bright) !important;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.loot-editor-subtitle {
+  padding: 0 22px;
+  color: var(--text-muted) !important;
+}
+
+.loot-toolbar,
+.loot-table-wrap,
+.loot-group-totals,
+.loot-footer {
+  border: 1px solid var(--border);
+  background: #282016 !important;
+}
+
+.loot-toolbar {
+  padding: 10px 12px;
+  border-radius: 4px 4px 0 0;
+}
+
+.loot-segmented {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #18130e !important;
+}
+
+.loot-segmented button {
+  color: var(--text-muted) !important;
+}
+
+.loot-segmented button.active {
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.loot-segmented button:hover:not(.active) {
+  background: #392817 !important;
+  color: var(--text-primary) !important;
+}
+
+.loot-entry-field,
+.loot-entry-input,
+.loot-table input,
+.loot-modal-search,
+.loot-modal-search input {
+  border-color: var(--border) !important;
+  background: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.loot-entry-field {
+  border-radius: 3px !important;
+}
+
+.loot-entry-field:focus-within {
+  border-color: var(--gold) !important;
+}
+
+.loot-entry-label,
+.loot-item-name {
+  color: var(--gold-bright) !important;
+}
+
+.loot-entry-dropdown,
+.loot-modal {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #282016 !important;
+  box-shadow: 0 16px 30px rgba(0, 0, 0, 0.4);
+}
+
+.loot-entry-option,
+.loot-modal-row {
+  border-color: rgba(89, 65, 39, 0.65) !important;
+  color: var(--text-primary);
+}
+
+.loot-entry-option:hover,
+.loot-modal-row:hover {
+  background: #392817 !important;
+}
+
+.loot-table-wrap {
+  overflow: auto;
+  border-top: 0;
+  border-radius: 0;
+}
+
+.loot-table th {
+  border-color: var(--border) !important;
+  background: #302317 !important;
+  color: var(--gold-bright) !important;
+}
+
+.loot-table td {
+  border-color: rgba(89, 65, 39, 0.65) !important;
+  color: var(--text-primary) !important;
+}
+
+.loot-table tr:hover td,
+.loot-table tr.loot-row-warn td {
+  background: #332619 !important;
+}
+
+.loot-table input:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+}
+
+.loot-group-totals {
+  padding: 8px 12px;
+  border-top: 0;
+  border-radius: 0;
+}
+
+.loot-warning {
+  color: #e1b65e !important;
+}
+
+.loot-footer {
+  padding: 10px 12px;
+  border-top: 0;
+  border-radius: 0 0 4px 4px;
+}
+
+.loot-footer .btn-primary,
+.loot-footer .btn-ghost {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+}
+
+.loot-footer .btn-primary {
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.loot-footer .btn-ghost {
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+}
+
+.loot-row-count,
+.loot-modal-empty,
+.loot-modal-id {
+  color: var(--text-muted) !important;
+}
+
+.loot-modal-overlay {
+  background: rgba(9, 6, 3, 0.78) !important;
+}

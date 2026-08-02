@@ -1,0 +1,306 @@
+.quest-editor-header,
+.quest-editor-layout {
+  --vanilla-bg: #1b140d;
+  --vanilla-panel: #282016;
+  --vanilla-panel-dark: #18130e;
+  --vanilla-field: #211a13;
+  --vanilla-border: #594127;
+  --vanilla-border-soft: #3e2f20;
+  --vanilla-text: #e3d6bc;
+  --vanilla-muted: #aa987b;
+  --vanilla-gold: #c99a3d;
+}
+
+.quest-editor-header {
+  padding: 16px 20px 12px;
+  background: linear-gradient(180deg, rgba(55, 39, 24, 0.96), rgba(29, 21, 14, 0.98));
+  border-bottom: 1px solid var(--vanilla-border);
+}
+
+.quest-editor-header .editor-page-title {
+  color: var(--vanilla-text);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 20px;
+  letter-spacing: 0.02em;
+}
+
+.quest-editor-header .editor-page-subtitle,
+.quest-editor-layout .list-item-meta,
+.quest-editor-layout .loading-text,
+.quest-editor-layout .editor-empty,
+.quest-draft-header .page-sub {
+  color: var(--vanilla-muted);
+}
+
+.quest-editor-layout {
+  height: calc(100vh - 73px);
+  min-height: 0;
+  background: radial-gradient(circle at 70% 0%, rgba(116, 75, 27, 0.08), transparent 34%), var(--vanilla-bg);
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .editor-list {
+  background: linear-gradient(180deg, rgba(40, 32, 22, 0.98), rgba(27, 20, 13, 0.98));
+  border-color: var(--vanilla-border);
+}
+
+.quest-editor-layout .editor-list-header {
+  padding: 8px;
+  background: rgba(24, 19, 14, 0.92);
+  border-color: var(--vanilla-border-soft);
+}
+
+.quest-editor-layout .search-box,
+.quest-editor-layout .editor-list-header select,
+.quest-editor-layout .editor-list-header input {
+  background: var(--vanilla-field);
+  border-color: var(--vanilla-border-soft);
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .search-box input::placeholder,
+.quest-editor-layout .editor-list-header input::placeholder,
+.quest-editor-layout input::placeholder,
+.quest-editor-layout textarea::placeholder {
+  color: #85745d;
+}
+
+.quest-editor-layout .list-item {
+  padding: 8px 10px;
+  border-color: rgba(89, 65, 39, 0.55);
+}
+
+.quest-editor-layout .list-item:hover {
+  background: rgba(116, 75, 27, 0.2);
+}
+
+.quest-editor-layout .list-item.active {
+  background: linear-gradient(90deg, rgba(126, 87, 32, 0.34), rgba(126, 87, 32, 0.12));
+  border-left-color: var(--vanilla-gold);
+}
+
+.quest-editor-layout .list-item-name {
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .editor-form {
+  min-width: 0;
+  background: transparent;
+}
+
+.quest-editor-layout .creature-subtabs {
+  background: rgba(40, 32, 22, 0.92) !important;
+  border-color: var(--vanilla-border) !important;
+  padding-inline: 12px !important;
+}
+
+.quest-editor-layout .creature-subtab {
+  color: var(--vanilla-muted);
+}
+
+.quest-editor-layout .creature-subtab:hover:not(:disabled),
+.quest-editor-layout .creature-subtab.active {
+  color: var(--vanilla-gold);
+  border-bottom-color: var(--vanilla-gold);
+}
+
+.quest-draft-header {
+  margin: 0 16px 12px;
+  padding: 10px 14px;
+  background: linear-gradient(180deg, rgba(48, 37, 25, 0.98), rgba(34, 26, 18, 0.98));
+  border-color: var(--vanilla-border);
+  border-radius: 4px;
+}
+
+.quest-draft-header .page-title {
+  color: var(--vanilla-text);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 17px;
+}
+
+.quest-editor-layout .header-actions {
+  gap: 5px;
+}
+
+.quest-editor-layout .header-actions button,
+.quest-editor-layout .btn-ghost,
+.quest-editor-layout .btn-primary {
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.quest-editor-layout .btn-ghost {
+  background: rgba(54, 39, 24, 0.8);
+  border-color: var(--vanilla-border);
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .btn-ghost:hover:not(:disabled) {
+  background: rgba(126, 87, 32, 0.28);
+  border-color: var(--vanilla-gold);
+  color: #f0dfbd;
+}
+
+.quest-editor-layout .btn-primary {
+  background: linear-gradient(180deg, #a7792c, #78531f);
+  border-color: #d0a353;
+  color: #fff1d0;
+  box-shadow: inset 0 1px rgba(255, 230, 169, 0.18);
+}
+
+.quest-editor-layout .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #bd8c37, #896126);
+}
+
+.quest-editor-layout .field-section-title,
+.quest-editor-layout h5 {
+  color: #d1ad69;
+  border-color: var(--vanilla-border-soft);
+  letter-spacing: 0.05em;
+}
+
+.quest-editor-layout .field-group label,
+.quest-editor-layout .quest-faction-field label {
+  color: var(--vanilla-muted);
+  font-size: 10px;
+}
+
+.quest-editor-layout .field-group input,
+.quest-editor-layout .field-group select,
+.quest-editor-layout .field-group textarea,
+.quest-editor-layout .quest-field-input,
+.quest-editor-layout input,
+.quest-editor-layout select,
+.quest-editor-layout textarea {
+  background: var(--vanilla-field);
+  border-color: var(--vanilla-border-soft);
+  border-radius: 3px;
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .field-group input:focus,
+.quest-editor-layout .field-group select:focus,
+.quest-editor-layout .field-group textarea:focus,
+.quest-editor-layout .quest-field-input:focus {
+  border-color: var(--vanilla-gold);
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.14);
+}
+
+.quest-editor-layout .quest-field-input.is-dirty {
+  border-color: #b67c2d;
+  background: #2b2115;
+}
+
+.quest-editor-layout .quest-lookup-display {
+  background: rgba(24, 19, 14, 0.7);
+  border-color: var(--vanilla-border-soft);
+  color: var(--vanilla-muted);
+}
+
+.quest-editor-layout .quest-lookup-name {
+  color: var(--vanilla-text);
+}
+
+.quest-editor-layout .quest-lookup-name.is-empty {
+  color: #806f58;
+}
+
+.quest-editor-layout .quest-objective-row,
+.quest-editor-layout .quest-faction-grid,
+.quest-editor-layout .quest-faction-reward-row {
+  border-color: var(--vanilla-border-soft);
+}
+
+.quest-editor-layout .quest-objective-row {
+  background: rgba(40, 32, 22, 0.45);
+}
+
+.quest-editor-layout .editor-msg.success {
+  background: rgba(62, 107, 55, 0.18);
+  border-color: #547a42;
+  color: #b8d89c;
+}
+
+.quest-editor-layout .editor-msg.error {
+  background: rgba(116, 42, 30, 0.2);
+  border-color: #854735;
+  color: #e2a48e;
+}
+
+.quest-editor-layout .quest-editor-form > div[style*="background: 'var(--bg-panel)'"] {
+  background: var(--vanilla-panel) !important;
+  border-color: var(--vanilla-border) !important;
+}
+
+@media (max-width: 1000px) {
+  .quest-editor-layout .editor-list { width: 240px !important; }
+  .quest-draft-header { margin-inline: 10px; }
+}
+
+@media (max-width: 760px) {
+  .quest-editor-layout { display: block; height: auto; overflow: visible; }
+  .quest-editor-layout .editor-list { width: auto !important; max-height: 280px; }
+  .quest-editor-layout .editor-form { min-height: 640px; }
+  .quest-draft-header { display: block; }
+  .quest-draft-header .header-actions { margin-top: 10px; flex-wrap: wrap; }
+}
+
+/* Inline filter and chain styles need explicit Vanilla overrides. */
+.quest-editor-layout .quest-class-filter-trigger {
+  background: var(--vanilla-field) !important;
+  border-color: var(--vanilla-border) !important;
+  color: var(--vanilla-muted) !important;
+}
+
+.quest-editor-layout .quest-class-filter-trigger:hover,
+.quest-editor-layout .quest-class-filter-trigger:focus-visible {
+  background: rgba(126, 87, 32, 0.22) !important;
+  border-color: var(--vanilla-gold) !important;
+  color: var(--vanilla-text) !important;
+  outline: none;
+}
+
+.quest-editor-layout .quest-class-filter-menu {
+  background: var(--vanilla-panel-dark) !important;
+  border-color: var(--vanilla-border) !important;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45) !important;
+}
+
+.quest-editor-layout .quest-class-filter-menu label {
+  color: var(--vanilla-text) !important;
+  border-radius: 3px;
+}
+
+.quest-editor-layout .quest-class-filter-menu label:hover {
+  background: rgba(126, 87, 32, 0.2);
+}
+
+.quest-editor-layout .quest-class-filter-menu input[type='checkbox'],
+.quest-editor-layout input[type='checkbox'] {
+  accent-color: var(--vanilla-gold);
+}
+
+.quest-editor-layout .quest-chain-panel {
+  background: linear-gradient(180deg, rgba(40, 32, 22, 0.96), rgba(24, 19, 14, 0.98)) !important;
+  border-color: var(--vanilla-border) !important;
+}
+
+.quest-editor-layout .quest-chain-track {
+  background: transparent !important;
+}
+
+.quest-editor-layout .quest-chain-node {
+  background: var(--vanilla-field) !important;
+  border-color: var(--vanilla-border) !important;
+  color: var(--vanilla-muted) !important;
+}
+
+.quest-editor-layout .quest-chain-node.is-current {
+  background: rgba(201, 154, 61, 0.16) !important;
+  border-color: var(--vanilla-gold) !important;
+  color: var(--vanilla-gold) !important;
+}
+
+.quest-editor-layout .quest-chain-arrow {
+  color: var(--vanilla-gold) !important;
+}

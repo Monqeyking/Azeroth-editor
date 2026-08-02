@@ -1,0 +1,177 @@
+/* Warm Vanilla skin for the NPC movement editor. */
+.npcmove-page {
+  --bg-dark: #18130e;
+  --bg-panel: #282016;
+  --bg-hover: #332619;
+  --text-primary: #e3d6bc;
+  --text-secondary: #c1ad8d;
+  --text-muted: #aa987b;
+  --border: #594127;
+  --gold: #c99a3d;
+  --gold-dim: #8f6530;
+  --gold-bright: #e7c77e;
+  min-height: 100%;
+  background: #1b140d !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-header {
+  margin: 16px 16px 0;
+  padding: 18px 22px !important;
+  border: 1px solid var(--border) !important;
+  border-bottom-color: #75552d !important;
+  background: linear-gradient(180deg, #302317 0%, #21170f 100%) !important;
+  box-shadow: inset 0 1px rgba(255, 219, 145, 0.06), 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.npcmove-header .editor-page-title {
+  color: var(--gold-bright) !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.npcmove-header .editor-page-subtitle {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-search,
+.npcmove-filters,
+.npcmove-message {
+  margin: 0 16px;
+  border-color: var(--border) !important;
+  background: #21170f !important;
+}
+
+.npcmove-search .search-box,
+.npcmove-search input,
+.npcmove-filters select,
+.npcmove-fields input,
+.npcmove-fields select,
+.npcmove-waypoint-row input {
+  border-color: var(--border) !important;
+  background: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-search .search-box:focus-within,
+.npcmove-search input:focus,
+.npcmove-filters select:focus,
+.npcmove-fields input:focus,
+.npcmove-fields select:focus,
+.npcmove-waypoint-row input:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.16);
+}
+
+.npcmove-search .btn-primary,
+.npcmove-header .btn-primary {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.npcmove-message {
+  color: var(--text-secondary) !important;
+}
+
+.npcmove-layout {
+  margin: 0 16px 16px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  background: #1b140d !important;
+}
+
+.npcmove-results,
+.npcmove-editor {
+  background: #21170f !important;
+  border-color: var(--border) !important;
+}
+
+.npcmove-result {
+  border-bottom-color: rgba(89, 65, 39, 0.7) !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-result:hover,
+.npcmove-result.active {
+  background: #392817 !important;
+}
+
+.npcmove-result.active {
+  border-left-color: var(--gold) !important;
+}
+
+.npcmove-result span,
+.npcmove-result small,
+.npcmove-empty,
+.npcmove-summary small,
+.npcmove-fields label,
+.field-hint,
+.npcmove-waypoint-head p {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-summary,
+.npcmove-card,
+.npcmove-preview,
+.npcmove-waypoints {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #282016 !important;
+}
+
+.npcmove-summary strong,
+.npcmove-card h3,
+.npcmove-waypoints h3 {
+  color: var(--gold-bright) !important;
+}
+
+.npcmove-summary > div,
+.npcmove-waypoint-head,
+.npcmove-waypoint-row {
+  border-color: rgba(89, 65, 39, 0.65) !important;
+}
+
+.npcmove-waypoint-head {
+  background: #302317 !important;
+}
+
+.npcmove-waypoint-row.head {
+  color: var(--gold-bright) !important;
+  background: #21170f !important;
+}
+
+.npcmove-waypoint-row .icon-btn {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-waypoint-row .icon-btn:hover {
+  color: #df8873 !important;
+}
+
+.npcmove-waypoint-head .btn-ghost {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+}
+
+.npcmove-preview .creature-model-preview,
+.npcmove-preview .creature-model-preview-head,
+.npcmove-preview .creature-model-preview-debug {
+  border-color: var(--border) !important;
+  background: #1d160f !important;
+}
+
+@media (max-width: 900px) {
+  .npcmove-header,
+  .npcmove-search,
+  .npcmove-filters,
+  .npcmove-message,
+  .npcmove-layout {
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+}

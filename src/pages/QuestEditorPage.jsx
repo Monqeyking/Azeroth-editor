@@ -3,6 +3,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, X, CircleHelp } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import './QuestEditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -265,7 +266,7 @@ function QuestGiverList({ questId, table: initialTable, label, query, navigate, 
       {error && <div className="editor-msg error">{error}</div>}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginBottom: '8px' }}>
         {loading && <span className="loading-text">Loading NPC relations...</span>}
-        {rows.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>Geen NPCs gekoppeld</span>}
+        {rows.length === 0 && <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>No NPCs linked</span>}
         {rows.map(r => (
           <div key={r.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 9px', border: '1px solid var(--border)', borderRadius: '5px', fontSize: '12px' }}>
             <div><strong>{r.name || '(missing creature template)'}</strong><div style={{ color: 'var(--text-muted)', marginTop: '2px' }}>Entry #{r.id} · {Number(r.spawnCount) ? `${r.spawnCount} spawn${Number(r.spawnCount) === 1 ? '' : 's'}${r.firstMap != null ? ` · ${QUEST_NPC_MAP_NAMES[r.firstMap] || `Map ${r.firstMap}`} (${Number(r.firstX).toFixed(1)}, ${Number(r.firstY).toFixed(1)})` : ''}` : 'No spawn'}</div></div>
@@ -282,7 +283,7 @@ function QuestGiverList({ questId, table: initialTable, label, query, navigate, 
           <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', maxHeight: '200px', overflowY: 'auto', marginTop: '2px' }}>
             {results.map(c => (
               <div key={c.entry} style={{ padding: '4px 8px', fontSize: '11px', cursor: 'pointer' }} onClick={() => add(c.entry)}>
-                {c.entry} â€” {c.name}
+                {c.entry} — {c.name}
               </div>
             ))}
           </div>
@@ -373,7 +374,7 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
     return () => { cancelled = true; };
   }, [form?.ID]);
 
-  if (loading) return <div style={{ marginBottom: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>Loading chainâ€¦</div>;
+  if (loading) return <div style={{ marginBottom: '16px', color: 'var(--text-muted)', fontSize: '11px' }}>Loading chain…</div>;
   if (error) return <div style={{ marginBottom: '16px', color: '#e55', fontSize: '11px' }}>Chain error: {error}</div>;
   if (!chain) return null;
 
@@ -397,12 +398,12 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
     textOverflow: 'ellipsis',
   });
 
-  const arrow = <span style={{ color: 'var(--text-muted)', margin: '0 4px', alignSelf: 'center' }}>â†’</span>;
+  const arrow = <span className="quest-chain-arrow" style={{ color: 'var(--text-muted)', margin: '0 4px', alignSelf: 'center' }}>→</span>;
 
   const node = (q) => {
     const isCurrent = q.ID === chain.currentId;
     return (
-      <div key={q.ID} style={nodeStyle(isCurrent)} onClick={isCurrent ? undefined : () => onNavigate(q.ID)} title={q.LogTitle}>
+      <div key={q.ID} className={`quest-chain-node ${isCurrent ? 'is-current' : ''}`} style={nodeStyle(isCurrent)} onClick={isCurrent ? undefined : () => onNavigate(q.ID)} title={q.LogTitle}>
         <span style={{ fontSize: '9px', opacity: 0.7 }}>#{q.ID}</span>
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '120px' }}>{q.LogTitle || '(untitled)'}</span>
       </div>
@@ -410,8 +411,8 @@ function QuestChainVisualizer({ form, query, onNavigate }) {
   };
 
   return (
-    <div style={{ marginBottom: '16px', padding: '10px 12px', background: 'var(--bg-panel)', borderRadius: '6px', border: '1px solid var(--border)', overflowX: 'auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 'max-content', direction: 'ltr' }}>
+    <div className="quest-chain-panel" style={{ marginBottom: '16px', padding: '10px 12px', background: 'var(--bg-panel)', borderRadius: '6px', border: '1px solid var(--border)', overflowX: 'auto' }}>
+      <div className="quest-chain-track" style={{ display: 'flex', alignItems: 'center', gap: '4px', minWidth: 'max-content', direction: 'ltr' }}>
         {chain.steps.map((q, i) => (
           <React.Fragment key={q.ID}>
             {i > 0 && arrow}
@@ -603,7 +604,7 @@ function QuestFormFields({ form, baseline, onChange, query, onNavigate, onOpenNp
         />
         <button type="button" className="btn-ghost" style={{ padding: '2px 8px', fontSize: '11px' }}
           onClick={() => setExpandedFlags(s => !s)}>
-          flags {expandedFlags ? 'â–²' : 'â–¼'}
+          flags {expandedFlags ? '▲' : '▼'}
         </button>
         {expandedFlags && (
           <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 20, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px 12px', fontSize: '11px', maxHeight: '240px', overflowY: 'auto', marginTop: '4px', minWidth: '220px' }}>
@@ -951,20 +952,21 @@ function QuestFilters({ filters, setFilters }) {
       <div style={{ fontSize: '10px', color: 'var(--text-muted)', marginTop: '-2px' }}>via quest starter NPC spawns</div>
 
       {/* Class multi-select */}
-      <div style={{ position: 'relative' }} ref={popoverRef}>
+      <div className="quest-class-filter" style={{ position: 'relative' }} ref={popoverRef}>
         <button
           type="button"
           onClick={() => setClassOpen(o => !o)}
+          className="quest-class-filter-trigger"
           style={{ width: '100%', textAlign: 'left', fontSize: '11px', padding: '4px 8px', background: 'var(--bg-dark)', border: '1px solid var(--border)', borderRadius: '4px', color: selectedLabels.length ? 'var(--text-primary)' : 'var(--text-muted)', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
         >
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {selectedLabels.length ? selectedLabels.join(', ') : 'All classes'}
           </span>
-          <span style={{ marginLeft: '4px', opacity: 0.6 }}>â–¼</span>
+          <span style={{ marginLeft: '4px', opacity: 0.6 }}>▼</span>
         </button>
 
         {classOpen && (
-          <div style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', marginTop: '2px', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
+          <div className="quest-class-filter-menu" style={{ position: 'absolute', top: '100%', left: 0, right: 0, zIndex: 50, background: 'var(--bg-panel)', border: '1px solid var(--border)', borderRadius: '6px', padding: '8px', marginTop: '2px', boxShadow: '0 4px 16px rgba(0,0,0,0.4)' }}>
             {CLASS_OPTIONS.map(({ bit, label }) => (
               <label key={bit} style={{ display: 'flex', alignItems: 'center', gap: '6px', padding: '3px 2px', fontSize: '11px', cursor: 'pointer' }}>
                 <input type="checkbox" checked={(filters.classes & bit) !== 0} onChange={() => toggleClass(bit)} />
@@ -974,7 +976,7 @@ function QuestFilters({ filters, setFilters }) {
             {filters.classes > 0 && (
               <button className="btn-ghost" style={{ fontSize: '10px', padding: '2px 6px', marginTop: '4px' }}
                 onClick={() => setFilters(f => ({ ...f, classes: 0 }))}>
-                âœ• clear
+                ✕ clear
               </button>
             )}
           </div>
@@ -985,7 +987,7 @@ function QuestFilters({ filters, setFilters }) {
         <input type="number" placeholder="Lv min" value={filters.levelMin}
           onChange={e => setFilters(f => ({ ...f, levelMin: e.target.value }))}
           style={{ fontSize: '11px', width: '60px', padding: '3px 6px' }} />
-        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>â€“</span>
+        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>–</span>
         <input type="number" placeholder="Lv max" value={filters.levelMax}
           onChange={e => setFilters(f => ({ ...f, levelMax: e.target.value }))}
           style={{ fontSize: '11px', width: '60px', padding: '3px 6px' }} />
@@ -1003,7 +1005,7 @@ function QuestFilters({ filters, setFilters }) {
       {hasFilters && (
         <button className="btn-ghost" style={{ fontSize: '10px', padding: '2px 6px', alignSelf: 'flex-start' }}
           onClick={() => setFilters({ type: '', classes: 0, classExact: true, faction: '', continent: '', levelMin: '', levelMax: '' })}>
-          âœ• clear all
+          ✕ clear all
         </button>
       )}
     </div>
@@ -1193,7 +1195,7 @@ export default function QuestEditorPage() {
       setCreateBaseline({ ...CREATE_DEFAULTS });
       setActiveField(null);
     } catch (e) {
-      setCreateMsg({ type: 'error', text: `âœ— ${e.message}` });
+      setCreateMsg({ type: 'error', text: `✕ ${e.message}` });
     }
     setCreateSaving(false);
   };

@@ -110,11 +110,11 @@ function SetBrowser({ query, searchItemSets, onEdit, onCreate, onWorkshop }) {
         const dbRes = await query(sql, [isId ? Number(trimmed) : `%${trimmed}%`]);
         dbRows = dbRes.data || [];
       } catch (e) {
-        setStatus(`Custom tabel niet leesbaar: ${e.message}`);
+        setStatus(`Custom table could not be read: ${e.message}`);
       }
 
       if (!dbcRes.success) {
-        setStatus(prev => prev || `DBC niet leesbaar: ${dbcRes.error}`);
+        setStatus(prev => prev || `DBC could not be read: ${dbcRes.error}`);
       }
 
       const merged = mergeSetResults(dbcRes.data || [], dbRows);

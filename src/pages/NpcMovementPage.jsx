@@ -4,6 +4,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import CreatureModelPreview from '../components/creature/CreatureModelPreview';
 import './EditorPage.css';
 import './NpcMovementPage.css';
+import './NpcMovementWarm.css';
 
 const MODES = ['Idle', 'Random', 'Waypoint'];
 const MAPS = { 0: 'Eastern Kingdoms', 1: 'Kalimdor', 530: 'Outland', 571: 'Northrend' };

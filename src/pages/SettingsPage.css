@@ -1,0 +1,168 @@
+.settings-page {
+  --vanilla-bg: #1b140d;
+  --vanilla-panel: #282016;
+  --vanilla-panel-dark: #18130e;
+  --vanilla-field: #211a13;
+  --vanilla-border: #594127;
+  --vanilla-border-soft: #3e2f20;
+  --vanilla-text: #e3d6bc;
+  --vanilla-muted: #aa987b;
+  --vanilla-gold: #c99a3d;
+  --bg-dark: var(--vanilla-panel-dark);
+  --text-primary: var(--vanilla-text);
+  --text-secondary: #c1ae8b;
+  --text-muted: var(--vanilla-muted);
+  --gold: var(--vanilla-gold);
+
+  min-height: 100%;
+  background-color: var(--vanilla-bg);
+  background-image:
+    radial-gradient(ellipse at 18% 0%, rgba(139, 87, 30, 0.14), transparent 38%),
+    repeating-linear-gradient(105deg, rgba(255, 224, 166, 0.018) 0 1px, transparent 1px 7px),
+    linear-gradient(180deg, #24180d 0%, #17110c 42%, #120e0a 100%);
+  color: var(--vanilla-text);
+}
+
+.settings-header {
+  background: linear-gradient(180deg, rgba(22, 16, 10, 0.98), rgba(31, 22, 14, 0.96));
+  border-bottom: 1px solid var(--vanilla-border);
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.2);
+}
+
+.settings-header .page-title {
+  color: #eadbbd;
+  text-shadow: 0 1px 2px #000;
+}
+
+.settings-header .page-sub {
+  color: var(--vanilla-muted);
+}
+
+.settings-content {
+  max-width: 900px;
+  padding: 0 20px 28px;
+}
+
+.settings-page .panel {
+  overflow: hidden;
+  background: var(--vanilla-panel);
+  border: 1px solid var(--vanilla-border);
+  border-radius: 4px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.16);
+}
+
+.settings-page .settings-content > .panel[style] {
+  margin-top: 12px !important;
+}
+
+.settings-page .panel-header {
+  padding: 9px 12px;
+  background: linear-gradient(180deg, #211810, #18130e);
+  border-bottom: 1px solid var(--vanilla-border);
+  color: #d9c398;
+  font-size: 11px;
+  letter-spacing: 0.07em;
+  text-shadow: 0 1px 1px #000;
+}
+
+.settings-page .panel-header svg {
+  color: var(--vanilla-gold);
+}
+
+.settings-page .panel > div[style*='padding'] {
+  background: rgba(40, 32, 22, 0.84);
+}
+
+.settings-page p[style],
+.settings-page .settings-description {
+  color: var(--text-secondary) !important;
+  line-height: 1.55;
+}
+
+.settings-page code {
+  color: #e0cda8 !important;
+  background: var(--vanilla-field) !important;
+  border: 1px solid var(--vanilla-border-soft);
+}
+
+.settings-page .field-group {
+  gap: 4px;
+}
+
+.settings-page .field-group label {
+  color: #c1ae8b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.settings-page .field-group input,
+.settings-page .field-group select {
+  min-height: 30px;
+  color: var(--vanilla-text);
+  background: var(--vanilla-field);
+  border: 1px solid var(--vanilla-border-soft);
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.settings-page .field-group input::placeholder {
+  color: #806f58;
+}
+
+.settings-page .field-group input:focus,
+.settings-page .field-group select:focus {
+  border-color: #927034;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.15);
+}
+
+.settings-page .btn-ghost {
+  background: #332619;
+  border-color: var(--vanilla-border);
+  color: #d4c29f;
+}
+
+.settings-page .btn-ghost:hover:not(:disabled) {
+  background: #48331f;
+  border-color: #9a7434;
+  color: #fff0c9;
+}
+
+.settings-page .btn-primary {
+  background: linear-gradient(180deg, #8a672c, #654718);
+  border-color: #b58a3b;
+  color: #fff0c9;
+  text-shadow: 0 1px 1px #2a1b08;
+}
+
+.settings-page .btn-primary:hover:not(:disabled) {
+  background: linear-gradient(180deg, #a27a31, #795521);
+  border-color: #d0a24d;
+}
+
+.settings-page .editor-msg.success {
+  color: #a9d197;
+  background: rgba(70, 112, 55, 0.18);
+  border-color: rgba(107, 160, 83, 0.42);
+}
+
+.settings-page .editor-msg.error {
+  color: #e89b84;
+  background: rgba(130, 49, 35, 0.18);
+  border-color: rgba(173, 76, 52, 0.48);
+}
+
+.settings-page .wow-client-data-panel .panel-header span {
+  font-size: 11px;
+}
+
+@media (max-width: 700px) {
+  .settings-content {
+    padding-inline: 12px;
+  }
+
+  .settings-page [style*='grid-template-columns'] {
+    grid-template-columns: 1fr !important;
+  }
+}

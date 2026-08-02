@@ -3,6 +3,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import { useSearchParams } from 'react-router-dom';
 import { BookOpen, Filter, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
 import './TrainerSpellVisualPanel.css';
+import './TrainerSpellWarm.css';
 
 const CLASSES = [
   { id: 0, name: 'Profession', color: '#C8A45A' },
@@ -829,7 +830,7 @@ export default function TrainerSpellVisualPanel() {
               SupercededBySpell: 0,
             });
             if (!slaResult.success) {
-              console.warn('SkillLineAbility.dbc: kon geen entry toevoegen voor spell', spellId, slaResult.error);
+              console.warn('SkillLineAbility.dbc: could not add entry for spell', spellId, slaResult.error);
             }
           }
         } else {

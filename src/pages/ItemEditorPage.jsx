@@ -3,6 +3,7 @@ import { useConnection } from '../lib/ConnectionContext';
 import { Search, Save, RotateCcw, ChevronRight, MousePointerClick, Copy, Zap, Plus, ClipboardCopy, Layers } from 'lucide-react';
 import './DashboardPage.css';
 import './EditorPage.css';
+import './ItemEditorPage.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import ItemScalingTab from './ItemScalingTab';
@@ -38,7 +39,7 @@ const DMG_TYPE_OPTIONS      = ['0:Physical','1:Holy','2:Fire','3:Nature','4:Fros
 const MATERIAL_OPTIONS      = ['-1:Consumable','0:Undefined','1:Metal','2:Wood','3:Liquid','4:Jewelry','5:Chain','6:Plate','7:Cloth','8:Leather'];
 const SPELL_TRIGGER_OPTIONS = ['0:On Use','1:On Equip','2:Chance on Hit','4:Soulstone','5:Use (no delay)','6:Learn on Pickup'];
 const XP_BONUS_OPTIONS = [
-  { id: 0,     label: 'Geen XP-bonus' },
+  { id: 0,     label: 'No XP bonus' },
   { id: 71354, label: '+5% XP (Dead Pirate\'s Ring)' },
   { id: 57353, label: '+10% XP (Valor Heirloom Chest)' },
 ];
@@ -164,24 +165,24 @@ function ItemTooltip({ form }) {
   const delay  = Number(form.delay) || 0;
 
   return (
-    <div style={{ background:'#1a0a2e',border:'2px solid #6e3f8e',borderRadius:'4px',padding:'10px 14px',fontFamily:'"Trebuchet MS",serif',fontSize:'12px',lineHeight:'1.55',color:'#ffd200',boxShadow:'0 0 20px rgba(110,63,142,0.5)' }}>
+    <div className="item-tooltip-preview" style={{ background:'#21170f',border:'1px solid #8f6530',borderRadius:'4px',padding:'12px 14px',fontFamily:'inherit',fontSize:'12px',lineHeight:'1.55',color:'#e3d6bc',boxShadow:'0 8px 20px rgba(0,0,0,0.28)' }}>
       <div style={{ color, fontWeight:700, fontSize:'13px', marginBottom:'4px' }}>{form.name || 'Unnamed Item'}</div>
 
-      {Number(form.bonding) > 0  && <div style={{color:'#fff'}}>{BONDING_TEXT[Number(form.bonding)]}</div>}
-      {Number(form.MaxCount) === 1 && <div style={{color:'#fff'}}>Unique</div>}
+      {Number(form.bonding) > 0  && <div style={{color:'#e3d6bc'}}>{BONDING_TEXT[Number(form.bonding)]}</div>}
+      {Number(form.MaxCount) === 1 && <div style={{color:'#e3d6bc'}}>Unique</div>}
 
       {inv > 0 && (
-        <div style={{display:'flex',justifyContent:'space-between',color:'#fff'}}>
+        <div style={{display:'flex',justifyContent:'space-between',color:'#e3d6bc'}}>
           <span>{INV_LABELS[inv]||''}</span><span>{CLASS_LABELS[cls]||''}</span>
         </div>
       )}
 
       {isWeapon && (dMin1>0||dMax1>0) && (
         <>
-          <div style={{color:'#fff'}}>{dMin1} – {dMax1} Damage{dType1>0?` (${DMG_LABEL[dType1]})`:''}</div>
-          {(dMin2>0||dMax2>0) && <div style={{color:'#fff'}}>{dMin2} – {dMax2} Damage{dType2>0?` (${DMG_LABEL[dType2]})`:''}</div>}
+          <div style={{color:'#e3d6bc'}}>{dMin1} – {dMax1} Damage{dType1>0?` (${DMG_LABEL[dType1]})`:''}</div>
+          {(dMin2>0||dMax2>0) && <div style={{color:'#e3d6bc'}}>{dMin2} – {dMax2} Damage{dType2>0?` (${DMG_LABEL[dType2]})`:''}</div>}
           {delay>0 && (
-            <div style={{display:'flex',justifyContent:'space-between',color:'#fff'}}>
+            <div style={{display:'flex',justifyContent:'space-between',color:'#e3d6bc'}}>
               <span>Speed {(delay/1000).toFixed(1)}</span>
               {(dMin1+dMax1)>0 && <span>{(((dMin1+dMax1)/2)/(delay/1000)).toFixed(1)} dps</span>}
             </div>
@@ -189,25 +190,25 @@ function ItemTooltip({ form }) {
         </>
       )}
 
-      {hasArmor && <div style={{color:'#fff'}}>{form.armor} Armor</div>}
-      {stats.map(({t,v},i) => <div key={i} style={{color:'#1eff00'}}>{v>0?'+':''}{v} {STAT_NAMES[t]||`Stat(${t})`}</div>)}
-      {(hasArmor||isWeapon) && <div style={{color:'#fff',marginTop:'2px'}}>Durability 100 / 100</div>}
-      {classNames && <div style={{color:'#ffd200'}}>Classes: {classNames}</div>}
-      {raceNames  && <div style={{color:'#ffd200'}}>Races: {raceNames}</div>}
-      {Number(form.ItemLevel)>0     && <div style={{color:'#fff'}}>Item Level {form.ItemLevel}</div>}
-      {Number(form.RequiredLevel)>0 && <div style={{color:'#fff'}}>Requires Level {form.RequiredLevel}</div>}
-      {spells.map(({id,trigger},i) => <div key={i} style={{color:'#1eff00',marginTop:'2px'}}>{TRIGGER_TEXT[trigger]||'Use'}: Spell #{id}</div>)}
+      {hasArmor && <div style={{color:'#e3d6bc'}}>{form.armor} Armor</div>}
+      {stats.map(({t,v},i) => <div key={i} style={{color:'#b7d98b'}}>{v>0?'+':''}{v} {STAT_NAMES[t]||`Stat(${t})`}</div>)}
+      {(hasArmor||isWeapon) && <div style={{color:'#e3d6bc',marginTop:'2px'}}>Durability 100 / 100</div>}
+      {classNames && <div style={{color:'#d6b56b'}}>Classes: {classNames}</div>}
+      {raceNames  && <div style={{color:'#d6b56b'}}>Races: {raceNames}</div>}
+      {Number(form.ItemLevel)>0     && <div style={{color:'#e3d6bc'}}>Item Level {form.ItemLevel}</div>}
+      {Number(form.RequiredLevel)>0 && <div style={{color:'#e3d6bc'}}>Requires Level {form.RequiredLevel}</div>}
+      {spells.map(({id,trigger},i) => <div key={i} style={{color:'#b7d98b',marginTop:'2px'}}>{TRIGGER_TEXT[trigger]||'Use'}: Spell #{id}</div>)}
 
       {form.description && (
-        <div style={{color:'#ffd200',fontStyle:'italic',marginTop:'6px',borderTop:'1px solid #6e3f8e',paddingTop:'6px'}}>
+        <div style={{color:'#d6b56b',fontStyle:'italic',marginTop:'6px',borderTop:'1px solid #594127',paddingTop:'6px'}}>
           "{form.description}"
         </div>
       )}
       {Number(form.SellPrice)>0 && (() => {
         const g=Math.floor(form.SellPrice/10000), s=Math.floor((form.SellPrice%10000)/100), c=form.SellPrice%100;
         return (
-          <div style={{marginTop:'6px',borderTop:'1px solid #6e3f8e',paddingTop:'6px',color:'#fff',fontSize:'11px'}}>
-            Sell Price:{g>0&&<span style={{color:'#ffd200'}}> {g}g</span>}{s>0&&<span style={{color:'#c0c0c0'}}> {s}s</span>}<span style={{color:'#cd7f32'}}> {c}c</span>
+          <div style={{marginTop:'6px',borderTop:'1px solid #594127',paddingTop:'6px',color:'#e3d6bc',fontSize:'11px'}}>
+            Sell Price:{g>0&&<span style={{color:'#d6b56b'}}> {g}g</span>}{s>0&&<span style={{color:'#c8b99e'}}> {s}s</span>}<span style={{color:'#c58b45'}}> {c}c</span>
           </div>
         );
       })()}
@@ -375,11 +376,11 @@ function ItemFormFields({ form, onChange }) {
         <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px'}}>
           <div>
             <FG label="ScalingStatDistribution">{num('ScalingStatDistribution')}</FG>
-            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatdistribution_dbc — bepaalt welke stats meeschalen en tot welk level (Maxlevel = bovengrens van de tooltip-range, bijv. "Levels 1-80"). Bewerk via het tabblad "Scaling".</div>
+            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatdistribution_dbc — defines which stats scale and up to which level (Maxlevel is the upper bound of the tooltip range, for example "Levels 1-80"). Edit it in the "Scaling" tab.</div>
           </div>
           <div>
             <FG label="ScalingStatValue">{num('ScalingStatValue')}</FG>
-            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatvalues_dbc — koppelt aan de tabel met budgetten per characterlevel waaruit de daadwerkelijke stat-waarden worden berekend.</div>
+            <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-8px'}}>ID in scalingstatvalues_dbc — links to the per-character-level budget table used to calculate the actual stat values.</div>
           </div>
         </div>
       </div>
@@ -415,7 +416,7 @@ function ItemFormFields({ form, onChange }) {
               {XP_BONUS_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
             </select>
           </FG>
-          <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-4px'}}>Vult Spell 1 + trigger "On Equip" automatisch in.</div>
+          <div style={{fontSize:'11px',color:'var(--text-muted)',marginTop:'-4px'}}>Automatically fills Spell 1 and the "On Equip" trigger.</div>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:'10px'}}>
           {[1,2,3,4,5].map(i=>(
@@ -834,7 +835,7 @@ export default function ItemEditorPage() {
                 </div>
                 <div className="header-actions">
                   {selected && (
-                    <button className="btn-ghost" onClick={handleUseAsTemplate} title={`Laad "${selected.name}" als template`}>
+                    <button className="btn-ghost" onClick={handleUseAsTemplate} title={`Load "${selected.name}" as template`}>
                       <ClipboardCopy size={13} /> Use selected as template
                     </button>
                   )}
@@ -866,7 +867,7 @@ export default function ItemEditorPage() {
             ) : (
               <div className="editor-empty">
                 <Layers />
-                <p>Selecteer een item om scaling te configureren</p>
+                <p>Select an item to configure scaling</p>
               </div>
             )
           )}
@@ -874,7 +875,7 @@ export default function ItemEditorPage() {
         </div>
 
         {/* ── Tooltip panel ── */}
-        <div style={{width:'260px',flexShrink:0,borderLeft:'1px solid var(--border)',background:'var(--bg-panel)',overflowY:'auto',display:'flex',flexDirection:'column'}}>
+        <div className="item-preview-panel" style={{width:'260px',flexShrink:0,borderLeft:'1px solid var(--border)',background:'var(--bg-panel)',overflowY:'auto',display:'flex',flexDirection:'column'}}>
           {(selected || activeTab==='create') ? (
             <>
               <div style={{padding:'10px 12px',borderBottom:'1px solid var(--border)',fontSize:'10px',fontWeight:700,textTransform:'uppercase',letterSpacing:'1px',color:'var(--text-muted)'}}>

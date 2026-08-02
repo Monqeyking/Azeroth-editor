@@ -1,0 +1,286 @@
+/* Warm Vanilla skin for the talent tree editor. */
+.talent-page {
+  --bg-void: #1b140d;
+  --bg-dark: #18130e;
+  --bg-panel: #282016;
+  --bg-raised: #21170f;
+  --bg-active: #392817;
+  --bg-hover: #332619;
+  --bg-inset: #18130e;
+  --text-primary: #e3d6bc;
+  --text-secondary: #c1ad8d;
+  --text-muted: #aa987b;
+  --text-white: #f0e2c6;
+  --border: #594127;
+  --border-gold: #c99a3d;
+  --border-glow: #8f6530;
+  --gold: #c99a3d;
+  --gold-dim: #8f6530;
+  --gold-bright: #e7c77e;
+  background: #1b140d !important;
+  color: var(--text-primary) !important;
+}
+
+.talent-page-header {
+  margin: 16px 16px 0;
+  padding: 18px 22px 14px !important;
+  border: 1px solid var(--border) !important;
+  border-bottom-color: #75552d !important;
+  border-radius: 4px 4px 0 0;
+  background: linear-gradient(180deg, #302317 0%, #21170f 100%) !important;
+  box-shadow: inset 0 1px rgba(255, 219, 145, 0.06), 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.talent-page-header h1 {
+  color: var(--gold-bright) !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.talent-page-header p,
+.talent-page-toolbar,
+.compare-file-label,
+.talent-section-label,
+.talent-no-tabs {
+  color: var(--text-muted) !important;
+}
+
+.talent-page-toolbar {
+  margin: 0 16px 10px;
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #2a1e14 !important;
+}
+
+.talent-page-toolbar b {
+  color: var(--gold-bright) !important;
+}
+
+.talent-page-toolbar .dashboard-toolbar-status.online {
+  color: #9ad29f !important;
+}
+
+.talent-class-list {
+  margin: 0 16px 8px;
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #21170f !important;
+}
+
+.talent-class-item {
+  border-radius: 3px !important;
+  color: var(--text-secondary) !important;
+}
+
+.talent-class-item:hover,
+.talent-class-item.active {
+  border-color: var(--gold-dim) !important;
+  background: #392817 !important;
+  color: var(--gold-bright) !important;
+}
+
+.talent-layout {
+  margin: 0 16px 16px;
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #21170f !important;
+  box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+}
+
+.talent-tree-area,
+.talent-edit-panel,
+.compare-pane {
+  background: #1d160f !important;
+  border-color: var(--border) !important;
+}
+
+.talent-tabs {
+  border-color: var(--border) !important;
+  background: #2a1e14 !important;
+}
+
+.talent-tab-btn,
+.btn-ghost,
+.btn-primary {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+}
+
+.talent-tab-btn {
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+}
+
+.talent-tab-btn:hover,
+.talent-tab-btn.active {
+  border-color: var(--gold) !important;
+  background: #392817 !important;
+  color: var(--gold-bright) !important;
+}
+
+.talent-tree-scroll {
+  background: #18130e;
+}
+
+.talent-grid-cell {
+  border-color: rgba(89, 65, 39, 0.7) !important;
+  border-radius: 3px !important;
+}
+
+.talent-grid-cell:hover,
+.talent-grid-cell.selected-empty {
+  border-color: var(--gold) !important;
+  background: rgba(201, 154, 61, 0.1) !important;
+}
+
+.talent-node {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background-color: #21170f !important;
+}
+
+.talent-node:hover,
+.talent-node.selected {
+  border-color: var(--gold) !important;
+  background-color: #392817 !important;
+  box-shadow: 0 0 0 2px rgba(201, 154, 61, 0.18), 0 0 14px rgba(201, 154, 61, 0.12);
+}
+
+.talent-node-rank {
+  color: var(--gold-bright) !important;
+}
+
+.talent-node-name {
+  color: var(--text-primary) !important;
+}
+
+.talent-prereq-line {
+  stroke: #b97845 !important;
+}
+
+.talent-edit-panel {
+  border-left-color: var(--border) !important;
+}
+
+.talent-edit-actions,
+.talent-panel-id,
+.talent-edit-panel .panel-header {
+  border-color: var(--border) !important;
+  background: #2a1e14 !important;
+}
+
+.talent-edit-panel .panel-header,
+.talent-edit-section,
+.talent-edit-panel .editor-empty {
+  color: var(--gold-bright) !important;
+}
+
+.talent-edit-panel .field-group label,
+.field-spell-hint,
+.spell-icon-ranks,
+.delete-confirm-label {
+  color: var(--text-muted) !important;
+}
+
+.talent-edit-panel input,
+.talent-edit-panel select,
+.spell-icon-master,
+.talent-edit-panel [style*="background"] {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background-color: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.talent-edit-panel input:focus,
+.talent-edit-panel select:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.16);
+}
+
+.spell-icon-master {
+  background: rgba(201, 154, 61, 0.08) !important;
+}
+
+.spell-icon-master-preview,
+.spell-picker-icon {
+  border-color: var(--border) !important;
+}
+
+.spell-picker-overlay {
+  background: rgba(9, 6, 3, 0.78) !important;
+}
+
+.spell-picker-panel {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #282016 !important;
+}
+
+.spell-picker-header,
+.spell-picker-search {
+  border-color: var(--border) !important;
+  background: #2a1e14 !important;
+}
+
+.spell-picker-header h3,
+.spell-picker-name {
+  color: var(--gold-bright) !important;
+}
+
+.spell-picker-search input,
+.spell-picker-id,
+.spell-picker-empty {
+  color: var(--text-muted) !important;
+}
+
+.spell-picker-item:hover {
+  border-color: var(--gold) !important;
+  background: #392817 !important;
+}
+
+.btn-primary {
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.btn-primary:hover {
+  background: #765225 !important;
+}
+
+.btn-ghost {
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+}
+
+.btn-ghost:hover,
+.btn-ghost-confirm:hover:not(:disabled) {
+  background: #392817 !important;
+  color: var(--gold-bright) !important;
+}
+
+.talent-delete-inline .btn-ghost {
+  color: #df8873 !important;
+}
+
+@media (max-width: 900px) {
+  .talent-page-header,
+  .talent-page-toolbar,
+  .talent-class-list,
+  .talent-layout {
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+
+  .talent-layout {
+    flex-direction: column;
+  }
+
+  .talent-edit-panel {
+    width: auto;
+    max-height: 420px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+}
