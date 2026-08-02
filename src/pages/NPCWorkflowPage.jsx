@@ -8,7 +8,6 @@ import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import '../pages/DashboardPage.css';
 import './EditorPage.css';
 import './NPCWorkflowPage.css';
-import './NPCWorkflowWarm.css';
 
 const CLASS_OPTIONS = [
   { value: 1, label: 'Warrior' },

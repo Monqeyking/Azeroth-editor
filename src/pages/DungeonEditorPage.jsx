@@ -5,7 +5,6 @@ import { useConnection } from '../lib/ConnectionContext';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import './DungeonEditorPage.css';
-import './DungeonEditorWarm.css';
 
 const difficultyNames = { 0: 'Normal', 1: 'Heroic', 2: '10 Normal', 3: '25 Normal', 4: '10 Heroic', 5: '25 Heroic' };
 const expansionNames = ['Classic', 'The Burning Crusade', 'Wrath of the Lich King'];

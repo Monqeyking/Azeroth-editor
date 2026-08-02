@@ -240,7 +240,7 @@ export default function GameObjectEditorPage() {
       if (res.success) {
         const info = res.data?.[displayId];
         setDisplayInfo(info || null);
-        setDisplayInfoError(info ? '' : 'Geen GameObjectDisplayInfo voor displayId ' + displayId);
+        setDisplayInfoError(info ? '' : 'No GameObjectDisplayInfo for display ID ' + displayId);
       } else {
         setDisplayInfo(null);
         setDisplayInfoError(res.error);
@@ -326,7 +326,7 @@ export default function GameObjectEditorPage() {
         `UPDATE gameobject_template SET name=?, type=?, displayId=?, size=?, ${dataSet}, VerifiedBuild=? WHERE entry=?`,
         [...params, verified, entry]
       );
-      if (writeRes?.success === false) throw new Error(writeRes.error || 'Template opslaan mislukt');
+      if (writeRes?.success === false) throw new Error(writeRes.error || 'Failed to save template');
       const verifyRes = await query('SELECT * FROM gameobject_template WHERE entry = ?', [entry]);
       if (verifyRes?.success === false) throw new Error(verifyRes.error || 'Opgeslagen template kon niet worden gelezen');
       const savedTemplate = verifyRes.data?.[0];
@@ -371,7 +371,7 @@ export default function GameObjectEditorPage() {
           guid,
         ]
       );
-      if (writeRes?.success === false) throw new Error(writeRes.error || 'Spawn opslaan mislukt');
+      if (writeRes?.success === false) throw new Error(writeRes.error || 'Failed to save spawn');
       const verifyRes = await query('SELECT * FROM gameobject WHERE guid = ?', [guid]);
       if (verifyRes?.success === false) throw new Error(verifyRes.error || 'Opgeslagen spawn kon niet worden gelezen');
       const savedSpawn = verifyRes.data?.[0];
@@ -431,7 +431,7 @@ export default function GameObjectEditorPage() {
     }
     const match = String(res.result || '').match(/orientation\s*[:=]\s*([-+]?\d+(?:\.\d+)?)/i);
     if (!match) {
-      setMsg({ type: 'error', text: 'Geen Orientation gevonden in de .gps-output' });
+      setMsg({ type: 'error', text: 'No orientation found in .gps output' });
       return;
     }
     const playerFacing = Number(match[1]);
@@ -444,19 +444,19 @@ export default function GameObjectEditorPage() {
     const target = selectedSpawn || spawns[0];
     if (!target) return;
     await navigator.clipboard.writeText(`${num(target.position_x, 0).toFixed(3)} ${num(target.position_y, 0).toFixed(3)} ${num(target.position_z, 0).toFixed(3)}`);
-    setMsg({ type: 'success', text: 'Coördinaten gekopieerd' });
+    setMsg({ type: 'success', text: 'Coordinates copied' });
   }, [selectedSpawn, spawns]);
 
   const deleteSpawn = useCallback(async () => {
     if (!selectedSpawn) return;
-    if (!window.confirm(`Spawn #${selectedSpawn.guid} definitief verwijderen?`)) return;
+    if (!window.confirm(`Permanently delete spawn #${selectedSpawn.guid}?`)) return;
     const res = await query('DELETE FROM gameobject WHERE guid = ?', [selectedSpawn.guid]);
     if (!res.success) { setMsg({ type: 'error', text: res.error }); return; }
     setSpawns(prev => prev.filter(s => s.guid !== selectedSpawn.guid));
     setSelectedSpawn(null);
     setSpawnDraft(null);
     setSpawnDirty(false);
-    setMsg({ type: 'success', text: `Spawn #${selectedSpawn.guid} verwijderd` });
+    setMsg({ type: 'success', text: `Spawn #${selectedSpawn.guid} deleted` });
   }, [selectedSpawn, query]);
 
   const openAddSpawn = () => {
@@ -511,7 +511,7 @@ export default function GameObjectEditorPage() {
       <div className="editor-page-header go-editor-header">
         <div>
           <h1 className="editor-page-title">Game Objects</h1>
-          <p className="editor-page-subtitle">Zoek een object, pas de scale aan met live 3D preview en beheer spawns</p>
+          <p className="editor-page-subtitle">Search an object, adjust its scale with live 3D preview, and manage spawns</p>
         </div>
         <div className="header-actions">
           <button type="button" className="btn-ghost" onClick={() => loadTemplates(search, typeFilter, onlySpawned)} disabled={loading || !templates.length}><RotateCcw size={13} /> Refresh</button>
@@ -565,7 +565,7 @@ export default function GameObjectEditorPage() {
                 </div>
               );
             }) : (
-              <div className="editor-empty"><MousePointerClick /><p>Geen game objects gevonden.</p></div>
+              <div className="editor-empty"><MousePointerClick /><p>No game objects found.</p></div>
             )}
           </div>
         </aside>
@@ -652,13 +652,13 @@ export default function GameObjectEditorPage() {
                 <div className="editor-card">
                   <div className="go-panel-title go-panel-title-split">
                     <span><MapPin size={12} /> Spawns ({spawns.length})</span>
-                    <button type="button" className="btn-ghost go-small-btn" onClick={openAddSpawn}><Plus size={12} /> Nieuw</button>
+                    <button type="button" className="btn-ghost go-small-btn" onClick={openAddSpawn}><Plus size={12} /> New</button>
                   </div>
                   <div className="go-spawn-list">
                     {spawns.length ? spawns.map(spawn => (
                       <SpawnRow key={spawn.guid} spawn={spawn} mapName={mapNames[spawn.map]} active={selectedSpawn?.guid === spawn.guid} onSelect={() => selectSpawn(spawn)} />
                     )) : (
-                      <div className="go-spawn-empty">Geen spawns voor dit object. Klik “Nieuw” om er één te maken.</div>
+                      <div className="go-spawn-empty">No spawns for this object. Click “New” to create one.</div>
                     )}
                   </div>
                 </div>
@@ -668,10 +668,10 @@ export default function GameObjectEditorPage() {
                     <div className="go-panel-title go-panel-title-split">
                       <span><Crosshair size={12} /> Spawn #{(selectedSpawn || {}).guid}</span>
                       <div className="go-spawn-actions">
-                        <button type="button" className="btn-ghost go-small-btn" onClick={teleportToSpawn} title="Teleporteer naar spawn (.go xyz)"><MapPin size={12} /></button>
+                        <button type="button" className="btn-ghost go-small-btn" onClick={teleportToSpawn} title="Teleport to spawn (.go xyz)"><MapPin size={12} /></button>
                         <button type="button" className="btn-ghost go-small-btn" onClick={usePlayerFacing} title="Gebruik player facing + pi via .gps"><Compass size={12} /></button>
-                        <button type="button" className="btn-ghost go-small-btn" onClick={copyCoords} title="Coördinaten kopiëren"><Copy size={12} /></button>
-                        <button type="button" className="btn-danger go-small-btn" onClick={deleteSpawn} title="Spawn verwijderen"><Trash2 size={12} /></button>
+                        <button type="button" className="btn-ghost go-small-btn" onClick={copyCoords} title="Copy coordinates"><Copy size={12} /></button>
+                        <button type="button" className="btn-danger go-small-btn" onClick={deleteSpawn} title="Delete spawn"><Trash2 size={12} /></button>
                       </div>
                     </div>
 
@@ -737,19 +737,19 @@ export default function GameObjectEditorPage() {
       {pendingSelection && dirty && (
         <div className="go-pending-warning">
           <AlertTriangle size={13} />
-          <span>Onopgeslagen wijzigingen op #{selectedEntry}. Opslaan of negeren voor je naar #{pendingSelection} gaat.</span>
+          <span>Unsaved changes on #{selectedEntry}. Save or discard them before switching to #{pendingSelection}.</span>
           <div className="go-pending-actions">
             <button type="button" className="btn-primary" disabled={saving || !pendingRow} onClick={async () => {
               const target = pendingRow;
               const ok = await saveAll();
               if (ok && target) await loadTemplate(target);
               setPendingSelection(null);
-            }}><Save size={13} /> Opslaan &amp; wissel</button>
+            }}><Save size={13} /> Save &amp; switch</button>
             <button type="button" className="btn-ghost" disabled={!pendingRow} onClick={async () => {
               setTemplateDirty(false); setSpawnDirty(false); setPendingSelection(null);
               if (pendingRow) await loadTemplate(pendingRow);
-            }}>Negeren</button>
-            <button type="button" className="btn-ghost" onClick={() => setPendingSelection(null)}>Annuleren</button>
+            }}>Discard</button>
+            <button type="button" className="btn-ghost" onClick={() => setPendingSelection(null)}>Cancel</button>
           </div>
         </div>
       )}
@@ -757,7 +757,7 @@ export default function GameObjectEditorPage() {
       {addModal && (
         <div className="modal-overlay" onMouseDown={() => setAddModal(null)}>
           <div className="modal-box" onMouseDown={e => e.stopPropagation()}>
-            <div className="modal-title">Spawn toevoegen — #{template.entry}</div>
+            <div className="modal-title">Add spawn — #{template.entry}</div>
             <div className="modal-field">
               <label className="modal-label">Map</label>
               <input type="number" className="modal-input" value={addForm.map} onChange={e => setAddForm(f => ({ ...f, map: e.target.value }))} />
@@ -769,8 +769,8 @@ export default function GameObjectEditorPage() {
               </div>
             ))}
             <div className="modal-actions">
-              <button className="modal-btn-cancel" onClick={() => setAddModal(null)}>Annuleren</button>
-              <button className="modal-btn-ok" onClick={confirmAddSpawn}>Toevoegen</button>
+              <button className="modal-btn-cancel" onClick={() => setAddModal(null)}>Cancel</button>
+              <button className="modal-btn-ok" onClick={confirmAddSpawn}>Add</button>
             </div>
           </div>
         </div>

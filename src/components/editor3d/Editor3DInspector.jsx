@@ -69,9 +69,9 @@ export default function Editor3DInspector({ spawn, transform, dirty, onSave, sav
     });
     try {
       const res = await onTeleport(cmd);
-      setTeleportMsg(res.success ? 'Geteleporteerd ✓' : `Fout: ${res.error ?? res.result}`);
+      setTeleportMsg(res.success ? 'Teleported ✓' : `Error: ${res.error ?? res.result}`);
     } catch (e) {
-      setTeleportMsg(`Fout: ${e.message}`);
+      setTeleportMsg(`Error: ${e.message}`);
     } finally {
       setTeleporting(false);
       setTimeout(() => setTeleportMsg(null), 3000);
@@ -178,7 +178,7 @@ export default function Editor3DInspector({ spawn, transform, dirty, onSave, sav
             <div className="ed3-inspector-row">
               <span>model</span>
               <span style={{ color: m2State === 'failed' ? '#e74c3c' : undefined }}>
-                {m2State === 'failed' ? 'niet gevonden' : 'laden…'}
+                {m2State === 'failed' ? 'not found' : 'loading…'}
               </span>
             </div>
           ) : null}
@@ -193,14 +193,14 @@ export default function Editor3DInspector({ spawn, transform, dirty, onSave, sav
           disabled={teleporting}
         >
           <Navigation size={12} />
-          {teleporting ? 'Teleporteren…' : 'Teleport naar spawn'}
+          {teleporting ? 'Teleporting…' : 'Teleport to spawn'}
         </button>
         {teleportMsg && (
           <div className="ed3-inspector-teleport-msg">{teleportMsg}</div>
         )}
       </section>
 
-      {/* Save knop */}
+      {/* Save */}
       {dirty && (
         <section className="ed3-inspector-section">
           <button
@@ -208,7 +208,7 @@ export default function Editor3DInspector({ spawn, transform, dirty, onSave, sav
             onClick={onSave}
             disabled={saving}
           >
-            {saving ? 'Opslaan…' : '💾 Wijzigingen opslaan'}
+            {saving ? 'Saving…' : '💾 Save changes'}
           </button>
         </section>
       )}

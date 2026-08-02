@@ -406,3 +406,152 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Warm Vanilla workspace */
+.enemies-page {
+  --enemy-bg: #1b140d;
+  --enemy-surface: #21170f;
+  --enemy-surface-raised: #282016;
+  --enemy-border: #594127;
+  --enemy-border-soft: rgba(89, 65, 39, 0.62);
+  --enemy-text: #e3d6bc;
+  --enemy-muted: #aa987b;
+  --enemy-gold: #c99a3d;
+  color: var(--enemy-text);
+}
+
+.enemies-page .page-header,
+.enemies-toolbar,
+.enemies-list-panel,
+.enemies-detail-panel {
+  border-color: var(--enemy-border);
+  background: var(--enemy-surface);
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.18);
+}
+
+.enemies-page .page-header {
+  background: transparent;
+}
+
+.enemies-page .page-title,
+.enemies-panel-title,
+.enemy-row-name,
+.enemy-info-card strong {
+  color: var(--enemy-text);
+}
+
+.enemies-page .page-sub,
+.enemies-panel-sub,
+.enemies-kpi-label,
+.enemy-row-meta-line,
+.enemy-preset-sub,
+.enemy-preset-desc,
+.enemy-info-card span {
+  color: var(--enemy-muted);
+}
+
+.enemies-kpi,
+.enemy-preset-card,
+.enemy-info-card,
+.enemy-visibility-quick,
+.enemy-notes {
+  border-color: var(--enemy-border-soft);
+  border-radius: 4px;
+  background: rgba(40, 32, 22, 0.72);
+}
+
+.enemies-kpi strong,
+.enemy-info-label,
+.enemy-visibility-label {
+  color: var(--enemy-gold);
+}
+
+.enemies-toolbar {
+  border-radius: 4px;
+  background: rgba(27, 20, 13, 0.96);
+}
+
+.enemies-page input,
+.enemies-page select,
+.enemies-page textarea,
+.enemies-page .search-input-wrap {
+  border-color: var(--enemy-border);
+  border-radius: 3px;
+  background: #18130e;
+  color: var(--enemy-text);
+}
+
+.enemies-page input:focus,
+.enemies-page select:focus,
+.enemies-page textarea:focus {
+  border-color: var(--enemy-gold);
+  box-shadow: 0 0 0 2px rgba(201, 154, 61, 0.12);
+  outline: none;
+}
+
+.enemies-page input::placeholder,
+.enemies-page textarea::placeholder {
+  color: #776750;
+}
+
+.enemy-row {
+  border-color: var(--enemy-border-soft);
+  background: rgba(24, 19, 14, 0.7);
+}
+
+.enemy-row:hover,
+.enemy-row.active {
+  border-color: var(--enemy-gold);
+  background: rgba(65, 45, 24, 0.72);
+}
+
+.enemy-pill,
+.enemy-match {
+  border-color: var(--enemy-border);
+  background: rgba(89, 65, 39, 0.24);
+  color: var(--enemy-text);
+}
+
+.enemy-preset-card:hover,
+.enemy-preset-card.active {
+  border-color: var(--enemy-gold);
+  background: rgba(82, 57, 27, 0.48);
+  box-shadow: inset 0 0 0 1px rgba(201, 154, 61, 0.2);
+}
+
+.enemy-preset-label {
+  color: var(--enemy-text);
+}
+
+.enemies-page .btn-primary,
+.enemies-page .btn-ghost {
+  border-radius: 3px;
+}
+
+.enemies-page .btn-primary {
+  border-color: #a87827;
+  background: #6b481d;
+  color: #f6e5c0;
+}
+
+.enemies-page .btn-primary:hover {
+  background: #805821;
+}
+
+.enemies-page .btn-ghost {
+  border-color: var(--enemy-border);
+  background: rgba(40, 32, 22, 0.82);
+  color: var(--enemy-text);
+}
+
+.enemies-page .btn-ghost:hover {
+  border-color: var(--enemy-gold);
+  background: rgba(82, 57, 27, 0.48);
+  color: #f6e5c0;
+}
+
+.enemies-page .editor-msg {
+  border-color: var(--enemy-border);
+  border-radius: 3px;
+  background: rgba(40, 32, 22, 0.9);
+}

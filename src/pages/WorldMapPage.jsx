@@ -167,7 +167,7 @@ function ContinentView({ mapId, label, expansion, areas, layout, dbcPath, worldm
         onClick={addMarkerAt}
         style={{ cursor: placing ? 'crosshair' : dragging.current ? 'grabbing' : 'grab' }}
       >
-        {loading && <div className="wm-placeholder"><Loader size={20} className="spin" /><span>Map laden…</span></div>}
+        {loading && <div className="wm-placeholder"><Loader size={20} className="spin" /><span>Loading map…</span></div>}
         {error && <div className="wm-placeholder"><span>{error}</span></div>}
         {displayImgSrc && (
           <div className="wm-inner" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
@@ -364,7 +364,7 @@ function WorldOverview({ classicOnly, worldmapMpqPath, onSelect }) {
       onMouseLeave={onMouseUp}
       style={{ cursor: dragging.current ? 'grabbing' : 'default' }}
     >
-      {loading && <div className="wm-placeholder"><Loader size={20} className="spin" /><span>World map laden…</span></div>}
+      {loading && <div className="wm-placeholder"><Loader size={20} className="spin" /><span>Loading world map…</span></div>}
 
       {loaded && (
         <div className="wm-inner" style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`, transformOrigin: '0 0' }}>
@@ -465,7 +465,7 @@ export default function WorldMapPage() {
       </div>
 
       {!worldmapMpqPath ? (
-        <div className="wm-placeholder" style={{ flex: 1 }}>Stel het World Map-pad in via Settings</div>
+        <div className="wm-placeholder" style={{ flex: 1 }}>Set the World Map path in Settings</div>
       ) : selected ? (
         <ContinentView
           key={selected.mapId}

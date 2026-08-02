@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Search, Plus, Trash2, Save } from 'lucide-react';
 import './VendorEditorPage.css';
-import './VendorEditorWarm.css';
 
 const QUALITY_COLOR = {
   0: '#9d9d9d', // Poor

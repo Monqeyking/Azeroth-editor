@@ -2,7 +2,6 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { Plus, Trash2, Save, Search } from 'lucide-react';
 import './LootEditorPage.css';
-import './LootEditorWarm.css';
 
 const LOOT_TABLES = {
   Creature:   'creature_loot_template',

@@ -3,7 +3,6 @@ import { useConnection } from '../lib/ConnectionContext';
 import { AlertTriangle, X, Plus, Trash2, Save } from 'lucide-react';
 import './EditorPage.css';
 import './RaceClassPage.css';
-import './RaceClassWarm.css';
 
 const RACES = [
   { id: 1,  name: 'Human',     faction: 'alliance', icon: 'race_human_male' },
@@ -1179,6 +1178,5 @@ export default function RaceClassPage() {
     </div>
   );
 }
-
 
 

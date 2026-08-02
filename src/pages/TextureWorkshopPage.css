@@ -6,3 +6,167 @@
 .tw-page .tw-color-analysis{align-items:stretch;overflow-x:auto;padding:9px 12px}.tw-page .tw-color-analysis>b{min-width:128px;align-self:center}.tw-page .tw-color-analysis>small{min-width:210px;align-self:center}.tw-page .tw-color-analysis label{flex:0 0 176px;min-height:60px;display:grid;grid-template-columns:20px 30px 1fr 30px;grid-template-rows:30px 23px;align-items:center;gap:5px;padding:7px 8px}.tw-page .tw-color-analysis label input[type=checkbox]{grid-column:1;grid-row:1}.tw-page .tw-color-analysis label i{grid-column:2;grid-row:1;width:27px;height:27px;border-radius:4px}.tw-page .tw-color-analysis label code{grid-column:3;grid-row:1;min-width:0;color:#d7e3fb;font-size:10px}.tw-page .tw-color-analysis label input[type=color]{grid-column:4;grid-row:1;width:27px;height:27px}.tw-page .tw-color-analysis label input[type=range]{grid-column:1/-1;grid-row:2;width:100%}.tw-page .tw-color-analysis label::after{content:'Source  →  Target';grid-column:2/4;grid-row:2;align-self:end;pointer-events:none;color:#7f8da8;font-size:8px;letter-spacing:.04em}.tw-page .tw-color-analysis label input[type=range]{position:relative;z-index:1;transform:translateY(-5px)}
 .tw-page .tw-color-analysis label code{display:none}
 .tw-before-after{display:flex;gap:2px;margin-left:auto}.tw-before-after button{border:1px solid #34425f;background:#171d2b;color:#8f9db8;padding:3px 7px;font:inherit;font-size:9px;cursor:pointer}.tw-before-after button:first-child{border-radius:3px 0 0 3px}.tw-before-after button:last-child{border-radius:0 3px 3px 0}.tw-before-after button.active{background:#334a76;color:#eef4ff;border-color:#718cce}.tw-mapping-summary{display:flex;align-items:center;gap:9px;min-height:30px;padding:0 12px;border-top:1px solid #2a2e40;background:#10131d;color:#aab8d1;font-size:10px}.tw-mapping-summary b{text-transform:uppercase;letter-spacing:.06em;color:#d5e1f8;font-size:9px}.tw-mapping-summary small{margin-left:auto;color:#77849d}
+
+.tw-page {
+  --tw-bg: #1b140d;
+  --tw-panel: #282016;
+  --tw-panel-dark: #18130e;
+  --tw-field: #211a13;
+  --tw-border: #594127;
+  --tw-border-soft: #3e2f20;
+  --tw-text: #e3d6bc;
+  --tw-muted: #aa987b;
+  --tw-gold: #c99a3d;
+  background: radial-gradient(circle at 62% 0%, rgba(116, 75, 27, 0.1), transparent 34%), var(--tw-bg) !important;
+  color: var(--tw-text);
+}
+
+.tw-header {
+  background: linear-gradient(180deg, rgba(55, 39, 24, 0.98), rgba(29, 21, 14, 0.98)) !important;
+  border-color: var(--tw-border) !important;
+}
+
+.tw-header h1,
+.tw-panel-title,
+.tw-item-summary b,
+.tw-character-modal h2 { color: var(--tw-text) !important; }
+.tw-header p,
+.tw-readonly,
+.tw-panel-title svg,
+.tw-item-summary,
+.tw-source-status,
+.tw-set-list p,
+.tw-assets > p,
+.tw-variant-panel > small { color: var(--tw-muted) !important; }
+.tw-readonly { border-color: var(--tw-border) !important; background: rgba(126, 87, 32, 0.14) !important; }
+
+.tw-workspace { background: transparent !important; gap: 12px !important; }
+.tw-panel,
+.tw-preview-panel,
+.tw-variant-panel,
+.tw-assets,
+.tw-generator {
+  background: linear-gradient(180deg, rgba(40, 32, 22, 0.98), rgba(24, 19, 14, 0.98)) !important;
+  border-color: var(--tw-border) !important;
+}
+
+.tw-panel-title {
+  background: rgba(40, 32, 22, 0.92) !important;
+  border-color: var(--tw-border) !important;
+}
+
+.tw-search,
+.tw-variant-panel > label input,
+.tw-control-grid input,
+.tw-generator input,
+.tw-generator select,
+.tw-modal-controls select {
+  background: var(--tw-field) !important;
+  border-color: var(--tw-border-soft) !important;
+  color: var(--tw-text) !important;
+}
+
+.tw-search:focus-within,
+.tw-variant-panel > label input:focus,
+.tw-generator input:focus,
+.tw-generator select:focus,
+.tw-modal-controls select:focus { border-color: var(--tw-gold) !important; }
+.tw-search input::placeholder,
+.tw-variant-panel input::placeholder { color: #85745d !important; }
+
+.tw-set-list,
+.tw-item-list { border-color: var(--tw-border) !important; }
+.tw-set-list button,
+.tw-item-list button { color: var(--tw-text) !important; border-color: var(--tw-border-soft) !important; }
+.tw-set-list button:hover,
+.tw-item-list button:hover,
+.tw-set-list button.active,
+.tw-item-list button.active { background: rgba(126, 87, 32, 0.24) !important; border-color: var(--tw-gold) !important; }
+.tw-set-list button span,
+.tw-item-list em { color: var(--tw-muted) !important; }
+.tw-item-list b { color: var(--tw-text) !important; }
+.tw-item-list svg { color: var(--tw-gold) !important; }
+.tw-source-status { background: rgba(24, 19, 14, 0.9) !important; border-color: var(--tw-border) !important; }
+
+.tw-preview-panel { background: rgba(24, 19, 14, 0.98) !important; }
+.tw-item-summary { border-color: var(--tw-border) !important; }
+.tw-preview-grid { background: transparent !important; }
+.tw-texture-card,
+.tw-set-texture {
+  background: var(--tw-panel) !important;
+  border-color: var(--tw-border-soft) !important;
+  color: var(--tw-text) !important;
+}
+.tw-texture-card:hover,
+.tw-texture-card.active,
+.tw-set-texture:hover,
+.tw-set-texture.active { border-color: var(--tw-gold) !important; box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.3) !important; }
+.tw-texture-image,
+.tw-set-texture > div { background: conic-gradient(#211a13 25%, #18130e 0 50%, #211a13 0 75%, #18130e 0) 0/18px 18px !important; color: #806f58 !important; }
+.tw-texture-card code,
+.tw-set-texture code,
+.tw-selected-path code,
+.tw-assets-list code,
+.tw-export-log code { color: #d0b77f !important; }
+.tw-selected-path { background: var(--tw-field) !important; border-color: var(--tw-border) !important; color: var(--tw-text) !important; }
+.tw-selected-path span { color: var(--tw-gold) !important; }
+
+.tw-variant-panel { border-left-color: var(--tw-border) !important; }
+.tw-variant-panel > label,
+.tw-control-grid label,
+.tw-palette-row,
+.tw-palette-presets,
+.tw-color-analysis,
+.tw-mapping-summary { color: var(--tw-muted) !important; }
+.tw-palette-row,
+.tw-palette-presets,
+.tw-color-analysis,
+.tw-mapping-summary { background: rgba(24, 19, 14, 0.9) !important; border-color: var(--tw-border) !important; }
+.tw-palette-row > b,
+.tw-palette-presets > span,
+.tw-color-analysis > b,
+.tw-mapping-summary b { color: #d1ad69 !important; }
+.tw-palette-row small,
+.tw-palette-presets small,
+.tw-color-analysis > small,
+.tw-mapping-summary small { color: var(--tw-muted) !important; }
+
+.tw-generate {
+  background: linear-gradient(180deg, #a7792c, #78531f) !important;
+  border-color: #d0a353 !important;
+  color: #fff1d0 !important;
+}
+.tw-generate:hover:not(:disabled),
+.tw-palette-presets button:hover { background: rgba(126, 87, 32, 0.28) !important; border-color: var(--tw-gold) !important; }
+.tw-generate-secondary { background: rgba(54, 39, 24, 0.85) !important; border-color: var(--tw-border) !important; color: var(--tw-text) !important; }
+.tw-assets { border-top-color: var(--tw-border) !important; }
+.tw-assets-list button { background: var(--tw-field) !important; border-color: var(--tw-border-soft) !important; color: var(--tw-text) !important; }
+.tw-assets-list button.active { border-color: var(--tw-gold) !important; }
+
+.tw-before-after button,
+.tw-palette-presets button {
+  background: rgba(54, 39, 24, 0.85) !important;
+  border-color: var(--tw-border) !important;
+  color: var(--tw-text) !important;
+}
+.tw-before-after button.active { background: rgba(126, 87, 32, 0.34) !important; border-color: var(--tw-gold) !important; color: #fff1d0 !important; }
+.tw-palette-presets i { box-shadow: 0 0 0 1px #d6b56b !important; }
+.tw-floating-character { background: rgba(54, 39, 24, 0.94) !important; border-color: var(--tw-border) !important; color: var(--tw-text) !important; }
+.tw-floating-character:hover:not(:disabled) { border-color: var(--tw-gold) !important; color: #f0dfbd !important; }
+
+.tw-modal-backdrop { background: rgba(10, 7, 4, 0.74) !important; }
+.tw-character-modal { background: var(--tw-panel) !important; border-color: var(--tw-border) !important; }
+.tw-character-modal header,
+.tw-modal-controls { border-color: var(--tw-border) !important; }
+.tw-character-modal h2 svg { color: var(--tw-gold) !important; }
+.tw-character-modal p,
+.tw-modal-controls label,
+.tw-modal-controls small { color: var(--tw-muted) !important; }
+.tw-modal-stage { background: radial-gradient(circle at 50% 35%, #49351f, #18130e 70%) !important; }
+
+.tw-page .tw-color-analysis label::after { content: 'Source  â†’  Target' !important; color: #85745d !important; }
+.tw-page input[type='checkbox'] { accent-color: var(--tw-gold); }
+
+@media (max-width: 900px) {
+  .tw-workspace { grid-template-columns: 250px minmax(0, 1fr) !important; }
+}

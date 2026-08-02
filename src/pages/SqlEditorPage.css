@@ -119,3 +119,58 @@
   color: var(--text-muted, #555);
   font-style: italic;
 }
+
+/* Warm Vanilla workspace */
+.sql-editor-page {
+  --sql-bg: #1b140d;
+  --sql-panel: #21170f;
+  --sql-raised: #282016;
+  --sql-border: #594127;
+  --sql-text: #e3d6bc;
+  --sql-muted: #aa987b;
+  --sql-gold: #c99a3d;
+  background: var(--sql-bg);
+  color: var(--sql-text);
+}
+
+.sql-editor-page .editor-header,
+.sql-textarea-wrap,
+.sql-results {
+  border-color: var(--sql-border);
+  background: var(--sql-panel);
+}
+
+.sql-textarea {
+  border-color: var(--sql-border);
+  background: #18130e;
+  color: var(--sql-text);
+}
+
+.sql-textarea:focus {
+  border-color: var(--sql-gold);
+  box-shadow: 0 0 0 2px rgba(201, 154, 61, .12);
+}
+
+.sql-toolbar,
+.sql-results-header {
+  border-color: var(--sql-border);
+  background: var(--sql-raised);
+}
+
+.sql-hint,
+.sql-null {
+  color: var(--sql-muted);
+}
+
+.sql-error {
+  border-color: #8c4d38;
+  background: rgba(107, 54, 34, .35);
+}
+
+.sql-table th,
+.sql-table td {
+  border-color: rgba(89, 65, 39, .58);
+}
+
+.sql-table th { background: var(--sql-raised); color: var(--sql-gold); }
+.sql-table tr:hover td { background: rgba(82, 57, 27, .35); }

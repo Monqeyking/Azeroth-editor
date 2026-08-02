@@ -933,3 +933,67 @@
     min-width: 48px;
   }
 }
+.ui-editor-page {
+  --ui-bg: #1b140d;
+  --ui-panel: #21170f;
+  --ui-raised: #282016;
+  --ui-border: #594127;
+  --ui-text: #e3d6bc;
+  --ui-muted: #aa987b;
+  --ui-gold: #c99a3d;
+  background: var(--ui-bg);
+  color: var(--ui-text);
+}
+
+.ui-editor-toolbar,
+.ui-editor-sidebar,
+.ui-editor-main,
+.ui-editor-output,
+.ui-editor-card,
+.ui-editor-scene-inspector,
+.ui-editor-output-row {
+  border-color: var(--ui-border);
+  background: var(--ui-panel);
+}
+
+.ui-editor-toolbar { background: var(--ui-raised); }
+
+.ui-editor-path-box,
+.ui-editor-status-pill,
+.ui-editor-file,
+.ui-editor-scene-control,
+.ui-editor-scene-runtime-chip,
+.ui-editor-textarea,
+.ui-editor-scene-inspector input,
+.ui-editor-scene-inspector select,
+.ui-editor-scene-inspector textarea {
+  border-color: var(--ui-border);
+  border-radius: 3px;
+  background: #18130e;
+  color: var(--ui-text);
+}
+
+.ui-editor-file:hover,
+.ui-editor-file.active,
+.ui-editor-scene-control:hover,
+.ui-editor-scene-control-wide,
+.ui-editor-scene-runtime-chip:hover {
+  border-color: var(--ui-gold);
+  background: rgba(82, 57, 27, .48);
+  color: #f6e5c0;
+}
+
+.ui-editor-card-title,
+.ui-editor-panel-title,
+.ui-editor-scene-inspector-title,
+.ui-editor-output-label {
+  color: var(--ui-gold);
+}
+
+.ui-editor-card-text,
+.ui-editor-file-path,
+.ui-editor-output-path,
+.ui-editor-output-note,
+.ui-editor-scene-inspector-subtitle {
+  color: var(--ui-muted);
+}

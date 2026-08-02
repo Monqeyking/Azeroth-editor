@@ -3,7 +3,6 @@ import { useConnection } from '../lib/ConnectionContext';
 import { useSearchParams } from 'react-router-dom';
 import { BookOpen, Filter, Plus, Search, Sparkles, Trash2, X } from 'lucide-react';
 import './TrainerSpellVisualPanel.css';
-import './TrainerSpellWarm.css';
 
 const CLASSES = [
   { id: 0, name: 'Profession', color: '#C8A45A' },

@@ -127,17 +127,17 @@ export default function CharCreationPreview({ allRecords, race, gender, hasDataP
           active={hasDataPath}
         />
         {!hasDataPath && (
-          <div className="ccp-model-warn">Geen WoW data-pad — stel in via Settings</div>
+          <div className="ccp-model-warn">No WoW data path — set it in Settings</div>
         )}
       </div>
 
       {/* Opties */}
       <div className="ccp-options-panel">
         {!hasDataPath && (
-          <div className="ccp-warn-banner">Textures laden niet zonder data-pad.</div>
+          <div className="ccp-warn-banner">Textures cannot load without a data path.</div>
         )}
         {sections.length === 0 ? (
-          <div className="ccp-no-data">Geen records voor race/gender.</div>
+          <div className="ccp-no-data">No records for this race/gender.</div>
         ) : (
           sections.map(s => (
             <CategorySelector

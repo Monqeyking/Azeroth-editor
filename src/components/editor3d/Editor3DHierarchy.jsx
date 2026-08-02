@@ -62,7 +62,7 @@ export default function Editor3DHierarchy({ spawns, selectedId, onSelect, onAddS
         <Search size={11} className="ed3-hierarchy-search-icon" />
         <input
           className="ed3-hierarchy-search-input"
-          placeholder="Zoek naam, entry, guid…"
+          placeholder="Search name, entry, guid…"
           value={query}
           onChange={e => setQuery(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && handleDbSearch()}
@@ -75,7 +75,7 @@ export default function Editor3DHierarchy({ spawns, selectedId, onSelect, onAddS
       </div>
 
       <div className="ed3-hierarchy-list">
-        {/* Scene-resultaten */}
+        {/* Scene results */}
         {sceneFiltered.map(spawn => (
           <div
             key={spawn.guid}
@@ -89,25 +89,25 @@ export default function Editor3DHierarchy({ spawns, selectedId, onSelect, onAddS
           </div>
         ))}
 
-        {/* DB-zoekknop — tonen als query actief is */}
+        {/* Database search action */}
         {q && !dbLoading && dbResults === null && (
           <button className="ed3-hierarchy-db-btn" onClick={handleDbSearch}>
             <Database size={11} />
-            Zoek "{query}" in database
+            Search "{query}" in database
           </button>
         )}
 
         {dbLoading && (
           <div className="ed3-hierarchy-db-loading">
-            <Loader size={11} className="ed3-loading-spin" /> Zoeken…
+            <Loader size={11} className="ed3-loading-spin" /> Searching…
           </div>
         )}
 
         {dbError && (
-          <div className="ed3-hierarchy-db-error">Fout: {dbError}</div>
+          <div className="ed3-hierarchy-db-error">Error: {dbError}</div>
         )}
 
-        {/* DB-resultaten die nog niet in de scene zitten */}
+        {/* Database results not yet in the scene */}
         {dbOnlyResults.length > 0 && (
           <>
             <div className="ed3-hierarchy-db-header">
@@ -128,11 +128,11 @@ export default function Editor3DHierarchy({ spawns, selectedId, onSelect, onAddS
         )}
 
         {dbResults !== null && dbOnlyResults.length === 0 && sceneFiltered.length === 0 && (
-          <div className="ed3-hierarchy-empty">Geen resultaten gevonden</div>
+          <div className="ed3-hierarchy-empty">No results found</div>
         )}
 
         {!q && spawns.length === 0 && (
-          <div className="ed3-hierarchy-empty">Geen spawns geladen</div>
+          <div className="ed3-hierarchy-empty">No spawns loaded</div>
         )}
       </div>
     </div>

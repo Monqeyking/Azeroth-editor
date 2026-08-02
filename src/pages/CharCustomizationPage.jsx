@@ -221,7 +221,7 @@ function TextureThumb({ blpPath, size = 56, preferOutput = false, refreshKey = 0
     return () => { cancelled = true; };
   }, [blpPath, preferOutput, refreshKey]);
   const { dataUrl, loading, error } = staged || client;
-  if (!blpPath) return <div className="cc-thumb cc-thumb-empty" style={{ width: size, height: size }} title="Geen texture pad">—</div>;
+  if (!blpPath) return <div className="cc-thumb cc-thumb-empty" style={{ width: size, height: size }} title="No texture path">—</div>;
   if (loading) return <div className="cc-thumb cc-thumb-loading" style={{ width: size, height: size }}><Loader2 size={14} className="cc-spin" /></div>;
   if (error)   return <div className="cc-thumb cc-thumb-error" style={{ width: size, height: size }} title={error}><ImageOff size={14} /></div>;
   return (
@@ -327,10 +327,10 @@ function CharVisualPicker({ rows, selectedId, setSelectedId, race, gender, hasDa
 
       <div className="cc-vp-swatches">
         {!hasDataPath && (
-          <div className="cc-preview-warn">Geen WoW Data-pad — textures laden niet.</div>
+          <div className="cc-preview-warn">No WoW data path — textures cannot load.</div>
         )}
         {rows.length === 0 ? (
-          <div className="cc-preview-empty">Geen records voor deze selectie.</div>
+          <div className="cc-preview-empty">No records for this selection.</div>
         ) : (
           groups.map(({ variation, items }) => (
             <div key={variation} className="cc-swatch-group">
@@ -897,7 +897,7 @@ export default function CharCustomizationPage() {
       setDirty(false);
       setTimeout(() => setSaveMsg(null), 2500);
     } else {
-      setSaveMsg('Fout: ' + r.error);
+      setSaveMsg('Error: ' + r.error);
     }
   };
 
@@ -950,13 +950,13 @@ export default function CharCustomizationPage() {
         </div>
         <div className="cc-header-actions">
           {!dbcPath && (
-            <span className="cc-warn">DBC path niet ingesteld — ga naar Settings</span>
+            <span className="cc-warn">DBC path is not set — go to Settings</span>
           )}
-          {saveMsg && <span className={saveMsg.startsWith('Fout') ? 'cc-error-msg' : 'cc-ok-msg'}>{saveMsg}</span>}
+          {saveMsg && <span className={saveMsg.startsWith('Error') ? 'cc-error-msg' : 'cc-ok-msg'}>{saveMsg}</span>}
           <label className="cc-test-toggle"><input type="checkbox" checked={testMode} onChange={e => toggleTestMode(e.target.checked)} /> Test output only</label>
           <button className="cc-btn cc-btn-ghost" onClick={load} disabled={loading}>
             <RefreshCw size={14} />
-            Herladen
+            Reload
           </button>
           <button className="cc-btn cc-btn-ghost" onClick={writeBaselineTestBuild} disabled={saving || !dbcPath} title="Writes an unchanged source DBC to output for a serializer-only test">
             Baseline test
@@ -966,7 +966,7 @@ export default function CharCustomizationPage() {
           </button>
           <button className="cc-btn cc-btn-primary" onClick={handleSave} disabled={saving || !allRecords || !dirty}>
             <Save size={14} />
-            {saving ? 'Opslaan…' : 'Opslaan'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
         </div>
       </div>
@@ -1031,8 +1031,8 @@ export default function CharCustomizationPage() {
       </div>}
 
       <div className="cc-body">
-        {loading && <div className="cc-status">Laden…</div>}
-        {error   && <div className="cc-status cc-status-err">Fout: {error}</div>}
+        {loading && <div className="cc-status">Loading…</div>}
+        {error   && <div className="cc-status cc-status-err">Error: {error}</div>}
         {!loading && !error && allRecords && viewMode === 'preview' && (
           <CharCreationPreview
             allRecords={normalRecords}
@@ -1068,7 +1068,7 @@ export default function CharCustomizationPage() {
                     {visibleRows.length === 0 && (
                       <tr>
                         <td colSpan={9} className="cc-empty">
-                          Geen records voor deze combinatie. Gebruik "Rij toevoegen" om te beginnen.
+                          No records for this combination. Use "Add row" to get started.
                         </td>
                       </tr>
                     )}
@@ -1151,7 +1151,7 @@ export default function CharCustomizationPage() {
               <div className="cc-footer">
                 <button className="cc-btn cc-btn-ghost" onClick={addRow}>
                   <Plus size={14} />
-                  Rij toevoegen
+                  Add row
                 </button>
                 <span className="cc-count">{visibleRows.length} record{visibleRows.length !== 1 ? 's' : ''}</span>
               </div>
