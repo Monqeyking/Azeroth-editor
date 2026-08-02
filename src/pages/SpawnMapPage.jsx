@@ -598,7 +598,7 @@ export default function SpawnMapPage() {
 						<input
 							type="text"
 							className="spawn-search"
-							placeholder="Zoek naam of entry-ID…"
+							placeholder="Search name or entry ID…"
 							value={searchTerm}
 							onChange={e => { setSearchTerm(e.target.value); if (e.target.value.trim()) setSearchOpen(true); }}
 							onFocus={() => { if (searchTerm.trim()) setSearchOpen(true); }}
@@ -699,11 +699,11 @@ export default function SpawnMapPage() {
 				{(imgLoading || spawnLoading) && (
 					<span className="spawn-loading">
 						<Loader size={12} className="spin" />
-						{spawnLoading ? 'Spawns laden…' : 'Afbeelding laden…'}
+						{spawnLoading ? 'Loading spawns…' : 'Loading image…'}
 					</span>
 				)}
 				{!zone && !imgLoading && (
-					<span className="spawn-hint">Klik op een zone om in te zoomen</span>
+					<span className="spawn-hint">Click a zone to zoom in</span>
 				)}
 				{areasError && <span className="spawn-hint" style={{ color: 'var(--danger)' }}>DBC: {areasError}</span>}
 			</div>
@@ -727,7 +727,7 @@ export default function SpawnMapPage() {
 								draggable={false} alt="" />
 						))}
 						{!bgImage && !imgLoading && (
-							<div className="map-no-image">Geen afbeelding gevonden</div>
+							<div className="map-no-image">No image found</div>
 						)}
 
 						{!zone && continentArea && (
@@ -843,12 +843,12 @@ export default function SpawnMapPage() {
 					<div className="ctx-menu" ref={contextMenuRef}
 						style={{ left: contextMenu.x, top: contextMenu.y }}>
 						{contextMenu.spawn ? <>
-							<div className="ctx-item" onClick={ctxCopyCoords}>Coördinaten kopiëren</div>
-							<div className="ctx-item" onClick={ctxTeleport}>Teleporteer (.go xyz)</div>
+							<div className="ctx-item" onClick={ctxCopyCoords}>Copy coordinates</div>
+							<div className="ctx-item" onClick={ctxTeleport}>Teleport (.go xyz)</div>
 							<div className="ctx-divider" />
-							<div className="ctx-item ctx-danger" onClick={ctxDelete}>Spawn verwijderen</div>
+							<div className="ctx-item ctx-danger" onClick={ctxDelete}>Delete spawn</div>
 						</> : <>
-							<div className="ctx-item" onClick={ctxOpenAdd}>Spawn toevoegen…</div>
+							<div className="ctx-item" onClick={ctxOpenAdd}>Add spawn…</div>
 						</>}
 					</div>
 				)}
@@ -857,7 +857,7 @@ export default function SpawnMapPage() {
 				{addModal && (
 					<div className="modal-overlay" onMouseDown={() => setAddModal(null)}>
 						<div className="modal-box" onMouseDown={e => e.stopPropagation()}>
-							<div className="modal-title">Spawn toevoegen</div>
+						<div className="modal-title">Add spawn</div>
 							<div className="modal-field">
 								<label className="modal-label">Type</label>
 								<select className="modal-select" value={addType} onChange={e => setAddType(e.target.value)}>
@@ -870,15 +870,15 @@ export default function SpawnMapPage() {
 								<input type="number" className="modal-input" value={addEntry}
 									onChange={e => setAddEntry(e.target.value)}
 									onKeyDown={e => { if (e.key === 'Enter') ctxConfirmAdd(); if (e.key === 'Escape') setAddModal(null); }}
-									placeholder="bijv. 6"
+									placeholder="e.g. 6"
 									autoFocus />
 							</div>
 							<div className="modal-coords">
 								{addModal.wx?.toFixed(2)}, {addModal.wy?.toFixed(2)}, 0
 							</div>
 							<div className="modal-actions">
-								<button className="modal-btn-cancel" onClick={() => setAddModal(null)}>Annuleren</button>
-								<button className="modal-btn-ok" onClick={ctxConfirmAdd} disabled={!addEntry}>Toevoegen</button>
+								<button className="modal-btn-cancel" onClick={() => setAddModal(null)}>Cancel</button>
+								<button className="modal-btn-ok" onClick={ctxConfirmAdd} disabled={!addEntry}>Add</button>
 							</div>
 						</div>
 					</div>
@@ -908,7 +908,7 @@ export default function SpawnMapPage() {
 								<div className="insp-row"><span className="insp-key">Faction</span><span className="insp-val">{selected.spawn.faction}</span></div>
 								<div className="insp-row"><span className="insp-key">Rank</span><span className="insp-val">{RANK_NAMES[selected.spawn.rank] ?? selected.spawn.rank}</span></div>
 								<div className="insp-row"><span className="insp-key">Dmg mod</span><span className="insp-val">{selected.spawn.DamageModifier?.toFixed(2)}</span></div>
-								<div className="insp-row"><span className="insp-key">Beweging</span><span className="insp-val">{MOVE_NAMES[selected.spawn.MovementType] ?? selected.spawn.MovementType}</span></div>
+								<div className="insp-row"><span className="insp-key">Movement</span><span className="insp-val">{MOVE_NAMES[selected.spawn.MovementType] ?? selected.spawn.MovementType}</span></div>
 								<div className="insp-row"><span className="insp-key">AI</span><span className="insp-val">{selected.spawn.AIName || '—'}</span></div>
 								<div className="insp-row"><span className="insp-key">Script</span><span className="insp-val">{selected.spawn.ScriptName || '—'}</span></div>
 								{waypoints.length > 0 && <>

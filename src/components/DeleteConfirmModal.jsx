@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 
-export function DeleteConfirmModal({ title = 'Verwijderen', message, onConfirm, onCancel }) {
+export function DeleteConfirmModal({ title = 'Delete', message, onConfirm, onCancel }) {
 	const [selected, setSelected] = useState('yes');
 
 	useEffect(() => {

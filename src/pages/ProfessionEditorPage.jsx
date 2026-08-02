@@ -9,7 +9,6 @@ import '../pages/DashboardPage.css';
 import './EditorPage.css';
 import './NPCWorkflowPage.css';
 import './ProfessionEditorPage.css';
-import './ProfessionEditorWarm.css';
 
 const PROFESSION_PRESETS = [
   { id: 'alchemy', label: 'Alchemy', skillLine: 171, subname: 'Master Alchemist', npcflag: 83, greeting: 'I can teach you the secrets of alchemy.', color: '#9AD8B8' },

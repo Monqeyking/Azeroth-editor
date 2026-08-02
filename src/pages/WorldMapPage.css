@@ -233,3 +233,65 @@
   flex: 1;
   overflow: hidden;
 }
+
+/* Warm Vanilla workspace */
+.wm-page,
+.wm-detail {
+  --wm-bg: #1b140d;
+  --wm-panel: #21170f;
+  --wm-raised: #282016;
+  --wm-border: #594127;
+  --wm-text: #e3d6bc;
+  --wm-muted: #aa987b;
+  --wm-gold: #c99a3d;
+  background: var(--wm-bg);
+  color: var(--wm-text);
+}
+
+.wm-toolbar,
+.wm-detail-bar,
+.wm-marker-editor {
+  background: var(--wm-panel);
+  border-color: var(--wm-border);
+}
+
+.wm-toolbar,
+.wm-detail-bar {
+  box-shadow: 0 5px 14px rgba(0, 0, 0, .18);
+}
+
+.wm-toolbar-title,
+.wm-detail-title,
+.wm-marker-editor-title {
+  color: var(--wm-text);
+}
+
+.wm-classic-toggle,
+.wm-tile-status,
+.wm-marker-editor,
+.wm-marker-coords {
+  color: var(--wm-muted);
+}
+
+.wm-back-btn,
+.wm-edit-btn,
+.wm-delete-btn,
+.wm-marker-editor input:not([type="color"]),
+.wm-marker-editor textarea {
+  border-color: var(--wm-border);
+  border-radius: 3px;
+  background: #18130e;
+  color: var(--wm-text);
+}
+
+.wm-back-btn:hover,
+.wm-edit-btn:hover,
+.wm-edit-btn.active {
+  border-color: var(--wm-gold);
+  background: rgba(82, 57, 27, .48);
+  color: #f6e5c0;
+}
+
+.wm-edit-btn.active { color: #f0c65b; }
+.wm-delete-btn { color: #d78368; }
+.wm-placeholder { color: var(--wm-muted); }

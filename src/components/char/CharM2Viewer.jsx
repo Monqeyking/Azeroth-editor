@@ -367,7 +367,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
               setNoTex(false);
             }
           } else {
-            setGeoError(res?.error ?? 'Model laden mislukt');
+            setGeoError(res?.error ?? 'Failed to load model');
           }
           setGeoLoad(false);
         })
@@ -451,7 +451,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
             setGeoReady(true);
             if (onSubmeshes && res.data.submeshes) onSubmeshes(res.data.submeshes, serverActive);
           } else {
-            setGeoError(res?.error ?? 'Model laden mislukt');
+            setGeoError(res?.error ?? 'Failed to load model');
           }
           setGeoLoad(false);
         })
@@ -531,7 +531,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
       {geoLoading && !geoReady && (
         <div className="char-m2-overlay">
           <Loader2 size={20} className="cc-spin" />
-          <span>Model ladenÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦</span>
+          <span>Loading model…</span>
         </div>
       )}
       {geoError && !geoReady && (

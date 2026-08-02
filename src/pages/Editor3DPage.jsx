@@ -110,7 +110,7 @@ export default function Editor3DPage() {
       try {
         const res = await window.azeroth.spawns.load({ mapId, limit: 1000 });
         if (cancelled) return;
-        if (!res.success) { setError(res.error ?? 'Kan spawns niet laden'); return; }
+        if (!res.success) { setError(res.error ?? 'Could not load spawns'); return; }
         setSpawns(res.data);
 
         if (res.data.length && camPosRef.current.wx === 0 && camPosRef.current.wy === 0) {
@@ -333,7 +333,7 @@ export default function Editor3DPage() {
         orientation,
       });
       if (!res.success) {
-        setSaveError(`Fout bij ${spawn.guid}: ${res.error}`);
+        setSaveError(`Error for ${spawn.guid}: ${res.error}`);
         setSaving(false);
         return;
       }
@@ -387,7 +387,7 @@ export default function Editor3DPage() {
     const idResult = await query('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM game_tele');
     if (!idResult.success) return { success: false, error: `Kon tijdelijke teleport ID niet bepalen: ${idResult.error}` };
     const teleId = idResult.data?.[0]?.id;
-    if (!teleId) return { success: false, error: 'Kon tijdelijke teleport ID niet bepalen' };
+    if (!teleId) return { success: false, error: 'Could not determine a temporary teleport ID' };
 
     const del = await query('DELETE FROM game_tele WHERE name = ?', [teleName]);
     if (!del.success) return { success: false, error: `Kon tijdelijke teleport niet voorbereiden: ${del.error}` };
@@ -396,7 +396,7 @@ export default function Editor3DPage() {
       'INSERT INTO game_tele (id, position_x, position_y, position_z, orientation, map, name) VALUES (?, ?, ?, ?, ?, ?, ?)',
       [teleId, Number(x), Number(y), Number(z), orientation, Number(map), teleName]
     );
-    if (!ins.success) return { success: false, error: `Kon tijdelijke teleport niet opslaan: ${ins.error}` };
+    if (!ins.success) return { success: false, error: `Could not save temporary teleport: ${ins.error}` };
 
     await soapCommand('.reload game_tele');
     const escapedPlayer = playerName.replace(/"/g, '');
@@ -448,7 +448,7 @@ export default function Editor3DPage() {
         onToggleSpawns={() => setSpawnsVisible(v => !v)}
       />
 
-      {error && <div className="ed3-error-bar">Fout: {error}</div>}
+      {error && <div className="ed3-error-bar">Error: {error}</div>}
 
       <div className="ed3-workspace">
         <Editor3DHierarchy
@@ -508,14 +508,14 @@ export default function Editor3DPage() {
       {dirtyGuids.size > 0 && (
         <div className="ed3-save-bar">
           <span className="ed3-save-bar-msg">
-            {dirtyGuids.size} spawn{dirtyGuids.size > 1 ? 's' : ''} niet opgeslagen
+            {dirtyGuids.size} spawn{dirtyGuids.size > 1 ? 's' : ''} unsaved
           </span>
           {saveError && <span className="ed3-save-bar-error">{saveError}</span>}
           <button className="ed3-save-bar-btn undo" onClick={handleUndo} disabled={saving}>
-            Ongedaan maken
+            Undo changes
           </button>
           <button className="ed3-save-bar-btn save" onClick={handleSave} disabled={saving}>
-            {saving ? 'Opslaan…' : 'Opslaan'}
+            {saving ? 'Saving…' : 'Save'}
           </button>
          </div>
       )}

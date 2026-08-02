@@ -5,7 +5,6 @@ import { useBlpTexture } from '../lib/useBlpTexture';
 import TextureWorkshopGenerator from './TextureWorkshopGenerator';
 import TextureWorkshopCharacterModal from './TextureWorkshopCharacterModal';
 import './TextureWorkshopPage.css';
-import './TextureWorkshopWarm.css';
 
 const SLOT_NAMES = { 1: 'Head', 2: 'Neck', 3: 'Shoulder', 5: 'Chest', 6: 'Waist', 7: 'Legs', 8: 'Feet', 9: 'Wrist', 10: 'Hands', 11: 'Finger', 12: 'Trinket', 16: 'Back', 19: 'Tabard', 20: 'Chest' };
 const defaults = { hue: 0, saturation: 0, brightness: 0, contrast: 0, paletteStrength: 100, primary: '', secondary: '', accent: '', colorMappings: [] };

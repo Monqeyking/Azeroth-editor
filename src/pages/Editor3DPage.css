@@ -626,3 +626,101 @@
 .ed3-axis.x { color: #e74c3c; }
 .ed3-axis.y { color: #2ecc71; }
 .ed3-axis.z { color: #3498db; }
+
+/* Warm Vanilla workspace */
+.ed3-root {
+  --ed3-bg: #1b140d;
+  --ed3-panel: #21170f;
+  --ed3-raised: #282016;
+  --ed3-border: #594127;
+  --ed3-text: #e3d6bc;
+  --ed3-muted: #aa987b;
+  --ed3-gold: #c99a3d;
+  background: var(--ed3-bg);
+  color: var(--ed3-text);
+}
+
+.ed3-toolbar,
+.ed3-hierarchy,
+.ed3-inspector,
+.ed3-save-bar,
+.ed3-minimap-cal,
+.ed3-perf-panel {
+  background: var(--ed3-panel);
+  border-color: var(--ed3-border);
+}
+
+.ed3-tool-btn,
+.ed3-hierarchy-search,
+.ed3-hierarchy-db-btn,
+.ed3-map-select,
+.ed3-minimap-cal-btn,
+.ed3-inspector-teleport-btn,
+.ed3-inspector-save-btn,
+.ed3-save-bar-btn {
+  border-color: var(--ed3-border);
+  border-radius: 3px;
+  background: var(--ed3-raised);
+  color: var(--ed3-text);
+}
+
+.ed3-tool-btn:hover,
+.ed3-tool-btn.active,
+.ed3-hierarchy-item:hover,
+.ed3-hierarchy-item.active,
+.ed3-hierarchy-db-btn:hover,
+.ed3-map-select:hover:not(:disabled),
+.ed3-inspector-teleport-btn:hover:not(:disabled),
+.ed3-save-bar-btn.undo:hover:not(:disabled) {
+  border-color: var(--ed3-gold);
+  background: rgba(82, 57, 27, .48);
+  color: #f6e5c0;
+}
+
+.ed3-hierarchy-search-input,
+.ed3-inspector input,
+.ed3-inspector select {
+  border-color: var(--ed3-border);
+  background: #18130e;
+  color: var(--ed3-text);
+}
+
+.ed3-hierarchy-search-input:focus,
+.ed3-inspector input:focus,
+.ed3-inspector select:focus {
+  border-color: var(--ed3-gold);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(201, 154, 61, .12);
+}
+
+.ed3-hi-guid,
+.ed3-camera-hint,
+.ed3-spawn-count,
+.ed3-inspector-label,
+.ed3-inspector-empty,
+.ed3-save-bar-msg {
+  color: var(--ed3-muted);
+}
+
+.ed3-inspector-section,
+.ed3-inspector-row,
+.ed3-save-bar {
+  border-color: var(--ed3-border);
+}
+
+.ed3-inspector-title,
+.ed3-inspector-val,
+.ed3-perf-panel strong {
+  color: var(--ed3-text);
+}
+
+.ed3-save-bar-btn.save,
+.ed3-inspector-save-btn {
+  border-color: #a87827;
+  background: #6b481d;
+  color: #f6e5c0;
+}
+
+.ed3-save-bar-btn.save:hover:not(:disabled),
+.ed3-inspector-save-btn:hover:not(:disabled) { background: #805821; }
+.ed3-error-bar { border-color: #8c4d38; background: rgba(107, 54, 34, .4); }

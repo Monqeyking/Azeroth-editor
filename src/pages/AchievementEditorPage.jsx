@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { useConnection } from '../lib/ConnectionContext';
 import { AlertTriangle, Filter, Plus, Save, Search, Trash2, Trophy } from 'lucide-react';
 import './AchievementEditorPage.css';
-import './AchievementEditorWarm.css';
 
 function normalizeText(value) {
   return String(value || '').toLowerCase();

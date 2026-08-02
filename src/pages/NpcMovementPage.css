@@ -20,3 +20,181 @@
 .npcmove-waypoints { margin-top: 16px; overflow: hidden; }.npcmove-waypoint-head { justify-content: space-between; padding: 15px 17px; border-bottom: 1px solid var(--border); }.npcmove-waypoint-head h3 { margin-bottom: 3px; }.npcmove-waypoint-head p { margin: 0; color: var(--text-muted); font-size: 11px; }.npcmove-waypoint-table { min-width: 715px; }.npcmove-waypoint-row { display: grid; grid-template-columns: 34px repeat(6,minmax(86px,1fr)) 34px; align-items: center; gap: 7px; padding: 7px 11px; border-bottom: 1px solid rgba(42,48,64,.5); }.npcmove-waypoint-row:last-child { border: 0; }.npcmove-waypoint-row>span { color: var(--text-muted); font-size: 11px; text-align: center; }.npcmove-waypoint-row.head { padding-top: 8px; padding-bottom: 5px; color: var(--text-secondary); font-size: 10px; font-weight: 600; text-transform: uppercase; }.npcmove-waypoint-row input { min-width: 0; padding: 6px 7px; font-size: 12px; }.npcmove-waypoint-row .icon-btn { justify-self: center; padding: 6px; color: var(--text-muted); }.npcmove-waypoint-row .icon-btn:hover { color: #ee7070; }
 @media (max-width:900px) { .npcmove-layout { grid-template-columns: 230px minmax(0,1fr); }.npcmove-editor { padding: 16px; }.npcmove-detail-grid { grid-template-columns: 1fr; } }
 @media (max-width:680px) { .npcmove-header,.npcmove-search,.npcmove-filters { align-items: stretch; flex-direction: column; }.npcmove-header,.npcmove-search,.npcmove-filters,.npcmove-message { padding-left: 16px; padding-right: 16px; }.npcmove-filters>span { margin-left: 0; }.npcmove-layout { display: flex; min-height: 0; flex-direction: column; }.npcmove-results { max-height: 270px; border-right: 0; border-bottom: 1px solid var(--border); }.npcmove-summary { grid-template-columns: 1fr; }.npcmove-summary>div { border-right: 0; border-bottom: 1px solid var(--border); }.npcmove-summary>div:last-child { border-bottom: 0; }.npcmove-waypoints { overflow-x: auto; } }
+
+/* Warm Vanilla skin for the NPC movement editor. */
+.npcmove-page {
+  --bg-dark: #18130e;
+  --bg-panel: #282016;
+  --bg-hover: #332619;
+  --text-primary: #e3d6bc;
+  --text-secondary: #c1ad8d;
+  --text-muted: #aa987b;
+  --border: #594127;
+  --gold: #c99a3d;
+  --gold-dim: #8f6530;
+  --gold-bright: #e7c77e;
+  min-height: 100%;
+  background: #1b140d !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-header {
+  margin: 16px 16px 0;
+  padding: 18px 22px !important;
+  border: 1px solid var(--border) !important;
+  border-bottom-color: #75552d !important;
+  background: linear-gradient(180deg, #302317 0%, #21170f 100%) !important;
+  box-shadow: inset 0 1px rgba(255, 219, 145, 0.06), 0 12px 24px rgba(0, 0, 0, 0.18);
+}
+
+.npcmove-header .editor-page-title {
+  color: var(--gold-bright) !important;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.npcmove-header .editor-page-subtitle {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-search,
+.npcmove-filters,
+.npcmove-message {
+  margin: 0 16px;
+  border-color: var(--border) !important;
+  background: #21170f !important;
+}
+
+.npcmove-search .search-box,
+.npcmove-search input,
+.npcmove-filters select,
+.npcmove-fields input,
+.npcmove-fields select,
+.npcmove-waypoint-row input {
+  border-color: var(--border) !important;
+  background: #18130e !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-search .search-box:focus-within,
+.npcmove-search input:focus,
+.npcmove-filters select:focus,
+.npcmove-fields input:focus,
+.npcmove-fields select:focus,
+.npcmove-waypoint-row input:focus {
+  border-color: var(--gold) !important;
+  outline: none;
+  box-shadow: 0 0 0 1px rgba(201, 154, 61, 0.16);
+}
+
+.npcmove-search .btn-primary,
+.npcmove-header .btn-primary {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #5b3d1d !important;
+  color: #f0d18b !important;
+}
+
+.npcmove-message {
+  color: var(--text-secondary) !important;
+}
+
+.npcmove-layout {
+  margin: 0 16px 16px;
+  border: 1px solid var(--border);
+  border-top: 0;
+  background: #1b140d !important;
+}
+
+.npcmove-results,
+.npcmove-editor {
+  background: #21170f !important;
+  border-color: var(--border) !important;
+}
+
+.npcmove-result {
+  border-bottom-color: rgba(89, 65, 39, 0.7) !important;
+  color: var(--text-primary) !important;
+}
+
+.npcmove-result:hover,
+.npcmove-result.active {
+  background: #392817 !important;
+}
+
+.npcmove-result.active {
+  border-left-color: var(--gold) !important;
+}
+
+.npcmove-result span,
+.npcmove-result small,
+.npcmove-empty,
+.npcmove-summary small,
+.npcmove-fields label,
+.field-hint,
+.npcmove-waypoint-head p {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-summary,
+.npcmove-card,
+.npcmove-preview,
+.npcmove-waypoints {
+  border-color: var(--border) !important;
+  border-radius: 4px !important;
+  background: #282016 !important;
+}
+
+.npcmove-summary strong,
+.npcmove-card h3,
+.npcmove-waypoints h3 {
+  color: var(--gold-bright) !important;
+}
+
+.npcmove-summary > div,
+.npcmove-waypoint-head,
+.npcmove-waypoint-row {
+  border-color: rgba(89, 65, 39, 0.65) !important;
+}
+
+.npcmove-waypoint-head {
+  background: #302317 !important;
+}
+
+.npcmove-waypoint-row.head {
+  color: var(--gold-bright) !important;
+  background: #21170f !important;
+}
+
+.npcmove-waypoint-row .icon-btn {
+  color: var(--text-muted) !important;
+}
+
+.npcmove-waypoint-row .icon-btn:hover {
+  color: #df8873 !important;
+}
+
+.npcmove-waypoint-head .btn-ghost {
+  border-color: var(--border) !important;
+  border-radius: 3px !important;
+  background: #21170f !important;
+  color: var(--text-secondary) !important;
+}
+
+.npcmove-preview .creature-model-preview,
+.npcmove-preview .creature-model-preview-head,
+.npcmove-preview .creature-model-preview-debug {
+  border-color: var(--border) !important;
+  background: #1d160f !important;
+}
+
+@media (max-width: 900px) {
+  .npcmove-header,
+  .npcmove-search,
+  .npcmove-filters,
+  .npcmove-message,
+  .npcmove-layout {
+    margin-left: 8px;
+    margin-right: 8px;
+  }
+}

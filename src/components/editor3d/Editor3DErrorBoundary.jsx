@@ -16,7 +16,7 @@ export default class Editor3DErrorBoundary extends Component {
         <div className="editor3d-error">
           <h3>3D renderer crash</h3>
           <pre>{this.state.error.message}</pre>
-          <button onClick={() => this.setState({ error: null })}>Opnieuw proberen</button>
+          <button onClick={() => this.setState({ error: null })}>Try again</button>
         </div>
       );
     }

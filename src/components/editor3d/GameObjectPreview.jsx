@@ -485,13 +485,13 @@ export default function GameObjectPreview({ modelPath, scale = 1, height = 320, 
     loadPreviewModel(modelPath).then(result => {
       if (cancelled) return;
       setLoading(false);
-      if (!result?.data) { setError(result?.error || 'Model niet geladen'); return; }
+      if (!result?.data) { setError(result?.error || 'Model not loaded'); return; }
       setData(result.data);
       setTexData(makeTexture(result.data));
     }).catch(err => {
       if (!cancelled) {
         setLoading(false);
-        setError(err.message || 'Model niet geladen');
+      setError(err.message || 'Model not loaded');
       }
     });
     return () => { cancelled = true; };
@@ -586,11 +586,11 @@ export default function GameObjectPreview({ modelPath, scale = 1, height = 320, 
       )}
       {showLoading && (
         <div className="go-preview-overlay go-preview-loading">
-          <Loader2 size={18} className="spin" /><span>{hasModel ? 'Model wisselen…' : 'Model laden…'}</span>
+          <Loader2 size={18} className="spin" /><span>{hasModel ? 'Switching model…' : 'Loading model…'}</span>
         </div>
       )}
       {showError && <div className="go-preview-overlay go-preview-overlay-err">{error}</div>}
-      {showNoModel && <div className="go-preview-overlay">Geen model beschikbaar</div>}
+      {showNoModel && <div className="go-preview-overlay">No model available</div>}
     </div>
   );
 }

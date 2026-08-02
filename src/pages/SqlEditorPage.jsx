@@ -69,7 +69,7 @@ export default function SqlEditorPage() {
               disabled={loading || !sql.trim()}
             >
               <Play size={14} />
-              {loading ? 'Uitvoeren…' : 'Uitvoeren'}
+              {loading ? 'Running…' : 'Run'}
             </button>
             <button
               className="btn-secondary"
@@ -77,15 +77,15 @@ export default function SqlEditorPage() {
               disabled={loading}
             >
               <Trash2 size={14} />
-              Wissen
+              Clear
             </button>
-            <span className="sql-hint">Ctrl+Enter om uit te voeren</span>
+            <span className="sql-hint">Ctrl+Enter to run</span>
           </div>
         </div>
 
         {error && (
           <div className="sql-error">
-            <strong>Fout:</strong> {error}
+            <strong>Error:</strong> {error}
           </div>
         )}
 
@@ -93,10 +93,10 @@ export default function SqlEditorPage() {
           <div className="sql-results">
             <div className="sql-results-header">
               {results.length > 0
-                ? `${rowCount} rij${rowCount !== 1 ? 'en' : ''} gevonden`
+                ? `${rowCount} row${rowCount !== 1 ? 's' : ''} found`
                 : rowCount === 0 && columns.length === 0
-                  ? `Query uitgevoerd${rowCount !== null ? ` — ${rowCount} rij${rowCount !== 1 ? 'en' : ''} beïnvloed` : ''}`
-                  : '0 resultaten'}
+                  ? `Query executed${rowCount !== null ? ` — ${rowCount} row${rowCount !== 1 ? 's' : ''} affected` : ''}`
+                  : '0 results'}
             </div>
             {results.length > 0 && (
               <div className="sql-table-wrap">

@@ -207,8 +207,8 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
         ]));
 
         if (!res?.success || !res.data) {
-          setError(res?.error || "Model laden mislukt");
-          setDebugState(makeDebugState("error", [res?.error || "Model laden mislukt"]));
+          setError(res?.error || "Failed to load model");
+          setDebugState(makeDebugState("error", [res?.error || "Failed to load model"]));
           setLoading(false);
           return;
         }
@@ -344,7 +344,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
       {loading && !error && (
         <div className="glue-m2-overlay">
           <Loader2 size={20} className="cc-spin" />
-          <span>Model laden...</span>
+          <span>Loading model...</span>
         </div>
       )}
       {error && (

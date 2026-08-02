@@ -924,3 +924,95 @@
 .cc-set-face-list > span { width:100%; color:var(--text-secondary); }
 .cc-set-face { padding:4px 7px; border:1px solid var(--border); border-radius:4px; background:transparent; color:var(--text-primary); cursor:pointer; }
 @media (max-width: 980px) { .cc-set-workspace { grid-template-columns:1fr; } .cc-set-preview { min-height:420px; } .cc-set-preview .char-m2-viewer { min-height:360px; } }
+
+/* Warm Vanilla workspace */
+.cc-page {
+  --cc-bg: #1b140d;
+  --cc-panel: #21170f;
+  --cc-raised: #282016;
+  --cc-border: #594127;
+  --cc-text: #e3d6bc;
+  --cc-muted: #aa987b;
+  --cc-gold: #c99a3d;
+  background: var(--cc-bg);
+  color: var(--cc-text);
+}
+
+.cc-header,
+.cc-toolbar,
+.cc-table-wrap,
+.cc-preview-slot,
+.ccp-model-panel,
+.ccp-options-panel,
+.ccp-detail,
+.cc-set-skins,
+.cc-set-parts,
+.cc-set-preview {
+  background: var(--cc-panel);
+  border-color: var(--cc-border);
+}
+
+.cc-title,
+.cc-label,
+.cc-swatch-group-label,
+.ccp-category-label,
+.ccp-detail-id,
+.cc-count {
+  color: var(--cc-text);
+}
+
+.cc-subtitle,
+.cc-preview-slot-path,
+.cc-vp-detail-coords,
+.ccp-detail-meta,
+.ccp-detail-path,
+.cc-set-hint,
+.cc-set-skins small {
+  color: var(--cc-muted);
+}
+
+.cc-select,
+.cc-input,
+.ccp-selector,
+.cc-gender-btn,
+.cc-tab,
+.cc-set-skin,
+.cc-set-face {
+  border-color: var(--cc-border);
+  border-radius: 3px;
+  background: #18130e;
+  color: var(--cc-text);
+}
+
+.cc-select:focus,
+.cc-input:focus,
+.ccp-selector:focus {
+  border-color: var(--cc-gold);
+  box-shadow: 0 0 0 2px rgba(201, 154, 61, .12);
+}
+
+.cc-gender-btn:hover,
+.cc-gender-btn.active,
+.cc-tab:hover,
+.cc-tab.active,
+.cc-set-skin.active,
+.cc-set-face.active {
+  border-color: var(--cc-gold);
+  background: rgba(82, 57, 27, .48);
+  color: #f6e5c0;
+}
+
+.cc-table thead th,
+.cc-footer {
+  background: var(--cc-raised);
+  border-color: var(--cc-border);
+}
+
+.cc-row td { border-color: rgba(89, 65, 39, .5); }
+.cc-row:hover td,
+.cc-row-selected td { background: rgba(82, 57, 27, .38); }
+
+.cc-btn-primary { background: #6b481d; border-color: #a87827; color: #f6e5c0; }
+.cc-btn-primary:not(:disabled):hover { background: #805821; }
+.cc-btn-ghost { border-color: var(--cc-border); color: var(--cc-text); }
+.cc-btn-ghost:not(:disabled):hover { background: rgba(82, 57, 27, .48); border-color: var(--cc-gold); color: #f6e5c0; }

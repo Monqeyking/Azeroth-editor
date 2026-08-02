@@ -4,7 +4,6 @@ import { Save, RotateCcw, GitBranch, GitCompare, X, Search, Copy, Trash2, Plus }
 import './DashboardPage.css';
 import './EditorPage.css';
 import './TalentEditorPage.css';
-import './TalentEditorWarm.css';
 import { useUnsavedGuard } from '../lib/useUnsavedGuard';
 import { UnsavedChangesModal } from '../components/UnsavedChangesModal';
 import { DeleteConfirmModal } from '../components/DeleteConfirmModal';

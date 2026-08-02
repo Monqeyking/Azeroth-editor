@@ -389,7 +389,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
         : window.azeroth.dbc.readBlpTexture(dataPath, sourceBlpPath || blpPath);
     readTexture.then(res => {
       if (cancelled) return;
-      if (!res?.success) { setError(res?.error || 'Texture kon niet geladen worden'); setLoading(false); return; }
+      if (!res?.success) { setError(res?.error || 'Texture could not be loaded'); setLoading(false); return; }
       const img = new Image();
       img.onload = async () => {
         if (cancelled) return;
@@ -1156,7 +1156,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
               {semanticAnalysis && (
                 <div className="tme-semantic-controls">
                   <strong>Semantic analysis: {semanticAnalysis.status === 'ready' ? 'ready' : semanticAnalysis.status === 'review' ? 'review' : 'manual'}</strong>
-                  <span> {Math.round((semanticAnalysis.confidence?.total ?? 0) * 100)}% · {semanticAnalysis.template?.id || 'geen template'}</span>
+                  <span> {Math.round((semanticAnalysis.confidence?.total ?? 0) * 100)}% · {semanticAnalysis.template?.id || 'no template'}</span>
                   {reusedCorrection && <span> · opgeslagen correctie toegepast</span>}
                   {semanticOptions.length > 0 && <>
                     <select value={semanticRegion} onChange={e => setSemanticRegion(e.target.value)}>
@@ -1187,7 +1187,7 @@ export default function TextureMaskEditor({ dataPath, blpPath, outputPath = null
                 </button>
                 <button className="tme-tool-btn" onClick={fillMask} title="Fill all editable, non-protected pixels with the target colour">Fill</button>
                 {semanticAnalysis?.template?.match?.textureType === 'skin-atlas' && <button className={`tme-tool-btn ${mappingEdit ? 'active' : ''}`} onClick={() => { setShowComponentMappings(true); setMappingEdit(value => !value); }} title="Drag the selected component rectangle on the canvas">Mappings</button>}
-                <button className="tme-tool-btn" onClick={resetMask} title="Masker volledig wissen">
+                <button className="tme-tool-btn" onClick={resetMask} title="Clear mask completely">
                   <RotateCcw size={14} /> Reset
                 </button>
               </div>
