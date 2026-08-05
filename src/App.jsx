@@ -27,6 +27,8 @@ import SqlEditorPage from './pages/SqlEditorPage';
 import DbcSqlPage from './pages/DbcSqlPage';
 import ExpansionLockPage from './pages/ExpansionLockPage';
 import WorldMapPage from './pages/WorldMapPage';
+import WorldCheckPage from './pages/WorldCheckPage';
+import ADTEditorPage from './pages/ADTEditorPage';
 import UIEditorPage from './pages/UIEditorPage';
 import AssetEditorPage from './pages/AssetEditorPage';
 import AchievementEditorPage from './pages/AchievementEditorPage';
@@ -80,6 +82,8 @@ const router = createHashRouter([
       { path: 'dbc-sql',           element: <DbcSqlPage /> },
       { path: 'expansion-lock',    element: <ExpansionLockPage /> },
       { path: 'worldmap',          element: <WorldMapPage /> },
+      { path: 'world-check',       element: <WorldCheckPage /> },
+      { path: 'adt-editor',        element: <ADTEditorPage /> },
       { path: 'ui-editor',          element: <UIEditorPage /> },
       { path: 'asset-editor',       element: <AssetEditorPage /> },
       { path: 'settings',           element: <SettingsPage /> },

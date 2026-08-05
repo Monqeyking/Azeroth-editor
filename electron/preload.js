@@ -161,12 +161,26 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // ADT terrain (3D editor)
   adt: {
+    listMaps:              (opts) => ipcRenderer.invoke('adt:listMaps', opts),
+    inspect:               (opts) => ipcRenderer.invoke('adt:inspect', opts),
+    stageAreaIds:          (opts) => ipcRenderer.invoke('adt:stageAreaIds', opts),
+    stageAreaTableArea:    (opts) => ipcRenderer.invoke('adt:stageAreaTableArea', opts),
+    prepareServerTile:     (opts) => ipcRenderer.invoke('adt:prepareServerTile', opts),
+    runMapExtractor:       (opts) => ipcRenderer.invoke('adt:runMapExtractor', opts),
+    inspectVmapDependencies:(opts) => ipcRenderer.invoke('adt:inspectVmapDependencies', opts),
+    runMmapExtractor:       (opts) => ipcRenderer.invoke('adt:runMmapExtractor', opts),
     getTerrain:             (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
     getPlacements:          (opts) => ipcRenderer.invoke('adt:getPlacements', opts),
     getTileTextures:        (opts) => ipcRenderer.invoke('adt:getTileTextures', opts),
     getTextureLayers:         (opts) => ipcRenderer.invoke('adt:getTextureLayers', opts),
     diagBLP:                  (opts) => ipcRenderer.invoke('adt:diagBLP', opts),
     getWdl:                 (opts) => ipcRenderer.invoke('adt:getWdl', opts),
+  },
+  worldCheck: {
+    scanDurotar: (dataPath, serverMapsPath, lightweight = true, compareDataPath = '', serverComparePath = '') => ipcRenderer.invoke('worldcheck:scanDurotar', { dataPath, serverMapsPath, serverComparePath, lightweight, compareDataPath }),
+    getPreviews: (dataPath, tiles, overlayDataPath = '') => ipcRenderer.invoke('worldcheck:getPreviews', { dataPath, overlayDataPath, tiles }),
+    inspectTile: (dataPath, serverMapsPath, tileX, tileY, withPreview = false, serverComparePath = '') => ipcRenderer.invoke('worldcheck:inspectTile', { dataPath, serverMapsPath, serverComparePath, tileX, tileY, withPreview }),
+    exportServerData: (serverMapsPath, tiles) => ipcRenderer.invoke('worldcheck:exportServerData', { serverMapsPath, tiles }),
   },
   // M2 model loader (3D editor)
   m2: {

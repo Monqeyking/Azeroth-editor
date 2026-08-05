@@ -381,3 +381,143 @@
 .layout ::-webkit-scrollbar-thumb:hover {
   background: #8b682e;
 }
+
+/* Main navigation and contextual workspace rail. */
+.layout {
+  flex-direction: column;
+}
+
+.topbar {
+  flex: 0 0 58px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  padding: 0 14px;
+  background: linear-gradient(180deg, #211810, #18130e);
+  border-bottom: 1px solid var(--vanilla-border);
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.16);
+  -webkit-app-region: no-drag;
+}
+
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 0 0 auto;
+  min-width: 142px;
+}
+
+.topbar-brand .logo-img {
+  height: 34px;
+}
+
+.topbar-tabs {
+  display: flex;
+  align-items: stretch;
+  align-self: stretch;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.topbar-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: #aa987b;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+  text-decoration: none;
+  transition: color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+}
+
+.topbar-tab:hover {
+  color: #f0dfbd;
+  background: rgba(90, 64, 34, 0.35);
+}
+
+.topbar-tab.active {
+  color: #fff0c9;
+  border-bottom-color: var(--vanilla-gold);
+  background: linear-gradient(180deg, rgba(90, 64, 34, 0.2), rgba(90, 64, 34, 0.55));
+}
+
+.topbar-status {
+  margin-left: auto;
+  flex: 0 1 210px;
+  min-width: 0;
+}
+
+.topbar-status .db-badge {
+  margin: 0;
+  padding: 7px 10px;
+}
+
+.workspace-shell {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.workspace-shell .sidebar {
+  min-height: 0;
+}
+
+.sidebar-context {
+  flex: 0 0 auto;
+  padding: 14px 18px 10px;
+  border-bottom: 1px solid var(--vanilla-border-soft);
+}
+
+.sidebar-context-label {
+  display: block;
+  margin-bottom: 3px;
+  color: #806f58;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.9px;
+  text-transform: uppercase;
+}
+
+.sidebar-context strong {
+  color: #e3d6bc;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.workspace-shell .sidebar-nav {
+  padding-top: 10px;
+}
+
+.workspace-shell .sidebar-footer {
+  margin-top: auto;
+  padding-top: 10px;
+}
+
+@media (max-width: 900px) {
+  .topbar {
+    gap: 10px;
+  }
+
+  .topbar-brand {
+    min-width: auto;
+  }
+
+  .topbar-brand .logo-text,
+  .topbar-status {
+    display: none;
+  }
+
+  .topbar-tab {
+    padding: 0 9px;
+  }
+}

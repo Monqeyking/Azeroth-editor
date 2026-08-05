@@ -3,6 +3,7 @@ const { app, BrowserWindow, ipcMain, dialog, Menu, clipboard } = require('electr
 app.commandLine.appendSwitch('disable-gpu-sandbox');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 const net = require('net');
 const { spawn, execFile } = require('child_process');
 const { Worker } = require('worker_threads');
@@ -17,6 +18,8 @@ const mysql = require('mysql2/promise');
 const http = require('http');
 const AdmZip = require('adm-zip');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
+const { extractAdtMapTile } = require('./adt-map-extractor');
+const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, inspectVmapDependencies, runTargetMmap } = require('./adt-server-extractors');
 let mpqReader = null;
 const MPQ_STUB = {
   isDataPath: () => false,
@@ -3786,6 +3789,789 @@ ipcMain.handle('spawns:update', async (_, { guid, type, x, y, z, orientation }) 
 // ADT terrain parser
 const UNIT_SIZE = 33.33333 / 8; // = 4.16666 yards per outer vertex step
 
+// Read-only ADT inspector parser. It deliberately keeps uncertain fields raw or unresolved.
+const ADT_INSPECTOR_CHUNKS = new Set([
+  'MVER', 'MHDR', 'MCIN', 'MTEX', 'MMDX', 'MMID', 'MWMO', 'MWID',
+  'MDDF', 'MODF', 'MCNK', 'MCVT', 'MCNR', 'MCLY', 'MCAL', 'MCSH', 'MCRF', 'MH2O',
+]);
+
+function adtChunkId(raw) {
+  const direct = String(raw || '').slice(0, 4);
+  const reversed = direct.split('').reverse().join('');
+  return ADT_INSPECTOR_CHUNKS.has(direct) ? direct : ADT_INSPECTOR_CHUNKS.has(reversed) ? reversed : direct;
+}
+
+function adtSafeUInt(buf, offset) {
+  return offset >= 0 && offset + 4 <= buf.length ? buf.readUInt32LE(offset) : null;
+}
+
+function adtSafeFloat(buf, offset) {
+  return offset >= 0 && offset + 4 <= buf.length ? buf.readFloatLE(offset) : null;
+}
+
+function adtReadString(block, offset) {
+  if (!block || offset == null || offset < 0 || offset >= block.length) return null;
+  const end = block.indexOf(0, offset);
+  return block.slice(offset, end < 0 ? block.length : end).toString('utf8').replace(/\//g, '\\');
+}
+
+function adtParseTopChunks(buf) {
+  const chunks = [];
+  const warnings = [];
+  for (let offset = 0; offset + 8 <= buf.length;) {
+    const rawId = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const type = adtChunkId(rawId);
+    const end = offset + 8 + size;
+    const valid = end <= buf.length;
+    const item = { type, rawType: rawId, offset, size, valid, parsed: false, error: null };
+    if (!valid) {
+      item.error = `Chunk extends beyond file (${end} > ${buf.length})`;
+      warnings.push(`parser bounds error: ${type} at 0x${offset.toString(16)}`);
+      chunks.push(item);
+      break;
+    }
+    chunks.push(item);
+    offset = end;
+  }
+  if (chunks.length && chunks[chunks.length - 1].offset + 8 < buf.length && chunks[chunks.length - 1].valid) {
+    warnings.push('Trailing bytes after top-level chunks');
+  }
+  return { chunks, warnings };
+}
+
+function adtFirstChunk(chunks, type) {
+  return chunks.find(chunk => chunk.type === type && chunk.valid) || null;
+}
+
+function adtChunkData(buf, chunk) {
+  return chunk && chunk.valid ? buf.subarray(chunk.offset + 8, chunk.offset + 8 + chunk.size) : null;
+}
+
+function adtStringList(data) {
+  const result = [];
+  if (!data) return result;
+  let offset = 0;
+  while (offset < data.length) {
+    const end = data.indexOf(0, offset);
+    if (end < 0) {
+      if (offset < data.length) result.push(data.slice(offset).toString('utf8').replace(/\//g, '\\'));
+      break;
+    }
+    if (end > offset) result.push(data.slice(offset, end).toString('utf8').replace(/\//g, '\\'));
+    offset = end + 1;
+  }
+  return result;
+}
+
+function adtNestedChunk(buf, mcnkOffset, relativeOffset, expectedType) {
+  if (!relativeOffset) return null;
+  const offset = mcnkOffset + relativeOffset;
+  if (offset < 0 || offset + 8 > buf.length) return { valid: false, offset, type: expectedType, error: 'Subchunk offset outside file' };
+  const rawId = buf.toString('ascii', offset, offset + 4);
+  const size = buf.readUInt32LE(offset + 4);
+  const type = adtChunkId(rawId);
+  const valid = offset + 8 + size <= buf.length;
+  return { offset, size, type, rawType: rawId, valid, error: valid ? null : 'Subchunk extends beyond file' };
+}
+
+function adtParseDbcMap(buffer) {
+  if (!buffer || buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC') return new Map();
+  const count = buffer.readUInt32LE(4), recordSize = buffer.readUInt32LE(12);
+  const recordsEnd = 20 + count * recordSize;
+  if (!recordSize || recordsEnd > buffer.length) return new Map();
+  const strings = buffer.subarray(recordsEnd);
+  const result = new Map();
+  for (let i = 0; i < count; i++) {
+    const off = 20 + i * recordSize;
+    const id = adtSafeUInt(buffer, off);
+    if (id == null) continue;
+    const mapId = adtSafeUInt(buffer, off + 4);
+    const internal = adtReadString(strings, adtSafeUInt(buffer, off + 4));
+    const display = adtReadString(strings, adtSafeUInt(buffer, off + 20));
+    result.set(id, { id, internalName: internal || display || null, displayName: display || internal || null });
+  }
+  return result;
+}
+
+function adtParseAreaDbc(buffer) {
+  if (!buffer || buffer.length < 20 || buffer.toString('ascii', 0, 4) !== 'WDBC') return new Map();
+  const count = buffer.readUInt32LE(4), recordSize = buffer.readUInt32LE(12);
+  const recordsEnd = 20 + count * recordSize;
+  if (!recordSize || recordsEnd > buffer.length) return new Map();
+  const strings = buffer.subarray(recordsEnd);
+  const result = new Map();
+  for (let i = 0; i < count; i++) {
+    const off = 20 + i * recordSize;
+    const id = adtSafeUInt(buffer, off);
+    if (id == null) continue;
+    result.set(id, {
+      id,
+      mapId: adtSafeUInt(buffer, off + 4),
+      parentAreaId: adtSafeUInt(buffer, off + 8),
+      flags: adtSafeUInt(buffer, off + 16),
+      ambienceId: adtSafeUInt(buffer, off + 28),
+      zoneMusicId: adtSafeUInt(buffer, off + 32),
+      introSound: adtSafeUInt(buffer, off + 36),
+      explorationLevel: adtSafeUInt(buffer, off + 40),
+      factionGroupMask: adtSafeUInt(buffer, off + 112),
+      name: adtReadString(strings, adtSafeUInt(buffer, off + 44)),
+    });
+  }
+  return result;
+}
+
+async function adtReadSourceFile(reader, dataPath, overlayDataPath, internalPath, kind) {
+  const read = async (sourcePath) => {
+    if (!sourcePath) return null;
+    if (kind === 'texture' && reader.readBlpFromMpqs) return reader.readBlpFromMpqs(sourcePath, internalPath);
+    if (kind === 'm2' && reader.readM2FromMpqs) return reader.readM2FromMpqs(sourcePath, internalPath);
+    return reader.readFileFromMpqs ? reader.readFileFromMpqs(sourcePath, internalPath) : null;
+  };
+  return (overlayDataPath ? await read(overlayDataPath) : null) || (dataPath ? await read(dataPath) : null);
+}
+
+function adtAssetPath(value) {
+  return String(value || '').replace(/\//g, '\\').replace(/^\\+/, '');
+}
+
+async function adtResolveSource(config, sourceType, standalonePath, mapName, tileX, tileY, sourceDataPath = '', sourceAreaTablePath = '') {
+  const reader = getMpqReader();
+  const configuredCurrent = String(config?.worldmapMpqPath || '').trim();
+  const currentPath = configuredCurrent && reader.resolveDataPath ? reader.resolveDataPath(configuredCurrent) : null;
+  const label = sourceType === 'compare' ? 'Configured Compare Source' : sourceType === 'standalone' ? 'Standalone ADT File' : 'Configured Current Client';
+
+  if (sourceType === 'standalone') {
+    if (!standalonePath) return { success: false, error: 'No standalone ADT file selected.' };
+    if (!fs.existsSync(standalonePath) || !fs.statSync(standalonePath).isFile()) return { success: false, error: 'Selected ADT file does not exist.' };
+    if (!/\.adt$/i.test(standalonePath)) return { success: false, error: 'Select a file with the .adt extension.' };
+    const dependency = currentPath && reader.isDataPath(currentPath) ? currentPath : null;
+    const sourceInput = String(sourceDataPath || '').trim();
+    const standaloneSource = sourceInput && reader.resolveDataPath ? reader.resolveDataPath(sourceInput) : null;
+    if (sourceInput && (!standaloneSource || !reader.isDataPath(standaloneSource))) return { success: false, error: 'The standalone source Data folder is not a valid WoW client Data path.' };
+    const areaTablePath = String(sourceAreaTablePath || '').trim();
+    if (areaTablePath && (!fs.existsSync(areaTablePath) || !fs.statSync(areaTablePath).isFile())) return { success: false, error: 'The comparison AreaTable.dbc file does not exist.' };
+    return { success: true, sourceType: 'standalone', label, standalonePath, dataPath: standaloneSource || null, overlayDataPath: null, sourceAreaTablePath: areaTablePath || null, dependencyPath: dependency, dependencyStatus: dependency ? 'Configured Current Client' : 'None', sourceDataStatus: standaloneSource ? 'Standalone source Data folder' : 'Not selected' };
+  }
+
+  if (!currentPath || !reader.isDataPath(currentPath)) {
+    return { success: false, error: 'Current Client is Not configured in Settings.' };
+  }
+  if (sourceType === 'compare') {
+    const compareInput = String(config?.worldCheckComparePath || '').trim();
+    if (!compareInput) return { success: false, error: 'Compare Source is Not configured in Settings.' };
+    const compare = reader.resolveLayeredSource ? reader.resolveLayeredSource(currentPath, compareInput) : null;
+    if (!compare?.valid) return { success: false, error: 'Configured Compare Source is not a valid client or patch source.' };
+    return { success: true, sourceType: 'compare', label, dataPath: compare.baseDataPath, overlayDataPath: compare.overlayDataPath, resolvedPath: compare.path, kind: compare.kind, dependencyPath: currentPath, dependencyStatus: 'Configured Current Client' };
+  }
+  return { success: true, sourceType: 'current', label, dataPath: currentPath, overlayDataPath: null, resolvedPath: currentPath, kind: 'client', dependencyPath: currentPath, dependencyStatus: 'Configured Current Client' };
+}
+
+async function adtListMapsForSource(source) {
+  const reader = getMpqReader();
+  const paths = new Set();
+  for (const dataPath of [source.dataPath, source.overlayDataPath].filter(Boolean)) {
+    const list = reader.collectListfilePaths ? await reader.collectListfilePaths(dataPath) : [];
+    for (const value of list) paths.add(value.replace(/\//g, '\\'));
+  }
+  const maps = new Map();
+  for (const value of paths) {
+    const match = value.match(/^World\\Maps\\([^\\]+)\\([^\\]+)_(\d+)_(\d+)\.adt$/i);
+    if (!match || match[1].toLowerCase() !== match[2].toLowerCase()) continue;
+    const key = match[1].toLowerCase();
+    if (!maps.has(key)) maps.set(key, { name: match[1], tiles: [], tileKeys: new Set() });
+    const tile = { x: Number(match[3]), y: Number(match[4]) };
+    const tileKey = `${tile.x}_${tile.y}`;
+    if (!maps.get(key).tileKeys.has(tileKey)) {
+      maps.get(key).tileKeys.add(tileKey);
+      maps.get(key).tiles.push(tile);
+    }
+  }
+  return [...maps.values()].sort((a, b) => a.name.localeCompare(b.name)).map(item => ({ name: item.name, tiles: item.tiles.sort((a, b) => a.y - b.y || a.x - b.x) }));
+}
+
+function adtFilenameCoordinates(filePath) {
+  const name = path.basename(filePath || '');
+  const match = name.match(/^([^_]+)_(\d+)_(\d+)\.adt$/i);
+  return match ? { mapName: match[1], tileX: Number(match[2]), tileY: Number(match[3]) } : { mapName: null, tileX: null, tileY: null };
+}
+
+async function parseAdtInspector(buf, source, mapName, tileX, tileY) {
+  const reader = getMpqReader();
+  const warnings = [];
+  const top = adtParseTopChunks(buf);
+  warnings.push(...top.warnings);
+  const byType = new Map();
+  for (const chunk of top.chunks) if (!byType.has(chunk.type)) byType.set(chunk.type, chunk);
+  const mver = adtChunkData(buf, byType.get('MVER'));
+  const version = mver && mver.length >= 4 ? mver.readUInt32LE(0) : null;
+  if (!byType.has('MVER')) warnings.push('Missing required chunk: MVER');
+  if (!byType.has('MCIN')) warnings.push('Missing required chunk: MCIN');
+  if (!byType.has('MCNK')) warnings.push('Missing required chunk: MCNK');
+
+  const mtex = adtStringList(adtChunkData(buf, byType.get('MTEX')));
+  const mmdx = adtStringList(adtChunkData(buf, byType.get('MMDX')));
+  const mwmo = adtStringList(adtChunkData(buf, byType.get('MWMO')));
+  const mmid = adtChunkData(buf, byType.get('MMID'));
+  const mwid = adtChunkData(buf, byType.get('MWID'));
+  const mddfData = adtChunkData(buf, byType.get('MDDF'));
+  const modfData = adtChunkData(buf, byType.get('MODF'));
+  const m2Placements = [];
+  const wmoPlacements = [];
+  if (mddfData && mddfData.length % 36) warnings.push('parser bounds error: MDDF has a partial record');
+  if (modfData && modfData.length % 64) warnings.push('parser bounds error: MODF has a partial record');
+  if (mddfData) for (let off = 0; off + 36 <= mddfData.length; off += 36) {
+    const nameId = adtSafeUInt(mddfData, off);
+    m2Placements.push({ index: m2Placements.length, nameId, path: null });
+  }
+  // Resolve placement strings from the original null-terminated list rather than reconstructing it.
+  const mmdxBlock = adtChunkData(buf, byType.get('MMDX'));
+  const mwmoBlock = adtChunkData(buf, byType.get('MWMO'));
+  const m2PathsByOffset = new Map();
+  const wmoPathsByOffset = new Map();
+  for (let off = 0; off < (mmdxBlock?.length || 0);) { const value = adtReadString(mmdxBlock, off); if (value == null) break; m2PathsByOffset.set(off, adtAssetPath(value)); off += Buffer.byteLength(value, 'utf8') + 1; }
+  for (let off = 0; off < (mwmoBlock?.length || 0);) { const value = adtReadString(mwmoBlock, off); if (value == null) break; wmoPathsByOffset.set(off, adtAssetPath(value)); off += Buffer.byteLength(value, 'utf8') + 1; }
+  for (const item of m2Placements) item.path = m2PathsByOffset.get(mmid ? adtSafeUInt(mmid, item.nameId * 4) : -1) || null;
+  if (modfData) for (let off = 0; off + 64 <= modfData.length; off += 64) {
+    const nameId = adtSafeUInt(modfData, off);
+    const pathOffset = mwid ? adtSafeUInt(mwid, nameId * 4) : null;
+    wmoPlacements.push({ index: wmoPlacements.length, nameId, path: wmoPathsByOffset.get(pathOffset) || null });
+  }
+
+  const mcinChunk = byType.get('MCIN');
+  const mcinData = adtChunkData(buf, mcinChunk);
+  const mcinDataOffset = mcinChunk ? mcinChunk.offset + 8 : null;
+  const readDependencyDbc = (internalPath) => source.dependencyPath
+    ? Promise.race([
+      adtReadSourceFile(reader, source.dependencyPath, null, internalPath, 'dbc'),
+      new Promise(resolve => setTimeout(() => resolve(null), 3500)),
+    ])
+    : Promise.resolve(null);
+  const readSourceDbc = (internalPath) => source.dataPath
+    ? Promise.race([
+      adtReadSourceFile(reader, source.dataPath, source.overlayDataPath, internalPath, 'dbc'),
+      new Promise(resolve => setTimeout(() => resolve(null), 3500)),
+    ])
+    : Promise.resolve(null);
+  const readSourceAreaTable = source.sourceAreaTablePath
+    ? Promise.race([
+      fs.promises.readFile(source.sourceAreaTablePath),
+      new Promise(resolve => setTimeout(() => resolve(null), 3500)),
+    ])
+    : null;
+  const [sourceAreaBuffer, sourceMapBuffer, targetAreaBuffer, targetMapBuffer] = await Promise.all([
+    readSourceAreaTable || readSourceDbc('DBFilesClient\\AreaTable.dbc'),
+    readSourceDbc('DBFilesClient\\Map.dbc'),
+    readDependencyDbc('DBFilesClient\\AreaTable.dbc'),
+    readDependencyDbc('DBFilesClient\\Map.dbc'),
+  ]);
+  const sourceAreas = adtParseAreaDbc(sourceAreaBuffer);
+  const sourceMaps = adtParseDbcMap(sourceMapBuffer);
+  const targetAreas = adtParseAreaDbc(targetAreaBuffer);
+  const targetMaps = adtParseDbcMap(targetMapBuffer);
+  let expectedMap = null;
+  if (mapName) expectedMap = [...targetMaps.values()].find(row => row.internalName && row.internalName.toLowerCase() === mapName.toLowerCase()) || null;
+  if (source.dataPath && !sourceAreaBuffer) warnings.push('Source AreaTable.dbc unresolved');
+  if (source.dependencyPath && !targetAreaBuffer) warnings.push('Target AreaTable.dbc unresolved from current client');
+  if (source.dependencyPath && !targetMapBuffer) warnings.push('Target Map.dbc unresolved from current client');
+  if (!source.dependencyPath) warnings.push('Dependency source unavailable; names and assets are unresolved');
+
+  const mh2oChunk = byType.get('MH2O');
+  const mh2oData = adtChunkData(buf, mh2oChunk);
+  const waterByIndex = new Map();
+  let waterLayers = 0;
+  if (mh2oData) {
+    if (mh2oData.length < 256 * 32) warnings.push('parser bounds error: MH2O header table is truncated');
+    for (let i = 0; i < Math.min(256, Math.floor(mh2oData.length / 32)); i++) {
+      const layerCount = adtSafeUInt(mh2oData, i * 32 + 4) || 0;
+      if (layerCount) { waterLayers += layerCount; waterByIndex.set(i, layerCount); }
+    }
+  }
+
+  const textureExists = new Map(), m2Exists = new Map(), wmoExists = new Map();
+  const resolveAssets = async (values, kind, output) => {
+    if (!source.dependencyPath) return;
+    const pending = [...new Set(values.filter(Boolean))].slice(0, 96);
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < pending.length) {
+        const value = pending[cursor++], key = value.toLowerCase();
+        if (output.has(key)) continue;
+        try {
+          const raw = await Promise.race([
+            adtReadSourceFile(reader, source.dataPath, source.overlayDataPath, value, kind),
+            new Promise(resolve => setTimeout(() => resolve(null), 2500)),
+          ]);
+          output.set(key, raw == null ? null : !!raw);
+        } catch (_) { output.set(key, false); }
+      }
+    };
+    await Promise.race([
+      Promise.all(Array.from({ length: Math.min(8, pending.length) }, () => worker())),
+      new Promise(resolve => setTimeout(resolve, 3500)),
+    ]);
+  };
+  await resolveAssets(mtex, 'texture', textureExists);
+  await resolveAssets(m2Placements.map(item => item.path), 'm2', m2Exists);
+  await resolveAssets(wmoPlacements.map(item => item.path), 'wmo', wmoExists);
+
+  const grid = [];
+  const areaSummary = new Map();
+  const parseMcnk = (index, entry) => {
+    const ixExpected = index % 16, iyExpected = Math.floor(index / 16);
+    const item = { index, ix: ixExpected, iy: iyExpected, offset: entry?.offset ?? null, size: entry?.size ?? null, valid: false, warnings: ['MCNK missing'], areaId: null, areaName: null, sourceAreaName: null, sourceMapId: null, targetAreaName: null, targetMapId: null, mapId: null, continentId: null, flags: null, position: { x: null, y: null, z: null }, heights: { count: 0, min: null, max: null, average: null, invalid: 0 }, textureLayers: [], doodadRefs: [], wmoRefs: [], water: { present: false, layers: 0 }, subchunks: {}, parsed: false };
+    if (!entry?.offset) return item;
+    if (entry.offset + 8 > buf.length) { item.warnings = ['MCNK offset outside file']; return item; }
+    if (entry.magic !== 'MCNK') { item.warnings = ['MCIN offset invalid']; return item; }
+    const rawChunk = top.chunks.find(chunk => chunk.offset === entry.offset);
+    const chunkSize = rawChunk?.size ?? adtSafeUInt(buf, entry.offset + 4) ?? 0;
+    if (entry.offset + 8 + chunkSize > buf.length) { item.warnings = ['MCNK offset outside file']; return item; }
+    item.valid = true; item.parsed = true; item.size = chunkSize; item.warnings = [];
+    const ds = entry.offset + 8;
+    const flags = adtSafeUInt(buf, ds);
+    const ix = adtSafeUInt(buf, ds + 4), iy = adtSafeUInt(buf, ds + 8);
+    const nLayers = adtSafeUInt(buf, ds + 12) || 0;
+    const nDoodad = adtSafeUInt(buf, ds + 16) || 0;
+    const offsets = { MCVT: adtSafeUInt(buf, ds + 20), MCNR: adtSafeUInt(buf, ds + 24), MCLY: adtSafeUInt(buf, ds + 28), MCRF: adtSafeUInt(buf, ds + 32), MCAL: adtSafeUInt(buf, ds + 36), MCSH: adtSafeUInt(buf, ds + 44) };
+    const sizeAlpha = adtSafeUInt(buf, ds + 40);
+    const areaId = adtSafeUInt(buf, ds + 52), nWmo = adtSafeUInt(buf, ds + 56) || 0;
+    const pos = { x: adtSafeFloat(buf, ds + 104), y: adtSafeFloat(buf, ds + 108), z: adtSafeFloat(buf, ds + 112) };
+    Object.assign(item, { ix: ix ?? ixExpected, iy: iy ?? iyExpected, flags, areaId, position: pos });
+    for (const [name, relative] of Object.entries(offsets)) {
+      if (!relative) continue;
+      const sub = adtNestedChunk(buf, entry.offset, relative, name);
+      item.subchunks[name] = sub ? { offset: sub.offset, relativeOffset: relative, size: sub.size ?? null, valid: sub.valid, type: sub.type, error: sub.error } : null;
+      if (!sub?.valid) item.warnings.push('parser bounds error');
+    }
+    const sourceArea = sourceAreas.get(areaId);
+    const targetArea = targetAreas.get(areaId);
+    if (sourceArea) { item.sourceAreaName = sourceArea.name || null; item.sourceMapId = sourceArea.mapId; }
+    if (targetArea) { item.targetAreaName = targetArea.name || null; item.targetMapId = targetArea.mapId; item.mapId = targetArea.mapId; item.continentId = targetArea.mapId; if (expectedMap?.id != null && targetArea.mapId !== expectedMap.id) item.warnings.push('target area belongs to another map'); }
+    if (!sourceArea && !targetArea && areaId != null) item.warnings.push('area ID does not exist in source or target AreaTable');
+    const mcvt = adtNestedChunk(buf, entry.offset, offsets.MCVT, 'MCVT');
+    if (mcvt?.valid && mcvt.size >= 580) {
+      const values = []; let invalid = 0;
+      for (let h = 0; h < 145; h++) { const value = adtSafeFloat(buf, mcvt.offset + 8 + h * 4); if (Number.isFinite(value)) values.push(value + (pos.z || 0)); else invalid++; }
+      const min = values.length ? Math.min(...values) : null, max = values.length ? Math.max(...values) : null;
+      item.heights = { count: 145, min, max, average: values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null, invalid };
+    } else if (offsets.MCVT) item.warnings.push('parser bounds error: MCVT');
+    const mcly = adtNestedChunk(buf, entry.offset, offsets.MCLY, 'MCLY');
+    if (mcly?.valid) {
+      const dataStart = mcly.offset + 8, available = Math.floor(mcly.size / 16);
+      for (let layer = 0; layer < Math.min(nLayers, available, 4); layer++) {
+        const lp = dataStart + layer * 16, textureIdx = adtSafeUInt(buf, lp), layerFlags = adtSafeUInt(buf, lp + 4);
+        const row = { index: layer, textureIdx, path: textureIdx != null ? (mtex[textureIdx] || null) : null, exists: textureIdx != null && textureExists.has((mtex[textureIdx] || '').toLowerCase()) ? textureExists.get(mtex[textureIdx].toLowerCase()) : null, alphaAvailable: layer > 0 && !!(layerFlags & 0x100), flags: layerFlags };
+        item.textureLayers.push(row);
+        if (textureIdx == null || !mtex[textureIdx]) item.warnings.push('missing texture reference');
+        else if (source.dependencyPath && textureExists.get(mtex[textureIdx].toLowerCase()) === false) item.warnings.push('missing texture reference');
+      }
+      if (nLayers > available) item.warnings.push('parser bounds error: MCLY');
+    } else if (nLayers) item.warnings.push('parser bounds error: MCLY');
+    const mcrf = adtNestedChunk(buf, entry.offset, offsets.MCRF, 'MCRF');
+    if (mcrf?.valid) {
+      const refs = []; for (let r = 0; r + 4 <= mcrf.size; r += 4) refs.push(adtSafeUInt(buf, mcrf.offset + 8 + r));
+      item.doodadRefs = refs.slice(0, nDoodad).map(ref => ({ index: ref, ...(m2Placements[ref] || { path: null, exists: null }), exists: m2Placements[ref]?.path ? m2Exists.get(m2Placements[ref].path.toLowerCase()) : null }));
+      item.wmoRefs = refs.slice(nDoodad, nDoodad + nWmo).map(ref => ({ index: ref, ...(wmoPlacements[ref] || { path: null, exists: null }), exists: wmoPlacements[ref]?.path ? wmoExists.get(wmoPlacements[ref].path.toLowerCase()) : null }));
+      if (item.doodadRefs.some(ref => !ref.path || (source.dependencyPath && ref.exists === false))) item.warnings.push('missing M2 reference');
+      if (item.wmoRefs.some(ref => !ref.path || (source.dependencyPath && ref.exists === false))) item.warnings.push('missing WMO reference');
+    } else if (nDoodad || nWmo) item.warnings.push('parser bounds error: MCRF');
+    item.water = { present: !!waterByIndex.get(index), layers: waterByIndex.get(index) || 0 };
+    item.warnings = [...new Set(item.warnings)];
+    if (item.areaId != null) { const summary = areaSummary.get(item.areaId) || { areaId: item.areaId, areaName: item.sourceAreaName, sourceAreaName: item.sourceAreaName, sourceMapId: item.sourceMapId, targetAreaName: item.targetAreaName, targetMapId: item.targetMapId, count: 0, warnings: new Set() }; summary.count++; item.warnings.forEach(warning => summary.warnings.add(warning)); areaSummary.set(item.areaId, summary); }
+    return item;
+  };
+
+  for (let index = 0; index < 256; index++) {
+    const entryOffset = mcinDataOffset != null && index * 16 + 16 <= (mcinData?.length || 0) ? mcinDataOffset + index * 16 : null;
+    const entry = entryOffset == null ? null : { offset: adtSafeUInt(buf, entryOffset), size: adtSafeUInt(buf, entryOffset + 4), flags: adtSafeUInt(buf, entryOffset + 8), magic: null };
+    if (entry?.offset && entry.offset + 4 <= buf.length) entry.magic = adtChunkId(buf.toString('ascii', entry.offset, entry.offset + 4));
+    const chunk = parseMcnk(index, entry);
+    if (entry?.offset && entry.size && entry.offset + 8 <= buf.length && entry.size !== adtSafeUInt(buf, entry.offset + 4)) chunk.warnings.push('MCIN offset invalid');
+    grid.push(chunk);
+  }
+  if (!mcinData || mcinData.length < 256 * 16) warnings.push('MCIN is missing or truncated; MCNK grid is incomplete');
+  const topKnown = new Set(top.chunks.map(chunk => chunk.type));
+  for (const chunk of top.chunks) { if (!ADT_INSPECTOR_CHUNKS.has(chunk.type)) { chunk.error = chunk.error || 'Unsupported or unknown chunk'; warnings.push(`unsupported or unknown chunk: ${chunk.type}`); } else if (chunk.type !== 'MCNK') chunk.parsed = ['MVER', 'MHDR', 'MCIN', 'MTEX', 'MMDX', 'MMID', 'MWMO', 'MWID', 'MDDF', 'MODF', 'MH2O'].includes(chunk.type); }
+  const required = ['MVER', 'MCIN', 'MCNK'];
+  const missingRequired = required.filter(type => !topKnown.has(type));
+  const detectedType = topKnown.has('MCNK') ? (topKnown.has('MH2O') ? 'ADT terrain + water' : 'ADT terrain') : topKnown.has('MODF') ? 'ADT object/root variant' : 'Unknown or malformed ADT';
+  const allWarnings = [...new Set([...warnings, ...grid.flatMap(item => item.warnings)])];
+  const sourceAreaChoicesById = new Map();
+  for (const area of sourceAreas.values()) sourceAreaChoicesById.set(area.id, { id: area.id, name: area.name || null, mapId: area.mapId ?? null, parentAreaId: area.parentAreaId ?? null });
+  const targetAreaChoicesById = new Map();
+  for (const area of targetAreas.values()) {
+    if (expectedMap?.id != null && area.mapId !== expectedMap.id) continue;
+    targetAreaChoicesById.set(area.id, { id: area.id, name: area.name || null, mapId: area.mapId ?? null, parentAreaId: area.parentAreaId ?? null, flags: area.flags ?? 0, ambienceId: area.ambienceId ?? 0, zoneMusicId: area.zoneMusicId ?? 0, introSound: area.introSound ?? 0, explorationLevel: area.explorationLevel ?? 0, factionGroupMask: area.factionGroupMask ?? 0 });
+  }
+  for (const chunk of grid) {
+    if (chunk.areaId == null) continue;
+    if (!sourceAreaChoicesById.has(chunk.areaId)) sourceAreaChoicesById.set(chunk.areaId, { id: chunk.areaId, name: chunk.sourceAreaName || null, mapId: chunk.sourceMapId ?? null, parentAreaId: null });
+  }
+  return {
+    success: true,
+    source: { type: source.sourceType, label: source.label, path: source.resolvedPath || source.standalonePath || null, dependency: source.dependencyStatus, kind: source.kind || null },
+    file: { name: source.standalonePath ? path.basename(source.standalonePath) : `${mapName}_${tileX}_${tileY}.adt`, relativePath: source.standalonePath ? path.basename(source.standalonePath) : `World\\Maps\\${mapName}\\${mapName}_${tileX}_${tileY}.adt`, bytes: buf.length, sha256: hashBuffer(buf) },
+    coordinates: { mapName: mapName || null, tileX: tileX ?? null, tileY: tileY ?? null },
+    overview: { version, detectedType, topChunks: top.chunks, missingRequired, warnings: allWarnings, readStatus: allWarnings.length ? 'Read with warnings' : 'Read successfully' },
+    textures: mtex.map((texturePath, index) => ({ index, path: texturePath, exists: textureExists.has(texturePath.toLowerCase()) ? textureExists.get(texturePath.toLowerCase()) : null })),
+    objects: { m2: m2Placements.map(item => ({ ...item, exists: item.path ? m2Exists.get(item.path.toLowerCase()) : null })), wmo: wmoPlacements.map(item => ({ ...item, exists: item.path ? wmoExists.get(item.path.toLowerCase()) : null })) },
+    chunks: grid,
+    areaSummary: [...areaSummary.values()].map(item => ({ areaId: item.areaId, areaName: item.sourceAreaName || item.areaName || null, sourceAreaName: item.sourceAreaName || null, sourceMapId: item.sourceMapId ?? null, targetAreaName: item.targetAreaName || null, targetMapId: item.targetMapId ?? null, mapId: item.targetMapId ?? item.mapId ?? null, chunkCount: item.count, status: item.warnings.size ? 'Warnings' : 'OK', warnings: [...item.warnings] })).sort((a, b) => a.areaId - b.areaId),
+    sourceAreaChoices: [...sourceAreaChoicesById.values()].sort((a, b) => a.id - b.id),
+    targetAreaChoices: [...targetAreaChoicesById.values()].sort((a, b) => a.id - b.id),
+    water: { present: !!mh2oChunk, layers: waterLayers, liquidTypes: [], warnings: mh2oChunk ? ['Liquid type decoding is not included until the MH2O instance layout is verified.'] : [] },
+  };
+}
+
+ipcMain.handle('adt:listMaps', async (_, { sourceType = 'current' } = {}) => {
+  try {
+    const cfgPath = getConfigPath();
+    const config = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
+    const source = await adtResolveSource(config, sourceType);
+    if (!source.success) return source;
+    if (sourceType === 'standalone') return { success: true, data: [] };
+    return { success: true, data: await adtListMapsForSource(source) };
+  } catch (e) { return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('adt:inspect', async (_, { sourceType = 'current', standalonePath = '', sourceDataPath = '', sourceAreaTablePath = '', mapName = '', tileX = null, tileY = null } = {}) => {
+  try {
+    const cfgPath = getConfigPath();
+    const config = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
+    const source = await adtResolveSource(config, sourceType, standalonePath, mapName, tileX, tileY, sourceDataPath, sourceAreaTablePath);
+    if (!source.success) return source;
+    let resolvedMap = mapName || null, resolvedX = Number.isInteger(Number(tileX)) ? Number(tileX) : null, resolvedY = Number.isInteger(Number(tileY)) ? Number(tileY) : null, buf = null;
+    if (sourceType === 'standalone') {
+      const coords = adtFilenameCoordinates(standalonePath);
+      resolvedMap = coords.mapName; resolvedX = coords.tileX; resolvedY = coords.tileY;
+      buf = fs.readFileSync(standalonePath);
+    } else {
+      if (!resolvedMap || resolvedX == null || resolvedY == null) return { success: false, error: 'Select a map and numeric tile X/Y.' };
+      buf = await (source.overlayDataPath ? getMpqReader().readAdtBufferLayered(source.dataPath, source.overlayDataPath, resolvedMap, resolvedX, resolvedY) : getMpqReader().readAdtBuffer(source.dataPath, resolvedMap, resolvedX, resolvedY));
+    }
+    if (!buf) return { success: false, error: `ADT not found: ${resolvedMap || 'Unknown'}_${resolvedX ?? 'Unknown'}_${resolvedY ?? 'Unknown'}.adt` };
+    const inspected = await parseAdtInspector(buf, source, resolvedMap, resolvedX, resolvedY);
+    // Electron's structured clone rejects accidental Buffer/typed-array values. The inspector
+    // response is intentionally JSON-shaped so malformed/variant ADTs cannot break the IPC call.
+    return adtIpcSafe(inspected);
+  } catch (e) { console.error('adt:inspect error:', e); return { success: false, error: e.message }; }
+});
+
+function adtSafeOutputSegment(value, fallback = 'unknown') {
+  const normalized = String(value || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\.\./g, '_').trim();
+  return normalized || fallback;
+}
+
+function adtIpcSafe(value, seen = new WeakSet()) {
+  if (value == null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'bigint') return Number(value);
+  if (Buffer.isBuffer(value)) return Array.from(value);
+  if (Array.isArray(value)) return value.map(item => adtIpcSafe(item, seen));
+  if (typeof value !== 'object') return String(value);
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  const plain = {};
+  for (const [key, item] of Object.entries(value)) {
+    try { plain[key] = adtIpcSafe(item, seen); } catch { plain[key] = null; }
+  }
+  seen.delete(value);
+  return plain;
+}
+
+ipcMain.handle('adt:stageAreaIds', async (_, { sourceType = 'current', standalonePath = '', mapName = '', tileX = null, tileY = null, fromAreaId, toAreaId } = {}) => {
+  try {
+    const from = Number(fromAreaId), to = Number(toAreaId);
+    if (!Number.isInteger(from) || from < 0 || !Number.isInteger(to) || to < 0) return { success: false, error: 'Area IDs must be non-negative integers.' };
+    const cfgPath = getConfigPath();
+    const config = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
+    const source = await adtResolveSource(config, sourceType, standalonePath, mapName, tileX, tileY);
+    if (!source.success) return source;
+    let resolvedMap = mapName || null, resolvedX = Number.isInteger(Number(tileX)) ? Number(tileX) : null, resolvedY = Number.isInteger(Number(tileY)) ? Number(tileY) : null, buf = null;
+    if (sourceType === 'standalone') {
+      const coords = adtFilenameCoordinates(standalonePath);
+      resolvedMap = coords.mapName; resolvedX = coords.tileX; resolvedY = coords.tileY;
+      buf = fs.readFileSync(standalonePath);
+    } else {
+      if (!resolvedMap || resolvedX == null || resolvedY == null) return { success: false, error: 'Select a map and tile before staging an AreaID change.' };
+      buf = await (source.overlayDataPath ? getMpqReader().readAdtBufferLayered(source.dataPath, source.overlayDataPath, resolvedMap, resolvedX, resolvedY) : getMpqReader().readAdtBuffer(source.dataPath, resolvedMap, resolvedX, resolvedY));
+    }
+    if (!buf) return { success: false, error: 'The selected ADT could not be read.' };
+    const staged = Buffer.from(buf);
+    const top = adtParseTopChunks(staged);
+    const mcin = adtFirstChunk(top.chunks, 'MCIN');
+    const mcinData = adtChunkData(staged, mcin);
+    const changed = [];
+    for (let index = 0; index < 256; index++) {
+      const entryOffset = mcin && index * 16 + 16 <= mcinData.length ? mcin.offset + 8 + index * 16 : null;
+      const mcnkOffset = entryOffset == null ? null : adtSafeUInt(staged, entryOffset);
+      const areaOffset = mcnkOffset != null ? mcnkOffset + 8 + 52 : null;
+      if (areaOffset == null || areaOffset + 4 > staged.length || adtChunkId(staged.toString('ascii', mcnkOffset, mcnkOffset + 4)) !== 'MCNK') continue;
+      if (adtSafeUInt(staged, areaOffset) !== from) continue;
+      staged.writeUInt32LE(to, areaOffset);
+      changed.push(index);
+    }
+    if (!changed.length) return { success: true, changed: 0, fromAreaId: from, toAreaId: to, message: `No MCNK chunks with AreaID ${from} were found.` };
+    const fileName = source.standalonePath ? path.basename(source.standalonePath) : `${resolvedMap}_${resolvedX}_${resolvedY}.adt`;
+    const outputRoot = path.join(getUiOutputRoot(), 'adt-staging');
+    const outputDir = resolvedMap ? path.join(outputRoot, 'World', 'Maps', adtSafeOutputSegment(resolvedMap)) : path.join(outputRoot, 'Standalone');
+    fs.mkdirSync(outputDir, { recursive: true });
+    const outputPath = path.join(outputDir, adtSafeOutputSegment(fileName, 'staged.adt'));
+    fs.writeFileSync(outputPath, staged);
+    return { success: true, changed: changed.length, indices: changed, fromAreaId: from, toAreaId: to, outputPath, sourcePath: source.standalonePath || source.resolvedPath || null, message: `Staged ${changed.length} MCNK AreaID change(s). Source was not modified.` };
+  } catch (e) { console.error('adt:stageAreaIds error:', e); return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('adt:stageAreaTableArea', async (_, { newAreaId = null, name = '', templateAreaId = 14, mapId = null, parentAreaId = null, flags = null, ambienceId = null, zoneMusicId = null, introSound = null, explorationLevel = null, factionGroupMask = null } = {}) => {
+  try {
+    const areaName = String(name || '').trim();
+    if (!areaName) return { success: false, error: 'Enter a name for the new area.' };
+    const templateId = Number(templateAreaId);
+    if (!Number.isInteger(templateId) || templateId < 0) return { success: false, error: 'Select a valid target area template.' };
+    const cfgPath = getConfigPath();
+    const config = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
+    const reader = getMpqReader();
+    const configuredCurrent = String(config?.worldmapMpqPath || '').trim();
+    const currentPath = configuredCurrent && reader.resolveDataPath ? reader.resolveDataPath(configuredCurrent) : null;
+    if (!currentPath || !reader.isDataPath(currentPath)) return { success: false, error: 'Current client is not configured.' };
+    const raw = await reader.readFileFromMpqs(currentPath, 'DBFilesClient\\AreaTable.dbc');
+    if (!raw || raw.toString('ascii', 0, 4) !== 'WDBC') return { success: false, error: 'AreaTable.dbc could not be read from the current client.' };
+    const dbc = parseDbc(raw);
+    const template = dbc.records.find(row => Number(row[0]) === templateId);
+    if (!template) return { success: false, error: `Target AreaTable template ${templateId} was not found.` };
+    const usedIds = new Set(dbc.records.map(row => Number(row[0])));
+    let id = newAreaId === '' || newAreaId == null ? Math.max(...usedIds, 0) + 1 : Number(newAreaId);
+    if (!Number.isInteger(id) || id < 1) return { success: false, error: 'New AreaID must be a positive integer.' };
+    if (usedIds.has(id)) return { success: false, error: `AreaID ${id} already exists in the current client.` };
+    const usedAreaBits = new Set(dbc.records.map(row => Number(row[3])));
+    let areaBit = Math.max(...usedAreaBits, 0) + 1;
+    while (usedAreaBits.has(areaBit)) areaBit++;
+    const strings = createDbcStringAppender(dbc.stringBlock);
+    const row = template.slice();
+    row[0] = id;
+    row[1] = mapId == null || mapId === '' ? row[1] : Number(mapId);
+    row[2] = parentAreaId == null || parentAreaId === '' ? row[2] : Number(parentAreaId);
+    row[3] = areaBit;
+    const overrides = [[4, flags], [7, ambienceId], [8, zoneMusicId], [9, introSound], [10, explorationLevel], [28, factionGroupMask]];
+    for (const [index, value] of overrides) if (value !== null && value !== '') {
+      const nextValue = Number(value);
+      if (!Number.isInteger(nextValue) || nextValue < 0) return { success: false, error: `AreaTable field ${index} must be a non-negative integer.` };
+      row[index] = nextValue;
+    }
+    row[11] = strings.append(areaName);
+    const rows = [...dbc.records, row].sort((a, b) => Number(a[0]) - Number(b[0]));
+    const next = rebuildDbcBuffer(raw, rows, strings.build());
+    const outputPath = path.join(getUiOutputRoot(), 'adt-staging', 'DBFilesClient', 'AreaTable.dbc');
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.writeFileSync(outputPath, next);
+    return { success: true, areaId: id, areaBit, name: areaName, templateAreaId: templateId, outputPath, message: `Staged AreaTable entry ${id} · ${areaName}. Source client was not modified.` };
+  } catch (e) { console.error('adt:stageAreaTableArea error:', e); return { success: false, error: e.message }; }
+});
+
+function adtPathInside(root, candidate) {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+}
+
+ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', standalonePath = '', mapName = '', tileX = null, tileY = null, stagedAdtPath = '', areaTablePath = '', selectedArtifacts = {}, buildPlan = {} } = {}) => {
+  try {
+    const artifacts = {
+      adt: selectedArtifacts.adt !== false,
+      areaTable: selectedArtifacts.areaTable === true,
+    };
+    const outputs = {
+      map: buildPlan.map === true,
+      vmap: buildPlan.vmap === true,
+      mmap: buildPlan.mmap === true,
+    };
+    if (!artifacts.adt) return { success: false, error: 'The ADT tile is required for a server tile staging job.' };
+    if (artifacts.areaTable && !areaTablePath) return { success: false, error: 'AreaTable.dbc is selected, but no staged AreaTable.dbc exists yet.' };
+    const cfgPath = getConfigPath();
+    const config = fs.existsSync(cfgPath) ? JSON.parse(fs.readFileSync(cfgPath, 'utf8')) : {};
+    const source = await adtResolveSource(config, sourceType, standalonePath, mapName, tileX, tileY);
+    if (!source.success) return source;
+
+    let resolvedMap = mapName || null;
+    let resolvedX = Number.isInteger(Number(tileX)) ? Number(tileX) : null;
+    let resolvedY = Number.isInteger(Number(tileY)) ? Number(tileY) : null;
+    if (sourceType === 'standalone') {
+      const coords = adtFilenameCoordinates(standalonePath);
+      resolvedMap = coords.mapName;
+      resolvedX = coords.tileX;
+      resolvedY = coords.tileY;
+    }
+    if (!resolvedMap || !Number.isInteger(resolvedX) || !Number.isInteger(resolvedY)) return { success: false, error: 'A map and numeric tile coordinates are required.' };
+
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    let adtBuffer;
+    let inputPath = source.standalonePath || source.resolvedPath || null;
+    if (stagedAdtPath) {
+      const candidate = path.resolve(stagedAdtPath);
+      if (!adtPathInside(uiOutputRoot, candidate) || !fs.existsSync(candidate)) return { success: false, error: 'The staged ADT path is invalid or outside the editor output.' };
+      adtBuffer = fs.readFileSync(candidate);
+      inputPath = candidate;
+    } else if (sourceType === 'standalone') {
+      adtBuffer = fs.readFileSync(standalonePath);
+    } else {
+      if (source.overlayDataPath) adtBuffer = await getMpqReader().readAdtBufferLayered(source.dataPath, source.overlayDataPath, resolvedMap, resolvedX, resolvedY);
+      else adtBuffer = await getMpqReader().readAdtBuffer(source.dataPath, resolvedMap, resolvedX, resolvedY);
+    }
+    if (!adtBuffer || adtBuffer.length < 8) return { success: false, error: 'The selected ADT could not be read.' };
+
+    const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
+    const jobId = `${stamp}-${adtSafeOutputSegment(resolvedMap)}-${resolvedX}-${resolvedY}`;
+    const jobRoot = path.join(uiOutputRoot, 'server-build', jobId);
+    const mapFolder = adtSafeOutputSegment(resolvedMap);
+    const overlayRoot = path.join(jobRoot, 'client-overlay');
+    const overlayAdtPath = path.join(overlayRoot, 'World', 'Maps', mapFolder, `${mapFolder}_${resolvedX}_${resolvedY}.adt`);
+    fs.mkdirSync(path.dirname(overlayAdtPath), { recursive: true });
+    fs.writeFileSync(overlayAdtPath, adtBuffer);
+
+    let overlayAreaTablePath = null;
+    let areaTableBuffer = null;
+    let areaTableSource = null;
+    if (artifacts.areaTable) {
+      if (areaTablePath) {
+        const candidate = path.resolve(areaTablePath);
+        if (!adtPathInside(uiOutputRoot, candidate) || !fs.existsSync(candidate)) return { success: false, error: 'The staged AreaTable path is invalid or outside the editor output.' };
+        areaTableBuffer = fs.readFileSync(candidate);
+        areaTableSource = candidate;
+      } else {
+        const areaTableDataPath = source.dataPath || source.dependencyPath || null;
+        if (!areaTableDataPath) return { success: false, error: 'AreaTable.dbc is selected, but no Current Client source is available.' };
+        const reader = getMpqReader();
+        for (const internalPath of ['DBFilesClient\\AreaTable.dbc', 'AreaTable.dbc']) {
+          areaTableBuffer = await reader.readFileFromMpqs(areaTableDataPath, internalPath);
+          if (areaTableBuffer) { areaTableSource = `${areaTableDataPath}:${internalPath}`; break; }
+        }
+        if (!areaTableBuffer) return { success: false, error: 'AreaTable.dbc could not be read from the Current Client.' };
+      }
+      overlayAreaTablePath = path.join(overlayRoot, 'DBFilesClient', 'AreaTable.dbc');
+      fs.mkdirSync(path.dirname(overlayAreaTablePath), { recursive: true });
+      fs.writeFileSync(overlayAreaTablePath, areaTableBuffer);
+    }
+
+    const manifest = {
+      schemaVersion: 2,
+      status: 'staged',
+      createdAt: new Date().toISOString(),
+      map: { name: resolvedMap, id: mapIdForName(resolvedMap) ?? null },
+      tile: { x: resolvedX, y: resolvedY },
+      source: { type: sourceType, inputPath },
+      overlay: {
+        adt: path.relative(jobRoot, overlayAdtPath).replace(/\\/g, '\\'),
+        areaTable: overlayAreaTablePath ? path.relative(jobRoot, overlayAreaTablePath).replace(/\\/g, '\\') : null,
+      },
+      selectedArtifacts: artifacts,
+      buildPlan: outputs,
+      files: { adtBytes: adtBuffer.length, adtSha256: hashBuffer(adtBuffer), areaTableBytes: areaTableBuffer?.length || null, areaTableSha256: areaTableBuffer ? hashBuffer(areaTableBuffer) : null, areaTableSource },
+      extractors: { map: outputs.map ? 'planned' : 'not selected', vmap: outputs.vmap ? 'planned' : 'not selected', mmap: outputs.mmap ? 'planned' : 'not selected' },
+      note: 'Safe staging only. No client or server source files were modified.'
+    };
+    const manifestPath = path.join(jobRoot, 'manifest.json');
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    return { success: true, jobId, jobRoot, overlayAdtPath, overlayAreaTablePath, manifestPath, selectedArtifacts: artifacts, buildPlan: outputs, message: `Prepared server-data staging for ${resolvedMap} ${resolvedX},${resolvedY}. ${Object.values(artifacts).filter(Boolean).length} client item(s) selected; no extractor was run.` };
+  } catch (e) { console.error('adt:prepareServerTile error:', e); return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('adt:runMapExtractor', async (_, { jobRoot = '' } = {}) => {
+  try {
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const resolvedJobRoot = path.resolve(jobRoot);
+    const serverBuildRoot = path.join(uiOutputRoot, 'server-build');
+    if (!adtPathInside(serverBuildRoot, resolvedJobRoot) || resolvedJobRoot === serverBuildRoot) return { success: false, error: 'The server-build job path is invalid.' };
+    const manifestPath = path.join(resolvedJobRoot, 'manifest.json');
+    if (!fs.existsSync(manifestPath)) return { success: false, error: 'The staging manifest was not found. Prepare the server tile first.' };
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    if (manifest.buildPlan?.map === false) return { success: false, error: 'The .map output is not selected in this staging job.' };
+    const relativeAdt = String(manifest.overlay?.adt || '').replace(/[\\/]+/g, path.sep);
+    const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
+    if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) return { success: false, error: 'The staged ADT is missing from the job overlay.' };
+    const result = extractAdtMapTile({ adtPath, outputRoot: path.join(resolvedJobRoot, 'server-output'), mapName: manifest.map?.name, mapId: manifest.map?.id, tileX: Number(manifest.tile?.x), tileY: Number(manifest.tile?.y) });
+    manifest.status = 'map-generated';
+    manifest.extractors = { ...(manifest.extractors || {}), map: 'generated' };
+    manifest.outputs = { ...(manifest.outputs || {}), map: { path: path.relative(resolvedJobRoot, result.outputPath).replace(/\\/g, '\\'), bytes: result.bytes, sha256: result.sha256, warnings: result.warnings } };
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    return { success: true, ...result, manifestPath, message: `Generated .map for ${manifest.map?.name} ${manifest.tile?.x},${manifest.tile?.y}. Output: ${result.outputPath}` };
+  } catch (e) { console.error('adt:runMapExtractor error:', e); return { success: false, error: e.message }; }
+});
+
+function adtServerDataPaths(config) {
+  const configuredMapsPath = String(config?.mapsPath || '').trim();
+  if (!configuredMapsPath) return { error: 'Configure the AzerothCore maps path in Settings first.' };
+  const mapsPath = path.resolve(configuredMapsPath);
+  if (path.basename(mapsPath).toLowerCase() !== 'maps') return { error: 'The configured maps path must point to the server data\\maps folder.' };
+  const dataRoot = path.dirname(mapsPath);
+  const toolRoot = config?.serverPaths?.worldExe && fs.existsSync(config.serverPaths.worldExe)
+    ? path.dirname(config.serverPaths.worldExe)
+    : path.dirname(dataRoot);
+  return { mapsPath, vmapsPath: path.join(dataRoot, 'vmaps'), mmapsPath: path.join(dataRoot, 'mmaps'), dataRoot, toolRoot };
+}
+
+function adtManifestPath(jobRoot) {
+  return path.join(jobRoot, 'manifest.json');
+}
+
+function loadAdtBuildManifest(jobRoot, uiOutputRoot) {
+  const serverBuildRoot = path.join(uiOutputRoot, 'server-build');
+  const resolvedJobRoot = path.resolve(jobRoot);
+  if (!adtPathInside(serverBuildRoot, resolvedJobRoot) || resolvedJobRoot === serverBuildRoot) throw new Error('The server-build job path is invalid.');
+  const manifestPath = adtManifestPath(resolvedJobRoot);
+  if (!fs.existsSync(manifestPath)) throw new Error('The staging manifest was not found. Prepare the server tile first.');
+  return { resolvedJobRoot, manifestPath, manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
+}
+
+function stagedAdtFromManifest(resolvedJobRoot, manifest) {
+  const relativeAdt = String(manifest.overlay?.adt || '').replace(/[\\/]+/g, path.sep);
+  const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
+  if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) throw new Error('The staged ADT is missing from the job overlay.');
+  return adtPath;
+}
+
+ipcMain.handle('adt:inspectVmapDependencies', async (_, { jobRoot = '' } = {}) => {
+  try {
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const { resolvedJobRoot, manifestPath, manifest } = loadAdtBuildManifest(jobRoot, uiOutputRoot);
+    const configPath = getConfigPath();
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    const server = adtServerDataPaths(config);
+    if (server.error) return { success: false, error: server.error };
+    if (!fs.existsSync(server.vmapsPath)) return { success: false, error: `Server vmaps directory not found: ${server.vmapsPath}` };
+    const mapId = Number.isInteger(Number(manifest.map?.id)) ? Number(manifest.map.id) : mapIdForName(manifest.map?.name);
+    const adtPath = stagedAdtFromManifest(resolvedJobRoot, manifest);
+    const result = inspectVmapDependencies({ adtPath, serverVmapsPath: server.vmapsPath, mapId, tileX: Number(manifest.tile?.x), tileY: Number(manifest.tile?.y) });
+    manifest.extractors = { ...(manifest.extractors || {}), vmap: 'dependencies-inspected' };
+    manifest.vmapDependencies = result;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    return { success: true, ...result, manifestPath, message: result.message };
+  } catch (e) { console.error('adt:inspectVmapDependencies error:', e); return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('adt:runMmapExtractor', async (_, { jobRoot = '' } = {}) => {
+  try {
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const { resolvedJobRoot, manifestPath, manifest } = loadAdtBuildManifest(jobRoot, uiOutputRoot);
+    if (manifest.buildPlan?.mmap === false) return { success: false, error: 'The MMAP output is not selected in this staging job.' };
+    const configPath = getConfigPath();
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    const server = adtServerDataPaths(config);
+    if (server.error) return { success: false, error: server.error };
+    const mapId = Number.isInteger(Number(manifest.map?.id)) ? Number(manifest.map.id) : mapIdForName(manifest.map?.name);
+    const tileX = Number(manifest.tile?.x), tileY = Number(manifest.tile?.y);
+    const mapRelative = String(manifest.outputs?.map?.path || '').replace(/[\\/]+/g, path.sep);
+    const mapOutputPath = path.resolve(resolvedJobRoot, mapRelative || path.join('server-output', 'maps', mapFileName(mapId, tileX, tileY)));
+    if (!adtPathInside(resolvedJobRoot, mapOutputPath) || !fs.existsSync(mapOutputPath)) return { success: false, error: 'Generate the staged .map before generating MMAP.' };
+    const result = await runTargetMmap({ jobRoot: resolvedJobRoot, serverMapsPath: server.mapsPath, serverVmapsPath: server.vmapsPath, toolRoot: server.toolRoot, mapId, tileX, tileY, mapOutputPath, configPath: path.join(server.toolRoot, 'mmaps-config.yaml') });
+    const outputs = { ...(manifest.outputs || {}), mmap: { path: path.relative(resolvedJobRoot, result.outputTile).replace(/\\/g, '\\'), bytes: result.bytes } };
+    if (result.outputMmap) outputs.mmapRoot = { path: path.relative(resolvedJobRoot, result.outputMmap).replace(/\\/g, '\\'), bytes: fs.statSync(result.outputMmap).size };
+    manifest.status = 'mmap-generated';
+    manifest.extractors = { ...(manifest.extractors || {}), mmap: 'generated' };
+    manifest.outputs = outputs;
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    return { success: true, ...result, manifestPath, message: `Generated MMAP for ${manifest.map?.name} ${tileX},${tileY}. Output: ${result.outputTile}` };
+  } catch (e) { console.error('adt:runMmapExtractor error:', e); return { success: false, error: e.message }; }
+});
+
 function parseAdt(buf) {
   let offset = 0;
   let mcinData = -1;
@@ -3992,6 +4778,520 @@ ipcMain.handle('adt:getWdl', async (_, { mapName }) => {
 });
 
 const minimapTexCache = new Map(); // `${dataPath}|${mapName}|${tileX}|${tileY}` ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ dataURL
+
+function parseWorldCheckAreas(buf) {
+  if (!buf) return { counts: {}, totalChunks: 0 };
+  let mcinData = -1;
+  for (let offset = 0; offset + 8 <= buf.length;) {
+    const magic = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    if (magic === 'NICM') { mcinData = offset + 8; break; }
+    if (!size) break;
+    offset += 8 + size;
+  }
+  if (mcinData < 0) return { counts: {}, totalChunks: 0 };
+
+  const counts = {};
+  let totalChunks = 0;
+  for (let i = 0; i < 256; i++) {
+    const mcnkOffset = buf.readUInt32LE(mcinData + i * 16);
+    if (!mcnkOffset || mcnkOffset + 8 > buf.length || buf.toString('ascii', mcnkOffset, mcnkOffset + 4) !== 'KNCM') continue;
+    const areaIdOffset = mcnkOffset + 8 + 52;
+    if (areaIdOffset + 4 > buf.length) continue;
+    const areaId = buf.readUInt32LE(areaIdOffset);
+    counts[areaId] = (counts[areaId] || 0) + 1;
+    totalChunks++;
+  }
+  return { counts, totalChunks };
+}
+
+function hashBuffer(buf) {
+  return buf ? crypto.createHash('sha256').update(buf).digest('hex') : null;
+}
+
+function worldCheckTile(tileX, tileY) {
+  return { tileX, tileY, fileName: `Kalimdor_${tileY}_${tileX}.adt` };
+}
+
+function worldCheckChunkMap(buf) {
+  const chunks = new Map();
+  if (!buf) return chunks;
+  for (let offset = 0; offset + 8 <= buf.length;) {
+    const id = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    if (offset + 8 + size > buf.length) break;
+    chunks.set(id, { data: offset + 8, size });
+    if (!size) break;
+    offset += 8 + size;
+  }
+  return chunks;
+}
+
+function worldCheckStringAt(buf, chunk, offset) {
+  if (!chunk || offset < 0 || offset >= chunk.size) return null;
+  const start = chunk.data + offset;
+  const end = buf.indexOf(0, start);
+  return buf.toString('utf8', start, end < 0 ? chunk.data + chunk.size : end).replace(/\//g, '\\');
+}
+
+function worldCheckPlacementPaths(buf, listId, idsId) {
+  const chunks = worldCheckChunkMap(buf);
+  const list = chunks.get(listId);
+  const ids = chunks.get(idsId);
+  if (!list || !ids) return [];
+  const paths = [];
+  for (let offset = 0; offset + 4 <= ids.size; offset += 4) {
+    const pathValue = worldCheckStringAt(buf, list, buf.readUInt32LE(ids.data + offset));
+    if (pathValue) paths.push(pathValue);
+  }
+  return [...new Set(paths)];
+}
+
+function worldCheckTexturePaths(buf) {
+  const chunks = worldCheckChunkMap(buf);
+  const chunk = chunks.get('XETM');
+  if (!chunk) return [];
+  const paths = [];
+  let offset = 0;
+  while (offset < chunk.size) {
+    const end = buf.indexOf(0, chunk.data + offset);
+    if (end < 0 || end >= chunk.data + chunk.size) break;
+    if (end > chunk.data + offset) paths.push(buf.toString('ascii', chunk.data + offset, end));
+    offset = end - chunk.data + 1;
+  }
+  return [...new Set(paths)];
+}
+
+function parseWorldCheckReferences(buf) {
+  const texturePaths = worldCheckTexturePaths(buf);
+  const parsedLayers = parseAdtTextureLayers(buf);
+  const m2Paths = worldCheckPlacementPaths(buf, 'XDMM', 'DIMM');
+  const wmoPaths = worldCheckPlacementPaths(buf, 'OMWM', 'DIWM');
+  return {
+    textures: [...new Set((parsedLayers?.texturePaths?.length ? parsedLayers.texturePaths : texturePaths).map(value => value.replace(/\//g, '\\')))],
+    m2: m2Paths,
+    wmo: wmoPaths,
+  };
+}
+
+const worldCheckAssetCache = new Map();
+
+async function inspectWorldCheckAsset(reader, dataPath, type, assetPath) {
+  const key = `${dataPath}|${type}|${assetPath.toLowerCase()}`;
+  if (worldCheckAssetCache.has(key)) return worldCheckAssetCache.get(key);
+
+  let buffer = null;
+  try {
+    if (type === 'texture' && reader.readBlpFromMpqs) buffer = await reader.readBlpFromMpqs(dataPath, assetPath);
+    else if (type === 'm2' && reader.readM2FromMpqs) buffer = await reader.readM2FromMpqs(dataPath, assetPath);
+    else if (reader.readFileFromMpqs) buffer = await reader.readFileFromMpqs(dataPath, assetPath);
+  } catch (_) {
+    buffer = null;
+  }
+
+  const result = buffer
+    ? { path: assetPath, exists: true, bytes: buffer.length, sha256: hashBuffer(buffer) }
+    : { path: assetPath, exists: false };
+  worldCheckAssetCache.set(key, result);
+  return result;
+}
+
+const worldCheckServerMapsCache = new Map();
+const WORLD_CHECK_SERVER_MAP_PROBE = '0012835.map';
+
+function resolveWorldCheckServerMapsPath(inputPath) {
+  const root = String(inputPath || '').trim();
+  if (!root) return null;
+  if (worldCheckServerMapsCache.has(root)) return worldCheckServerMapsCache.get(root);
+  if (!fs.existsSync(root)) {
+    worldCheckServerMapsCache.set(root, null);
+    return null;
+  }
+
+  const directProbe = path.join(root, WORLD_CHECK_SERVER_MAP_PROBE);
+  if (fs.existsSync(directProbe)) {
+    worldCheckServerMapsCache.set(root, root);
+    return root;
+  }
+
+  const queue = [{ dir: root, depth: 0 }];
+  const visited = new Set();
+  while (queue.length) {
+    const { dir, depth } = queue.shift();
+    const key = path.resolve(dir).toLowerCase();
+    if (visited.has(key) || depth > 8) continue;
+    visited.add(key);
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
+    if (entries.some(entry => entry.isFile() && entry.name.toLowerCase() === WORLD_CHECK_SERVER_MAP_PROBE)) {
+      worldCheckServerMapsCache.set(root, dir);
+      return dir;
+    }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      queue.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
+    }
+  }
+  worldCheckServerMapsCache.set(root, null);
+  return null;
+}
+
+const worldCheckServerDataCache = new Map();
+
+function locateWorldCheckServerDir(inputPath, targetName) {
+  const root = String(inputPath || '').trim();
+  if (!root || !fs.existsSync(root)) return null;
+  const stat = fs.statSync(root);
+  const start = stat.isDirectory() ? root : path.dirname(root);
+  const seeds = [start, path.dirname(start)].filter((value, index, values) => values.indexOf(value) === index);
+  const queue = seeds.map(dir => ({ dir, depth: 0 }));
+  const visited = new Set();
+  while (queue.length) {
+    const { dir, depth } = queue.shift();
+    const key = path.resolve(dir).toLowerCase();
+    if (visited.has(key) || depth > 8) continue;
+    visited.add(key);
+    if (path.basename(dir).toLowerCase() === targetName) return dir;
+    let entries;
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { continue; }
+    for (const entry of entries) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      queue.push({ dir: path.join(dir, entry.name), depth: depth + 1 });
+    }
+  }
+  return null;
+}
+
+function resolveWorldCheckServerDataPaths(inputPath) {
+  const root = String(inputPath || '').trim();
+  if (!root) return { maps: null, vmaps: null, mmaps: null };
+  if (worldCheckServerDataCache.has(root)) return worldCheckServerDataCache.get(root);
+  const result = {
+    maps: locateWorldCheckServerDir(root, 'maps'),
+    vmaps: locateWorldCheckServerDir(root, 'vmaps'),
+    mmaps: locateWorldCheckServerDir(root, 'mmaps'),
+  };
+  worldCheckServerDataCache.set(root, result);
+  return result;
+}
+
+function inspectWorldCheckServerMap(serverMapsPath, tileX, tileY) {
+  if (!serverMapsPath) return { configured: false, exists: false, valid: null };
+  const resolvedMapsPath = resolveWorldCheckServerMapsPath(serverMapsPath);
+  const fileName = `001${String(tileX).padStart(2, '0')}${String(tileY).padStart(2, '0')}.map`;
+  if (!resolvedMapsPath) return { configured: true, exists: false, valid: false, fileName, resolvedPath: null };
+  const filePath = path.join(resolvedMapsPath, fileName);
+  if (!fs.existsSync(filePath)) return { configured: true, exists: false, valid: false, fileName, resolvedPath: resolvedMapsPath };
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return { configured: true, exists: true, valid: !!parseMapFile(buffer), bytes: buffer.length, fileName, resolvedPath: resolvedMapsPath };
+  } catch (e) {
+    return { configured: true, exists: true, valid: false, fileName, resolvedPath: resolvedMapsPath, error: e.message };
+  }
+}
+
+function inspectWorldCheckServerArtifact(directory, fileName) {
+  if (!directory) return { exists: false, fileName };
+  const filePath = path.join(directory, fileName);
+  if (!fs.existsSync(filePath)) return { exists: false, fileName };
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return { exists: true, fileName, bytes: buffer.length, sha256: hashBuffer(buffer) };
+  } catch (e) {
+    return { exists: true, fileName, error: e.message };
+  }
+}
+
+function inspectWorldCheckServerData(inputPath, tileX, tileY) {
+  const configured = !!String(inputPath || '').trim();
+  if (!configured) return { configured: false, paths: { maps: null, vmaps: null, mmaps: null }, map: null, vmap: null, mmap: null };
+  const paths = resolveWorldCheckServerDataPaths(inputPath);
+  const mapName = `001${String(tileX).padStart(2, '0')}${String(tileY).padStart(2, '0')}.map`;
+  const vmapName = `001_${String(tileX).padStart(2, '0')}_${String(tileY).padStart(2, '0')}.vmtile`;
+  const mmapName = `001${String(tileX).padStart(2, '0')}${String(tileY).padStart(2, '0')}.mmtile`;
+  return {
+    configured: true,
+    paths,
+    map: inspectWorldCheckServerArtifact(paths.maps, mapName),
+    vmap: inspectWorldCheckServerArtifact(paths.vmaps, vmapName),
+    mmap: inspectWorldCheckServerArtifact(paths.mmaps, mmapName),
+    vmapRoot: inspectWorldCheckServerArtifact(paths.vmaps, '001.vmtree'),
+    mmapRoot: inspectWorldCheckServerArtifact(paths.mmaps, '001.mmap'),
+  };
+}
+
+function compareWorldCheckServerArtifact(current, compare) {
+  const details = {
+    current: current ? { exists: !!current.exists, fileName: current.fileName, bytes: current.bytes, sha256: current.sha256 } : { exists: false },
+    compare: compare ? { exists: !!compare.exists, fileName: compare.fileName, bytes: compare.bytes, sha256: compare.sha256 } : { exists: false },
+  };
+  if (!compare?.configured) return { ...details, status: 'not-compared' };
+  const currentExists = !!current?.exists;
+  const compareExists = !!compare?.exists;
+  if (currentExists && compareExists) return { ...details, status: current.sha256 === compare.sha256 ? 'identical' : 'modified' };
+  if (currentExists) return { ...details, status: 'only-current' };
+  if (compareExists) return { ...details, status: 'only-compare' };
+  return { ...details, status: 'missing-both' };
+}
+
+function compareWorldCheckServerData(current, compare) {
+  const compareConfigured = !!compare?.configured;
+  return {
+    configured: compareConfigured,
+    map: { ...(current?.map || {}), ...(compareWorldCheckServerArtifact(current?.map, compare?.map)) },
+    vmap: { ...(current?.vmap || {}), ...(compareWorldCheckServerArtifact(current?.vmap, compare?.vmap)) },
+    mmap: { ...(current?.mmap || {}), ...(compareWorldCheckServerArtifact(current?.mmap, compare?.mmap)) },
+  };
+}
+
+async function buildWorldCheckTile(reader, dataPath, serverMapsPath, serverComparePath, tileX, tileY, { withPreview = false, withReferences = false } = {}) {
+  const tile = worldCheckTile(tileX, tileY);
+  const adt = await reader.readAdtBuffer(dataPath, 'Kalimdor', tileY, tileX);
+  tile.adt = adt ? { exists: true, bytes: adt.length, sha256: hashBuffer(adt) } : { exists: false };
+  const areaInfo = parseWorldCheckAreas(adt);
+  const durotarChunks = areaInfo.counts[14] || 0;
+  const otherChunks = areaInfo.totalChunks - durotarChunks;
+  tile.area = { counts: areaInfo.counts, totalChunks: areaInfo.totalChunks, durotarChunks };
+  tile.zoneStatus = !adt ? 'missing' : durotarChunks === 0 ? 'adjacent' : otherChunks ? 'mixed' : 'durotar';
+  tile.preview = { exists: false };
+
+  if (withPreview && reader.readMinimapBlp) {
+    const minimap = await reader.readMinimapBlp(dataPath, 'Kalimdor', tileY, tileX);
+    if (minimap) {
+      try {
+        const decoded = decodeBLP(minimap);
+        tile.preview = {
+          exists: true,
+          bytes: minimap.length,
+          sha256: hashBuffer(minimap),
+          png: `data:image/png;base64,${rgbaToPNG(decoded.rgba, decoded.w, decoded.h).toString('base64')}`,
+        };
+      } catch (e) {
+        tile.preview.error = `Minimap decode failed: ${e.message}`;
+      }
+    }
+  }
+
+  tile.references = { textures: [], m2: [], wmo: [] };
+  if (withReferences && adt) {
+    const referencePaths = parseWorldCheckReferences(adt);
+    for (const type of ['textures', 'm2', 'wmo']) {
+      const assetType = type === 'textures' ? 'texture' : type;
+      for (const referencePath of referencePaths[type]) {
+        tile.references[type].push(await inspectWorldCheckAsset(reader, dataPath, assetType, referencePath));
+      }
+    }
+  }
+  const allReferences = Object.values(tile.references).flat();
+  tile.referenceSummary = {
+    total: allReferences.length,
+    found: allReferences.filter(reference => reference.exists).length,
+    missing: allReferences.filter(reference => !reference.exists).length,
+  };
+  tile.serverData = inspectWorldCheckServerData(serverMapsPath, tileX, tileY);
+  tile.serverCompareData = inspectWorldCheckServerData(serverComparePath, tileX, tileY);
+  tile.serverCompare = compareWorldCheckServerData(tile.serverData, tile.serverCompareData);
+  tile.serverMap = {
+    ...(tile.serverData.map || {}),
+    configured: !!serverMapsPath,
+    valid: !!tile.serverData.map?.exists,
+    resolvedPath: tile.serverData.paths.maps,
+  };
+  tile.status = !tile.adt.exists ? 'missing' : withReferences ? (tile.referenceSummary.missing ? 'missing-assets' : 'complete') : 'pending';
+  return tile;
+}
+
+function compareWorldCheckAdt(currentTile, compareAdt) {
+  const currentExists = !!currentTile?.adt?.exists;
+  const compareExists = !!compareAdt;
+  const compare = compareExists ? { exists: true, bytes: compareAdt.length, sha256: hashBuffer(compareAdt) } : { exists: false };
+  let status = 'not-configured';
+  if (currentExists && compareExists) status = currentTile.adt.sha256 === compare.sha256 ? 'identical' : 'modified';
+  else if (currentExists) status = 'only-current';
+  else if (compareExists) status = 'only-compare';
+  else status = 'missing-both';
+  return { compare, status };
+}
+
+ipcMain.handle('worldcheck:scanDurotar', async (_, { dataPath, serverMapsPath, serverComparePath = '', lightweight = false, compareDataPath = '' }) => {
+  try {
+    const reader = getMpqReader();
+    const resolvedPath = reader.resolveDataPath ? reader.resolveDataPath(dataPath) : dataPath;
+    if (!resolvedPath || !reader.isDataPath(resolvedPath)) {
+      return { success: false, error: 'No WoW Data folder with MPQ files was found at the selected path.' };
+    }
+    const compareSourceInfo = compareDataPath && reader.resolveLayeredSource
+      ? reader.resolveLayeredSource(resolvedPath, compareDataPath)
+      : compareDataPath ? { valid: !!compareDataPath, path: compareDataPath, kind: 'client', baseDataPath: compareDataPath, overlayDataPath: null } : null;
+
+    const wdt = reader.readWdtBuffer ? await reader.readWdtBuffer(resolvedPath, 'Kalimdor') : null;
+    const wdl = reader.readWdlBuffer ? await reader.readWdlBuffer(resolvedPath, 'Kalimdor') : null;
+    const result = [];
+
+    for (let tileY = 35; tileY <= 45; tileY++) {
+      for (let tileX = 28; tileX <= 35; tileX++) {
+        const tile = await buildWorldCheckTile(reader, resolvedPath, serverMapsPath, serverComparePath, tileX, tileY, { withPreview: !lightweight, withReferences: !lightweight });
+        if (compareSourceInfo?.valid) {
+          const compareAdt = reader.readAdtBufferLayered
+            ? await reader.readAdtBufferLayered(compareSourceInfo.baseDataPath, compareSourceInfo.overlayDataPath, 'Kalimdor', tileY, tileX)
+            : await reader.readAdtBuffer(compareSourceInfo.path, 'Kalimdor', tileY, tileX);
+          const comparison = compareWorldCheckAdt(tile, compareAdt);
+          tile.compare = comparison.compare;
+          tile.compareStatus = comparison.status;
+        } else {
+          tile.compare = { exists: false };
+          tile.compareStatus = compareDataPath ? 'compare-invalid' : 'not-configured';
+        }
+        result.push(tile);
+      }
+    }
+
+    return {
+      success: true,
+      sourcePath: resolvedPath,
+      compareSource: compareDataPath ? {
+        configured: true,
+        path: compareSourceInfo?.path || compareDataPath,
+        valid: !!compareSourceInfo?.valid,
+        kind: compareSourceInfo?.kind || null,
+        basePath: compareSourceInfo?.baseDataPath || null,
+        overlayPath: compareSourceInfo?.overlayDataPath || null,
+      } : { configured: false, path: '', valid: null, kind: null, basePath: null, overlayPath: null },
+      zone: { mapId: 1, mapName: 'Kalimdor', zoneName: 'Durotar', tileX: [28, 35], tileY: [35, 45] },
+      mapFiles: {
+        wdt: wdt ? { exists: true, bytes: wdt.length, sha256: hashBuffer(wdt) } : { exists: false },
+        wdl: wdl ? { exists: true, bytes: wdl.length, sha256: hashBuffer(wdl) } : { exists: false },
+      },
+      serverValidation: {
+        configured: !!serverMapsPath,
+        found: result.filter(tile => tile.serverMap.exists).length,
+        valid: result.filter(tile => tile.serverMap.valid).length,
+        missing: result.filter(tile => serverMapsPath && !tile.serverMap.exists).length,
+        resolvedPath: result.find(tile => tile.serverMap.resolvedPath)?.serverMap.resolvedPath || null,
+      },
+      serverDataValidation: {
+        configured: !!serverMapsPath,
+        compareConfigured: !!serverComparePath,
+        maps: result.filter(tile => tile.serverData?.map?.exists).length,
+        vmaps: result.filter(tile => tile.serverData?.vmap?.exists).length,
+        mmaps: result.filter(tile => tile.serverData?.mmap?.exists).length,
+        compareMaps: result.filter(tile => tile.serverCompareData?.map?.exists).length,
+        compareVmaps: result.filter(tile => tile.serverCompareData?.vmap?.exists).length,
+        compareMmaps: result.filter(tile => tile.serverCompareData?.mmap?.exists).length,
+      },
+      tiles: result,
+    };
+  } catch (e) {
+    console.error('worldcheck:scanDurotar error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('worldcheck:getPreviews', async (_, { dataPath, overlayDataPath = '', tiles }) => {
+  try {
+    const reader = getMpqReader();
+    const legacySource = dataPath && typeof dataPath === 'object' ? dataPath : null;
+    const baseInputPath = legacySource?.baseDataPath || dataPath;
+    const overlayInputPath = legacySource?.overlayDataPath || overlayDataPath;
+    const resolvedPath = reader.resolveDataPath ? reader.resolveDataPath(baseInputPath) : baseInputPath;
+    if (!resolvedPath || !reader.isDataPath(resolvedPath)) return { success: false, error: 'No WoW Data folder with MPQ files was found at the selected path.' };
+    const resolvedOverlayPath = overlayInputPath && reader.resolveDataPath ? reader.resolveDataPath(overlayInputPath) : overlayInputPath;
+    if (overlayInputPath && (!resolvedOverlayPath || !reader.isDataPath(resolvedOverlayPath))) return { success: false, error: 'The compare overlay is not a valid WoW Data or patch folder.' };
+    const requestedTiles = tiles || [];
+    const requests = requestedTiles.map(tile => ({ tileX: tile.tileY, tileY: tile.tileX }));
+    const buffers = resolvedOverlayPath && reader.readMinimapBlpBatchLayered
+      ? await reader.readMinimapBlpBatchLayered(resolvedPath, resolvedOverlayPath, 'Kalimdor', requests)
+      : reader.readMinimapBlpBatch ? await reader.readMinimapBlpBatch(resolvedPath, 'Kalimdor', requests) : [];
+    const previews = [];
+    const failures = [];
+    for (const row of buffers) {
+      try {
+        const decoded = decodeBLP(row.buffer);
+        previews.push({ tileX: row.tileY, tileY: row.tileX, bytes: row.buffer.length, sha256: hashBuffer(row.buffer), png: `data:image/png;base64,${rgbaToPNG(decoded.rgba, decoded.w, decoded.h).toString('base64')}` });
+      } catch (e) {
+        failures.push({ tileX: row.tileY, tileY: row.tileX, error: e.message });
+      }
+    }
+    if (requestedTiles.length && !previews.length) return { success: false, error: `No minimap previews could be decoded (${buffers.length} BLP files were found).`, requested: requestedTiles.length, found: buffers.length, failures };
+    return { success: true, previews, requested: requestedTiles.length, found: previews.length, missing: Math.max(0, requestedTiles.length - buffers.length), failures };
+  } catch (e) {
+    console.error('worldcheck:getPreviews error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('worldcheck:inspectTile', async (_, { dataPath, serverMapsPath, serverComparePath = '', tileX, tileY, withPreview = false }) => {
+  try {
+    const reader = getMpqReader();
+    const resolvedPath = reader.resolveDataPath ? reader.resolveDataPath(dataPath) : dataPath;
+    if (!resolvedPath || !reader.isDataPath(resolvedPath)) return { success: false, error: 'No WoW Data folder with MPQ files was found at the selected path.' };
+    const tile = await buildWorldCheckTile(reader, resolvedPath, serverMapsPath, serverComparePath, Number(tileX), Number(tileY), { withPreview, withReferences: true });
+    return { success: true, tile };
+  } catch (e) {
+    console.error('worldcheck:inspectTile error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('worldcheck:exportServerData', async (_, { serverMapsPath, tiles = [] }) => {
+  try {
+    const resolvedMapsPath = resolveWorldCheckServerMapsPath(serverMapsPath);
+    if (!resolvedMapsPath) return { success: false, error: 'No Durotar server maps folder was found below the selected path.' };
+    const safeTiles = [...new Map((tiles || []).map(tile => [
+      `${Number(tile.tileX)}_${Number(tile.tileY)}`,
+      { tileX: Number(tile.tileX), tileY: Number(tile.tileY) },
+    ]).values())].filter(tile => Number.isInteger(tile.tileX) && Number.isInteger(tile.tileY) && tile.tileX >= 28 && tile.tileX <= 35 && tile.tileY >= 35 && tile.tileY <= 45);
+    if (!safeTiles.length) return { success: false, error: 'Select at least one Durotar tile before exporting.' };
+
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const exportRoot = path.join(__dirname, '..', 'output', 'WorldCompare', 'Durotar', timestamp);
+    const mapsRoot = path.join(exportRoot, 'server-data', 'maps');
+    fs.mkdirSync(mapsRoot, { recursive: true });
+    const exported = [];
+    const missing = [];
+    for (const tile of safeTiles) {
+      const fileName = `001${String(tile.tileX).padStart(2, '0')}${String(tile.tileY).padStart(2, '0')}.map`;
+      const sourceFile = path.join(resolvedMapsPath, fileName);
+      if (!fs.existsSync(sourceFile)) {
+        missing.push({ ...tile, fileName });
+        continue;
+      }
+      const destinationFile = path.join(mapsRoot, fileName);
+      fs.copyFileSync(sourceFile, destinationFile);
+      exported.push({ ...tile, fileName, bytes: fs.statSync(destinationFile).size });
+    }
+    if (!exported.length) return { success: false, error: 'None of the selected tiles had a server .map file.', missing };
+
+    const manifest = {
+      format: 'azeroth-editor-world-compare-server-data-v1',
+      createdAt: new Date().toISOString(),
+      zone: { mapId: 1, mapName: 'Kalimdor', zoneName: 'Durotar', tileX: [28, 35], tileY: [35, 45] },
+      source: { selectedRoot: serverMapsPath, resolvedMapsPath },
+      export: { type: 'maps-only-staging', directServerWrite: false, selectedTiles: safeTiles, exported, missing },
+      nextStep: 'Review this staging package before any manual deployment. VMAP/MMAP regeneration is a separate extractor step.',
+    };
+    fs.writeFileSync(path.join(exportRoot, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
+    fs.writeFileSync(path.join(exportRoot, 'README.md'), [
+      '# Azeroth Editor World Compare export',
+      '',
+      'This is a read-only staging package for selected Durotar server map tiles.',
+      'Nothing was written to CaioServer data.',
+      '',
+      `Selected tiles: ${safeTiles.length}`,
+      `Exported .map files: ${exported.length}`,
+      `Missing .map files: ${missing.length}`,
+      '',
+      'The server-data/maps folder contains only the selected .map files.',
+      'Regenerate and review vmaps/mmaps separately when geometry changes require it.',
+      'See manifest.json for source paths and tile details.',
+      '',
+    ].join('\r\n'), 'utf8');
+    return { success: true, outputPath: exportRoot, mapsPath: mapsRoot, exported, missing, manifestPath: path.join(exportRoot, 'manifest.json') };
+  } catch (e) {
+    console.error('worldcheck:exportServerData error:', e);
+    return { success: false, error: e.message };
+  }
+});
 
 ipcMain.handle('adt:getTileTextures', async (_, { mapName, tiles }) => {
   try {

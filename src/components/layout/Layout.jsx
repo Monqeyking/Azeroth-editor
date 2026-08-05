@@ -5,88 +5,143 @@ import {
   LayoutDashboard, Swords, Package, ScrollText, Shield, Monitor,
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
-  Layers, ShoppingBag, Database, Globe, Hammer, Skull, LayoutGrid, Trophy, Footprints, ScanFace, Box, Castle
+  Layers, ShoppingBag, Database, Globe, Hammer, Skull, LayoutGrid,
+  Trophy, Footprints, ScanFace, Box, Castle, FileSearch
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
 
-const NAV_GROUPS = [
+const NAV_SECTIONS = [
   {
-    id: 'npcs',
-    label: 'NPCs & Creatures',
-    icon: Swords,
-    items: [
-      { to: '/creatures',      icon: Swords,      label: 'Creatures' },
-      { to: '/creature-displays', icon: ScanFace,   label: 'Creature Displays' },
-      { to: '/npc-workflow',   icon: GitBranch,   label: 'NPC Workflow' },
-      { to: '/npc-movement',   icon: Footprints,   label: 'NPC Movement' },
-      { to: '/professions',    icon: Hammer,      label: 'Professions' },
-      { to: '/trainer-spells', icon: BookOpen,     label: 'Trainers' },
-      { to: '/vendors',        icon: ShoppingBag,  label: 'Vendors' },
+    id: 'content', label: 'Content', icon: Swords, defaultPath: '/creatures',
+    groups: [
+      {
+        id: 'npcs', label: 'NPCs & Creatures', icon: Swords,
+        items: [
+          { to: '/creatures', icon: Swords, label: 'Creatures' },
+          { to: '/enemies', icon: Skull, label: 'Enemies' },
+          { to: '/npc-workflow', icon: GitBranch, label: 'NPC Workflow' },
+          { to: '/npc-movement', icon: Footprints, label: 'NPC Movement' },
+        ],
+      },
+      {
+        id: 'services', label: 'Services & Economy', icon: Hammer,
+        items: [
+          { to: '/professions', icon: Hammer, label: 'Professions' },
+          { to: '/trainer-spells', icon: BookOpen, label: 'Trainers' },
+          { to: '/vendors', icon: ShoppingBag, label: 'Vendors' },
+        ],
+      },
+      {
+        id: 'items', label: 'Items & Loot', icon: Package,
+        items: [
+          { to: '/items', icon: Package, label: 'Items' },
+          { to: '/item-sets', icon: Layers, label: 'Item Sets' },
+          { to: '/loot', icon: PackageOpen, label: 'Loot' },
+        ],
+      },
+      {
+        id: 'quests', label: 'Quests & Story', icon: ScrollText,
+        items: [
+          { to: '/quests', icon: ScrollText, label: 'Quests' },
+          { to: '/achievements', icon: Trophy, label: 'Achievements' },
+        ],
+      },
     ],
   },
   {
-    id: 'items',
-    label: 'Items & Economy',
-    icon: Package,
-    items: [
-      { to: '/items',     icon: Package,     label: 'Items' },
-      { to: '/item-sets', icon: Layers,      label: 'Item Sets' },
-      { to: '/loot',      icon: PackageOpen, label: 'Loot' },
+    id: 'characters', label: 'Characters', icon: Shield, defaultPath: '/spells',
+    groups: [
+      {
+        id: 'character', label: 'Character Systems', icon: Shield,
+        items: [
+          { to: '/spells', icon: Sparkles, label: 'Spells' },
+          { to: '/talents', icon: GitBranch, label: 'Talents' },
+          { to: '/races', icon: Users, label: 'Races & Classes' },
+        ],
+      },
+      {
+        id: 'appearance', label: 'Appearance', icon: Palette,
+        items: [
+          { to: '/char-customization', icon: Palette, label: 'Character Looks' },
+        ],
+      },
     ],
   },
   {
-    id: 'quests',
-    label: 'Quests & Story',
-    icon: ScrollText,
-    items: [
-      { to: '/quests',       icon: ScrollText, label: 'Quests' },
-      { to: '/achievements', icon: Trophy,     label: 'Achievements' },
+    id: 'world', label: 'World', icon: Monitor, defaultPath: '/worldmap',
+    groups: [
+      {
+        id: 'world-building', label: 'World Building', icon: Globe,
+        items: [
+          { to: '/worldmap', icon: Globe, label: 'World Map' },
+          { to: '/world-check', icon: Globe, label: 'World Check' },
+          { to: '/editor3d', icon: Monitor, label: '3D World Editor' },
+          { to: '/adt-editor', icon: FileSearch, label: 'ADT Editor' },
+        ],
+      },
+      {
+        id: 'world-editing', label: 'World Editing', icon: Hammer,
+        items: [
+          { to: '/game-objects', icon: Box, label: 'Game Objects' },
+          { to: '/dungeons', icon: Castle, label: 'Dungeons' },
+        ],
+      },
     ],
   },
   {
-    id: 'character',
-    label: 'Character',
-    icon: Shield,
-    items: [
-      { to: '/spells',             icon: Sparkles,  label: 'Spells' },
-      { to: '/talents',            icon: GitBranch, label: 'Talents' },
-      { to: '/races',              icon: Users,     label: 'Races & Classes' },
-      { to: '/char-customization', icon: Palette,   label: 'Char Looks' },
+    id: 'assets', label: 'Assets', icon: Box, defaultPath: '/creature-displays',
+    groups: [
+      {
+        id: 'asset-tools', label: 'Asset Tools', icon: Box,
+        items: [
+          { to: '/creature-displays', icon: ScanFace, label: 'Creature Displays' },
+          { to: '/asset-editor', icon: Box, label: '3D Asset Editor' },
+          { to: '/texture-workshop', icon: Palette, label: 'Texture Workshop' },
+          { to: '/ui-editor', icon: LayoutGrid, label: 'UI Editor' },
+        ],
+      },
     ],
   },
   {
-    id: 'world',
-    label: 'World & Tools',
-    icon: Monitor,
-    wip: true,
-    items: [
-      { to: '/editor3d',        icon: Monitor,    label: '3D Editor' },
-      { to: '/asset-editor',    icon: Box,        label: '3D Asset Editor' },
-      { to: '/ui-editor',       icon: LayoutGrid, label: 'UI Editor' },
-      { to: '/worldmap',        icon: Globe,   label: 'World Map' },
-      { to: '/game-objects',    icon: Box,     label: 'Game Objects' },
-      { to: '/dungeons',        icon: Castle,  label: 'Dungeons' },
-    ],
-  },
-  {
-    id: 'sql',
-    label: 'SQL',
-    icon: Database,
-    items: [
-      { to: '/dbc-sql', icon: Database, label: 'DBC SQL Editor' },
-      { to: '/sql',     icon: Terminal, label: 'Database SQL' },
+    id: 'tools', label: 'Tools', icon: Database, defaultPath: '/server-config',
+    groups: [
+      {
+        id: 'admin', label: 'Administration', icon: Settings,
+        items: [
+          { to: '/server-config', icon: Settings, label: 'Server Config' },
+          { to: '/expansion-lock', icon: Shield, label: 'Expansion Lock' },
+        ],
+      },
+      {
+        id: 'sql', label: 'SQL', icon: Database,
+        items: [
+          { to: '/dbc-sql', icon: Database, label: 'DBC SQL Editor' },
+          { to: '/sql', icon: Terminal, label: 'Database SQL' },
+        ],
+      },
     ],
   },
 ];
 
-const MIN_WIDTH = 160;
-const MAX_WIDTH = 340;
-const DEFAULT_WIDTH = 200;
+const MIN_WIDTH = 180;
+const MAX_WIDTH = 280;
+const DEFAULT_WIDTH = 220;
+const SIDEBAR_WIDTH_VERSION = '2';
 
 function loadCollapsed() {
   try { return JSON.parse(localStorage.getItem('sidebar-collapsed') || '{}'); }
   catch { return {}; }
+}
+
+function loadSidebarWidth() {
+  if (localStorage.getItem('sidebar-width-version') !== SIDEBAR_WIDTH_VERSION) {
+    localStorage.setItem('sidebar-width-version', SIDEBAR_WIDTH_VERSION);
+    localStorage.setItem('sidebar-width', String(DEFAULT_WIDTH));
+    return DEFAULT_WIDTH;
+  }
+  const saved = parseInt(localStorage.getItem('sidebar-width') || String(DEFAULT_WIDTH), 10);
+  return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Number.isFinite(saved) ? saved : DEFAULT_WIDTH));
 }
 
 function NavGroup({ group, collapsed, onToggle }) {
@@ -96,17 +151,14 @@ function NavGroup({ group, collapsed, onToggle }) {
   const Icon = group.icon;
 
   return (
-    <div className={`nav-group${group.wip ? ' nav-group-wip' : ''}`}>
+    <div className="nav-group">
       <button
         className={`nav-group-header${isAnyActive ? ' has-active' : ''}`}
         onClick={() => onToggle(group.id)}
       >
         <Icon size={13} />
         <span>{group.label}</span>
-        {isOpen
-          ? <ChevronDown size={11} className="chevron" />
-          : <ChevronRight size={11} className="chevron" />
-        }
+        {isOpen ? <ChevronDown size={11} className="chevron" /> : <ChevronRight size={11} className="chevron" />}
       </button>
       {isOpen && (
         <div className="nav-group-items">
@@ -127,17 +179,20 @@ function NavGroup({ group, collapsed, onToggle }) {
 export default function Layout() {
   const { dbStatus, disconnectDb, dbConfig } = useConnection();
   const navigate = useNavigate();
+  const location = useLocation();
   const [collapsed, setCollapsed] = useState(loadCollapsed);
-  const [sidebarWidth, setSidebarWidth] = useState(
-    () => parseInt(localStorage.getItem('sidebar-width') || String(DEFAULT_WIDTH), 10)
-  );
+  const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const dragging = useRef(false);
   const startX = useRef(0);
   const startWidth = useRef(0);
 
   useEffect(() => {
     if (dbStatus === 'disconnected') navigate('/connect');
-  }, [dbStatus]);
+  }, [dbStatus, navigate]);
+
+  useEffect(() => {
+    setSidebarWidth(loadSidebarWidth());
+  }, []);
 
   const handleDisconnect = async () => {
     await disconnectDb();
@@ -151,6 +206,12 @@ export default function Layout() {
       return next;
     });
   };
+
+  const activeSection = location.pathname === '/dashboard'
+    ? null
+    : NAV_SECTIONS.find(section =>
+        section.groups.some(group => group.items.some(item => location.pathname.startsWith(item.to)))
+      ) || NAV_SECTIONS[0];
 
   const onResizerMouseDown = useCallback((e) => {
     dragging.current = true;
@@ -180,61 +241,79 @@ export default function Layout() {
 
   return (
     <div className="layout">
-      <aside className="sidebar" style={{ width: sidebarWidth }}>
-        <div className="sidebar-header">
+      <header className="topbar">
+        <div className="topbar-brand">
           <img src={ollieLogo} className="logo-img" alt="Ollie" />
           <div className="logo-text">
             <span className="logo-title">Azeroth</span>
             <span className="logo-sub">Editor</span>
           </div>
         </div>
-
-        <div className="db-badge">
-          <span className="db-dot connected" />
-          <span className="db-name">{dbConfig.database}</span>
-        </div>
-
-        <div className="sidebar-nav-fixed">
-          <NavLink to="/dashboard" className={({ isActive }) =>
-            `nav-item${isActive ? ' active' : ''}`
-          }>
+        <nav className="topbar-tabs" aria-label="Main navigation">
+          <NavLink to="/dashboard" className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
             <LayoutDashboard size={14} />
             <span>Dashboard</span>
           </NavLink>
-          <NavLink to="/server-config" className={({ isActive }) =>
-            `nav-item nav-item-child${isActive ? ' active' : ''}`
-          }>
-            <Settings size={13} />
-            <span>Server Config</span>
-          </NavLink>
-        </div>
-
-        <nav className="sidebar-nav">
-          {NAV_GROUPS.map(group => (
-            <NavGroup key={group.id} group={group} collapsed={collapsed} onToggle={toggleGroup} />
-          ))}
-
+          {NAV_SECTIONS.map(section => {
+            const Icon = section.icon;
+            const isActive = activeSection?.id === section.id;
+            return (
+              <button
+                key={section.id}
+                className={`topbar-tab${isActive ? ' active' : ''}`}
+                onClick={() => navigate(section.defaultPath)}
+              >
+                <Icon size={14} />
+                <span>{section.label}</span>
+              </button>
+            );
+          })}
         </nav>
-
-        <div className="sidebar-footer">
-          <NavLink to="/settings" className={({ isActive }) =>
-            `nav-item${isActive ? ' active' : ''}`
-          }>
-            <Settings size={15} />
-            <span>Settings</span>
-          </NavLink>
-          <button className="nav-item disconnect" onClick={handleDisconnect}>
-            <Unplug size={15} />
-            <span>Disconnect</span>
-          </button>
+        <div className="topbar-status">
+          <div className="db-badge">
+            <span className="db-dot connected" />
+            <span className="db-name">{dbConfig.database}</span>
+          </div>
         </div>
-      </aside>
+      </header>
 
-      <div className="sidebar-resizer" onMouseDown={onResizerMouseDown} />
+      <div className="workspace-shell">
+        <aside className="sidebar" style={{ width: sidebarWidth }}>
+          {activeSection && (
+            <>
+              <div className="sidebar-context">
+                <span className="sidebar-context-label">Workspace</span>
+                <strong>{activeSection.label}</strong>
+              </div>
 
-      <main className="main-content">
-        <Outlet />
-      </main>
+              <nav className="sidebar-nav">
+                {activeSection.groups.map(group => (
+                  <NavGroup key={group.id} group={group} collapsed={collapsed} onToggle={toggleGroup} />
+                ))}
+              </nav>
+            </>
+          )}
+
+          <div className="sidebar-footer">
+            <NavLink to="/settings" className={({ isActive }) =>
+              `nav-item${isActive ? ' active' : ''}`
+            }>
+              <Settings size={15} />
+              <span>Settings</span>
+            </NavLink>
+            <button className="nav-item disconnect" onClick={handleDisconnect}>
+              <Unplug size={15} />
+              <span>Disconnect</span>
+            </button>
+          </div>
+        </aside>
+
+        <div className="sidebar-resizer" onMouseDown={onResizerMouseDown} />
+
+        <main className="main-content">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
