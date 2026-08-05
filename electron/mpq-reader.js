@@ -19,6 +19,11 @@ function initStorm() {
 // ── Mount-beheer ───────────────────────────────────────────────────────────────
 const MOUNT_POINT = '/wow_data';
 let mountedPath = null;
+let mountedRoot = null;
+
+function mountRootForDataPath(dataPath) {
+  return path.basename(dataPath).toLowerCase() === 'data' ? path.dirname(dataPath) : dataPath;
+}
 
 function ensureMounted(dataPath) {
   initStorm();
@@ -27,10 +32,12 @@ function ensureMounted(dataPath) {
   if (mountedPath) {
     try { FS.unmount(MOUNT_POINT); } catch (_) {}
     mountedPath = null;
+    mountedRoot = null;
   }
 
   try { FS.mkdir(MOUNT_POINT); } catch (_) {}
-  FS.mount(FS.filesystems.NODEFS, { root: dataPath }, MOUNT_POINT);
+  mountedRoot = mountRootForDataPath(dataPath);
+  FS.mount(FS.filesystems.NODEFS, { root: mountedRoot }, MOUNT_POINT);
   mountedPath = dataPath;
 
   // Zap caches bij pad-wijziging
@@ -65,10 +72,13 @@ function mpqScore(filePath) {
 function findMpqFiles(dataPath) {
   const mpqs = [];
 
-  for (const dir of [dataPath, path.join(dataPath, 'enUS')]) {
+  const dirs = [dataPath, path.join(dataPath, 'enUS')];
+  if (path.basename(dataPath).toLowerCase() === 'data') dirs.push(path.dirname(dataPath));
+  for (const dir of dirs) {
     if (!fs.existsSync(dir)) continue;
     for (const entry of fs.readdirSync(dir)) {
-      if (entry.toLowerCase().endsWith('.mpq')) {
+      const isParentPatch = dir !== dataPath && dir === path.dirname(dataPath);
+      if (entry.toLowerCase().endsWith('.mpq') && (!isParentPatch || entry.toLowerCase().startsWith('patch'))) {
         mpqs.push(path.join(dir, entry));
       }
     }
@@ -84,9 +94,15 @@ function isDataPath(dirPath) {
   return entries.some(e => e.toLowerCase().endsWith('.mpq'));
 }
 
+function resolveDataPath(inputPath) {
+  if (!inputPath) return null;
+  const candidates = [path.join(inputPath, 'Data'), path.join(inputPath, 'data'), inputPath];
+  return candidates.find(candidate => isDataPath(candidate)) || null;
+}
+
 // ── Emscripten-pad voor een absoluut MPQ-pad ───────────────────────────────────
 function toStormPath(dataPath, mpqAbsPath) {
-  const rel = path.relative(dataPath, mpqAbsPath).replace(/\\/g, '/');
+  const rel = path.relative(mountedRoot || mountRootForDataPath(dataPath), mpqAbsPath).replace(/\\/g, '/');
   return `${MOUNT_POINT}/${rel}`;
 }
 
@@ -334,6 +350,29 @@ async function readAdtBuffer(dataPath, mapName, tileX, tileY) {
   return buf;
 }
 
+function resolveLayeredSource(baseDataPath, compareInputPath) {
+  if (!compareInputPath) return null;
+  const resolvedComparePath = resolveDataPath(compareInputPath);
+  if (!resolvedComparePath || !isDataPath(resolvedComparePath)) return { valid: false, path: resolvedComparePath || compareInputPath };
+  const compareArchives = findMpqFiles(resolvedComparePath);
+  const patchOnly = compareArchives.length > 0 && compareArchives.every(file => /^patch(?:-[^/\\]+)?\.mpq$/i.test(path.basename(file)));
+  return {
+    valid: true,
+    path: resolvedComparePath,
+    kind: patchOnly ? 'overlay' : 'client',
+    baseDataPath: patchOnly ? baseDataPath : resolvedComparePath,
+    overlayDataPath: patchOnly ? resolvedComparePath : null,
+  };
+}
+
+async function readAdtBufferLayered(baseDataPath, overlayDataPath, mapName, tileX, tileY) {
+  if (overlayDataPath) {
+    const overlay = await readAdtBuffer(overlayDataPath, mapName, tileX, tileY);
+    if (overlay) return overlay;
+  }
+  return baseDataPath ? readAdtBuffer(baseDataPath, mapName, tileX, tileY) : null;
+}
+
 // ── Minimap BLP per ADT-tile ──────────────────────────────────────────────────
 // Probeert eerst het directe pad, valt terug op md5translate.trs (hashed names).
 const md5TransCache = new Map(); // dataPath → Map<lower "dir\mapX_Y.blp", hashedFilename>
@@ -378,6 +417,83 @@ async function readMinimapBlp(dataPath, mapName, tileX, tileY) {
   const hashPath = (hash.includes('\\') ? hash : `textures\\Minimap\\${hash}`).toLowerCase();
   const hashMpq = index.get(hashPath);
   return hashMpq ? await readFileFromMpqEntry(dataPath, hashMpq, hashPath) : null;
+}
+
+async function readArchiveEntries(dataPath, mpqAbsPath, requests) {
+  let stat;
+  try { stat = fs.statSync(mpqAbsPath); } catch (_) { return []; }
+
+  if (stat.isDirectory()) {
+    return requests.map(request => {
+      const filePath = path.join(mpqAbsPath, ...request.internalPath.split(/[\\\/]/));
+      try { return { ...request, buffer: fs.readFileSync(filePath) }; } catch (_) { return { ...request, buffer: null }; }
+    });
+  }
+
+  let archive;
+  try { archive = await MPQ.open(toStormPath(dataPath, mpqAbsPath), 'r'); }
+  catch (_) { return requests.map(request => ({ ...request, buffer: null })); }
+
+  const result = [];
+  try {
+    for (const request of requests) {
+      let buffer = null;
+      try {
+        if (archive.hasFile(request.internalPath)) {
+          const file = archive.openFile(request.internalPath);
+          const raw = file.read();
+          const copy = new Uint8Array(raw.byteLength);
+          copy.set(raw);
+          buffer = Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
+          file.close();
+        }
+      } catch (_) {}
+      result.push({ ...request, buffer });
+    }
+  } finally {
+    try { archive.close(); } catch (_) {}
+  }
+  return result;
+}
+
+async function readMinimapBlpBatch(dataPath, mapName, tiles) {
+  ensureMounted(dataPath);
+  const index = await buildBlpIndex(dataPath);
+  const trans = await getMd5Translate(dataPath);
+  const groups = new Map();
+
+  for (const tile of tiles || []) {
+    const directPath = `world\\minimaps\\${mapName}\\map${tile.tileX}_${tile.tileY}.blp`;
+    const directKey = directPath.toLowerCase();
+    let internalPath = directKey;
+    let archivePath = index.get(directKey);
+    if (!archivePath) {
+      const hash = trans.get(`${mapName.toLowerCase()}\\map${tile.tileX}_${tile.tileY}.blp`);
+      if (!hash) continue;
+      internalPath = (hash.includes('\\') ? hash : `textures\\Minimap\\${hash}`).toLowerCase();
+      archivePath = index.get(internalPath);
+    }
+    if (!archivePath) continue;
+    if (!groups.has(archivePath)) groups.set(archivePath, []);
+    groups.get(archivePath).push({ tileX: tile.tileX, tileY: tile.tileY, internalPath });
+  }
+
+  const rows = [];
+  for (const [archivePath, requests] of groups) {
+    rows.push(...await readArchiveEntries(dataPath, archivePath, requests));
+  }
+  return rows.filter(row => row.buffer);
+}
+
+async function readMinimapBlpBatchLayered(baseDataPath, overlayDataPath, mapName, tiles) {
+  const overlayRows = overlayDataPath ? await readMinimapBlpBatch(overlayDataPath, mapName, tiles) : [];
+  const found = new Map(overlayRows.map(row => [`${row.tileX}_${row.tileY}`, row]));
+  const missing = (tiles || []).filter(tile => !found.has(`${tile.tileX}_${tile.tileY}`));
+  if (missing.length && baseDataPath) {
+    const baseRows = await readMinimapBlpBatch(baseDataPath, mapName, missing);
+    for (const row of baseRows) found.set(`${row.tileX}_${row.tileY}`, row);
+  }
+  return (tiles || []).map(tile => found.get(`${tile.tileX}_${tile.tileY}`)).filter(Boolean);
 }
 
 function pathVariants(internalPath) {
@@ -451,6 +567,8 @@ async function collectListfilePaths(dataPath) {
       walkDirBlps(mpqPath, '', paths);
       walkDirFiles(mpqPath, '', paths, '.m2');
       walkDirFiles(mpqPath, '', paths, '.mdx');
+      walkDirFiles(mpqPath, '', paths, '.adt');
+      walkDirFiles(mpqPath, '', paths, '.wmo');
       continue;
     }
 
@@ -778,7 +896,7 @@ async function findArchivesForPaths(dataPath, blpPaths) {
 }
 
 module.exports = {
-  isDataPath, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readMinimapBlp, readWdlBuffer, readWdtBuffer,
+  isDataPath, resolveDataPath, resolveLayeredSource, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readAdtBufferLayered, readMinimapBlp, readMinimapBlpBatch, readMinimapBlpBatchLayered, readWdlBuffer, readWdtBuffer,
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
   buildM2Index, readM2FromMpqs, readM2Companion,
