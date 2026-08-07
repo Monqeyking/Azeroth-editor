@@ -232,11 +232,12 @@ export default function SettingsPage() {
           </div>
           <div style={{ padding: '16px' }}>
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
-              Paths to the server executables. They enable Authserver and Worldserver control from the dashboard.
+              Paths to server tools and executables. VMap generation uses the MPQ Editor only in the temporary staging job.
             </p>
             {[
               { key: 'authExe',  label: 'Authserver executable',  placeholder: 'D:\\CaioCore\\CaioServer\\authserver.exe' },
               { key: 'worldExe', label: 'Worldserver executable', placeholder: 'D:\\CaioCore\\CaioServer\\worldserver.exe' },
+              { key: 'mpqEditorExe', label: 'MPQ Editor executable', placeholder: 'D:\\Tools\\MPQEditor.exe' },
             ].map(({ key, label, placeholder }) => (
               <div key={key} className="field-group" style={{ marginBottom: 10 }}>
                 <label>{label}</label>

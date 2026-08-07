@@ -126,8 +126,8 @@ function ChunkDetail({ chunk, textures, water }) {
 }
 
 function AreaTableEditor({ sourceAreaChoices, targetAreaChoices, newAreaSourceId, onSourceChange, newAreaTemplateId, setNewAreaTemplateId, newAreaName, setNewAreaName, newAreaId, setNewAreaId, newAreaParentId, setNewAreaParentId, newAreaFlags, setNewAreaFlags, newAreaAmbienceId, setNewAreaAmbienceId, newAreaZoneMusicId, setNewAreaZoneMusicId, newAreaIntroSound, setNewAreaIntroSound, newAreaExplorationLevel, setNewAreaExplorationLevel, newAreaFactionGroupMask, setNewAreaFactionGroupMask, stageNewArea, loading, status }) {
-  return <Panel title="AreaTable target" meta="Belangrijke 3.3.5-velden voor de nieuwe area" className="adt-area-editor-panel">
-    <div className="adt-compare-help">Maak een nieuwe target-entry op basis van een bestaande client-entry. De bronclient wordt niet aangepast; het resultaat komt in de ADT-staging output.</div>
+  return <Panel title="AreaTable target" meta="Important 3.3.5 fields for the new area" className="adt-area-editor-panel">
+    <div className="adt-compare-help">Create a new target entry from an existing client entry. The source client is not modified; the result is written to the ADT staging output.</div>
     <div className="adt-area-editor-fields">
       <label>Source area<select value={newAreaSourceId} onChange={event => onSourceChange(event.target.value)}><option value="">Select source area…</option>{sourceAreaChoices.map(area => <option key={`editor-source-${area.id}`} value={area.id}>{area.id} · {area.name || 'Area name unavailable'}</option>)}</select></label>
       <label>Target template<select value={newAreaTemplateId} onChange={event => setNewAreaTemplateId(event.target.value)} disabled={!targetAreaChoices.length}>{targetAreaChoices.map(area => <option key={`editor-template-${area.id}`} value={area.id}>{area.id} · {area.name || 'Area name unavailable'}</option>)}</select></label>
@@ -147,35 +147,56 @@ function AreaTableEditor({ sourceAreaChoices, targetAreaChoices, newAreaSourceId
 }
 
 const STAGE_ARTIFACTS = [
-  { key: 'adt', label: 'ADT tile', description: 'De geselecteerde terrain tile.', required: true },
-  { key: 'areaTable', label: 'AreaTable.dbc', description: 'De gestagede area-entry en naamwijzigingen.', available: true },
+  { key: 'adt', label: 'ADT tile', description: 'The selected terrain tile.', required: true },
+  { key: 'areaTable', label: 'AreaTable.dbc', description: 'The staged area entry and name changes.', available: true },
 ];
 
 const BUILD_OUTPUTS = [
-  { key: 'map', label: '.map', description: 'Server terrain/heightmap output.' },
-  { key: 'vmap', label: 'VMap check', description: 'Controleer object-collision dependencies voor deze tile.' },
-  { key: 'mmap', label: 'MMAP', description: 'Gerichte pathfinding voor deze tile en omliggende maps.' },
+  { key: 'map', label: '.map', description: 'Server terrain/heightmap output for selected tiles.' },
+  { key: 'vmap', label: 'VMap', description: 'Build collision output for the selected ADTs.' },
+  { key: 'mmap', label: 'MMAP', description: 'Targeted pathfinding for the selected tiles.' },
 ];
 
-function StageCheckbox({ item, checked, onChange }) {
-  return <label className={`adt-stage-option ${item.available === false ? 'disabled' : ''}`}>
-    <input type="checkbox" checked={checked} disabled={item.available === false} onChange={event => onChange(event.target.checked)} />
+const WORKFLOW_LABELS = {
+  prepare: 'Prepare server tile',
+  map: 'Generate .map',
+  inspectVmap: 'Inspect VMap deps',
+  vmap: 'Generate VMap',
+  mmap: 'Generate MMAP',
+  complete: 'Workflow complete',
+};
+
+function nextWorkflowStep(plan) {
+  if (plan.map) return 'map';
+  if (plan.vmap) return 'inspectVmap';
+  if (plan.mmap && plan.map) return 'mmap';
+  return 'complete';
+}
+
+function StageCheckbox({ item, checked, onChange, locked = false }) {
+  return <label className={`adt-stage-option ${item.available === false || locked ? 'disabled' : ''}`}>
+    <input type="checkbox" checked={checked} disabled={item.available === false || locked} onChange={event => onChange(event.target.checked)} />
     <span><strong>{item.label}</strong><small>{item.description}{item.note ? ` · ${item.note}` : ''}</small></span>
   </label>;
 }
 
-function ServerTileStagingPanel({ loading, status, onPrepare, onRunMap, onInspectVmap, onRunMmap, jobRoot, stagedAreaTablePath, areaTableSourceAvailable, selectedArtifacts, setSelectedArtifacts, buildPlan, setBuildPlan }) {
+function ServerTileStagingPanel({ loading, status, progress, workflowStep, onPrepare, onRunMap, onInspectVmap, onRunVmap, onRunMmap, jobRoot, stagedAreaTablePath, areaTableSourceAvailable, selectedArtifacts, setSelectedArtifacts, buildPlan, setBuildPlan, batchTiles, batchTileKeys, setBatchTileKeys, sourceType }) {
   const selectedStageCount = Object.values(selectedArtifacts).filter(Boolean).length;
   const selectedBuildCount = Object.values(buildPlan).filter(Boolean).length;
   const areaTableReady = Boolean(stagedAreaTablePath || areaTableSourceAvailable);
   const toggleStage = (key, checked) => setSelectedArtifacts(current => ({ ...current, [key]: checked }));
   const toggleBuild = (key, checked) => setBuildPlan(current => ({ ...current, [key]: checked }));
-  return <Panel title="Server tile staging" meta="Veilige voorbereiding · output buiten de live server" className="adt-server-stage-panel">
-    <div className="adt-server-stage-content"><div><strong>Select what belongs in this staging job</strong><span>Alleen de aangevinkte bestanden en het build-plan worden in de manifest gezet. Client- en serverdata blijven ongewijzigd.</span></div><div className="adt-stage-actions"><button className="adt-btn primary" onClick={onPrepare} disabled={loading || !selectedArtifacts.adt}>{loading ? 'Preparing…' : 'Prepare server tile'}</button>{jobRoot && <><button className="adt-btn" onClick={onRunMap} disabled={loading || !buildPlan.map}>{loading ? 'Generating…' : 'Generate .map'}</button><button className="adt-btn" onClick={onInspectVmap} disabled={loading || !buildPlan.vmap}>{loading ? 'Checking…' : 'Inspect VMap deps'}</button><button className="adt-btn" onClick={onRunMmap} disabled={loading || !buildPlan.mmap || !buildPlan.map}>{loading ? 'Generating…' : 'Generate MMAP'}</button></>}</div></div>
+  const canAct = step => !loading && workflowStep === step;
+  const nextLabel = WORKFLOW_LABELS[workflowStep] || WORKFLOW_LABELS.prepare;
+  return <Panel title="Server tile staging" meta="Safe batch preparation · output outside the live server" className="adt-server-stage-panel">
+    <div className="adt-server-stage-content"><div><strong>Select what belongs in this staging job</strong><span>Only selected files and the build plan are recorded in the manifest. Client and server data remain unchanged.</span></div><div className="adt-stage-actions"><button className="adt-btn primary" onClick={onPrepare} disabled={!canAct('prepare') || !selectedArtifacts.adt}>{loading ? 'Preparing…' : 'Prepare server tile'}</button>{jobRoot && <><button className="adt-btn" onClick={onRunMap} disabled={!canAct('map') || !buildPlan.map}>{loading ? 'Generating…' : 'Generate .map'}</button><button className="adt-btn" onClick={onInspectVmap} disabled={!canAct('inspectVmap') || !buildPlan.vmap}>{loading ? 'Checking…' : 'Inspect VMap deps'}</button><button className="adt-btn" onClick={onRunVmap} disabled={!canAct('vmap') || !buildPlan.vmap}>{loading ? 'Generating…' : 'Generate VMap'}</button><button className="adt-btn" onClick={onRunMmap} disabled={!canAct('mmap') || !buildPlan.mmap || !buildPlan.map}>{loading ? 'Generating…' : 'Generate MMAP'}</button></>}</div></div>
+    {jobRoot && <div className="adt-workflow-next">Next step: <strong>{nextLabel}</strong></div>}
+    {progress && <div className="adt-extractor-progress"><div className="adt-extractor-progress-head"><strong>{progress.message}{progress.indeterminate && <span className="adt-progress-dots" aria-hidden="true" />}</strong><span>{progress.indeterminate ? 'Native tool running…' : `${progress.percent || 0}%`}</span></div><div className="adt-extractor-progress-track"><div className={`adt-extractor-progress-fill ${progress.indeterminate ? 'indeterminate' : ''}`} style={{ width: `${Math.max(3, Math.min(100, Number(progress.percent) || 0))}%` }} /></div></div>}
     <div className="adt-stage-sections">
-      <div><h3>Client overlay</h3><div className="adt-stage-options">{STAGE_ARTIFACTS.map(item => <StageCheckbox key={item.key} item={{ ...item, available: item.key === 'areaTable' ? areaTableReady : item.available }} checked={Boolean(selectedArtifacts[item.key])} onChange={checked => toggleStage(item.key, checked)} />)}</div></div>
-      <div><h3>Server output plan</h3><div className="adt-stage-options">{BUILD_OUTPUTS.map(item => <StageCheckbox key={item.key} item={item} checked={Boolean(buildPlan[item.key])} onChange={checked => toggleBuild(item.key, checked)} />)}</div></div>
-      <div className="adt-stage-selection-summary"><strong>{selectedStageCount} client item{selectedStageCount === 1 ? '' : 's'} · {selectedBuildCount} server output{selectedBuildCount === 1 ? '' : 's'}</strong><span>{selectedArtifacts.areaTable && !areaTableReady ? 'AreaTable is aangevinkt maar er is geen bron beschikbaar.' : selectedArtifacts.areaTable ? `AreaTable.dbc wordt meegenomen${stagedAreaTablePath ? ' vanuit staging' : ' vanuit de Current Client'}.` : 'Geen AreaTable.dbc geselecteerd.'}</span></div>
+      <div><h3>Client overlay</h3><div className="adt-stage-options">{STAGE_ARTIFACTS.map(item => <StageCheckbox key={item.key} item={{ ...item, available: item.key === 'areaTable' ? areaTableReady : item.available }} checked={Boolean(selectedArtifacts[item.key])} onChange={checked => toggleStage(item.key, checked)} locked={Boolean(jobRoot)} />)}</div></div>
+      <div><h3>Server output plan</h3><div className="adt-stage-options">{BUILD_OUTPUTS.map(item => <StageCheckbox key={item.key} item={item} checked={Boolean(buildPlan[item.key])} onChange={checked => toggleBuild(item.key, checked)} locked={Boolean(jobRoot)} />)}</div></div>
+      {sourceType === 'current' && <div className="adt-batch-picker"><h3>ADT tiles in this build</h3><span>Select every tile affected by the change. The loaded tile remains the primary tile.</span><div className="adt-batch-picker-list">{batchTiles.map(tile => { const key = `${tile.x}_${tile.y}`; return <label key={key}><input type="checkbox" checked={batchTileKeys.includes(key)} disabled={Boolean(jobRoot)} onChange={event => setBatchTileKeys(current => event.target.checked ? [...new Set([...current, key])] : current.filter(value => value !== key))} /><span>{tile.x},{tile.y}</span></label>; })}</div><small>{batchTileKeys.length} tile(s) selected</small></div>}
+      <div className="adt-stage-selection-summary"><strong>{selectedStageCount} client item{selectedStageCount === 1 ? '' : 's'} · {selectedBuildCount} server output{selectedBuildCount === 1 ? '' : 's'}</strong><span>{selectedArtifacts.areaTable && !areaTableReady ? 'AreaTable is selected, but no source is available.' : selectedArtifacts.areaTable ? `AreaTable.dbc will be included${stagedAreaTablePath ? ' from staging' : ' from the Current Client'}.` : 'No AreaTable.dbc selected.'}</span></div>
     </div>
     {status && <div className="adt-stage-status">{status}</div>}
   </Panel>;
@@ -190,6 +211,7 @@ export default function ADTEditorPage() {
   const [tileX, setTileX] = useState('');
   const [tileY, setTileY] = useState('');
   const [tileQuery, setTileQuery] = useState('');
+  const [batchTileKeys, setBatchTileKeys] = useState([]);
   const [inspection, setInspection] = useState(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [loading, setLoading] = useState(false);
@@ -204,9 +226,18 @@ export default function ADTEditorPage() {
   const [stagedAreaTablePath, setStagedAreaTablePath] = useState('');
   const [serverTileLoading, setServerTileLoading] = useState(false);
   const [serverTileStatus, setServerTileStatus] = useState('');
+  const [serverTileProgress, setServerTileProgress] = useState(null);
   const [serverTileJobRoot, setServerTileJobRoot] = useState('');
+  const [serverTileWorkflowStep, setServerTileWorkflowStep] = useState('prepare');
   const [selectedArtifacts, setSelectedArtifacts] = useState({ adt: true, areaTable: false });
   const [buildPlan, setBuildPlan] = useState({ map: true, vmap: true, mmap: true });
+
+  useEffect(() => {
+    if (!window.azeroth.adt.onProgress) return undefined;
+    return window.azeroth.adt.onProgress(progress => {
+      if (!progress?.jobRoot || progress.jobRoot === serverTileJobRoot) setServerTileProgress(progress);
+    });
+  }, [serverTileJobRoot]);
   const [newAreaSourceId, setNewAreaSourceId] = useState('');
   const [newAreaName, setNewAreaName] = useState('');
   const [newAreaId, setNewAreaId] = useState('');
@@ -223,7 +254,7 @@ export default function ADTEditorPage() {
   const [areaTableStageStatus, setAreaTableStageStatus] = useState('');
 
   const loadConfigAndMaps = useCallback(async (kind = sourceType) => {
-    setMaps([]); setMapName(''); setTileX(''); setTileY(''); setTileQuery('');
+    setMaps([]); setMapName(''); setTileX(''); setTileY(''); setTileQuery(''); setBatchTileKeys([]);
     if (kind === 'standalone') return;
     setMapsLoading(true); setError('');
     const result = await window.azeroth.adt.listMaps({ sourceType: kind });
@@ -240,7 +271,7 @@ export default function ADTEditorPage() {
   };
 
   const load = async (standaloneOverride = standalonePath) => {
-    setLoading(true); setError(''); setStageStatus(''); setInspection(null); setSelectedIndex(0); setAreaFilter(''); setAreaTarget('');
+    setLoading(true); setError(''); setStageStatus(''); setInspection(null); setSelectedIndex(0); setAreaFilter(''); setAreaTarget(''); setServerTileJobRoot(''); setServerTileWorkflowStep('prepare'); setServerTileStatus(''); setServerTileProgress(null);
     try {
       const result = await window.azeroth.adt.inspect({ sourceType, standalonePath: standaloneOverride, mapName, tileX: tileX === '' ? null : Number(tileX), tileY: tileY === '' ? null : Number(tileY) });
       if (!result.success) setError(result.error || 'Could not read ADT.'); else setInspection(result);
@@ -251,7 +282,7 @@ export default function ADTEditorPage() {
     }
   };
 
-  const clear = () => { setInspection(null); setError(''); setSelectedIndex(0); setStageStatus(''); setServerTileStatus(''); setServerTileJobRoot(''); setStagedAdtPath(''); setStagedAreaTablePath(''); setSelectedArtifacts({ adt: true, areaTable: false }); if (sourceType === 'standalone') setStandalonePath(''); };
+  const clear = () => { setInspection(null); setError(''); setSelectedIndex(0); setStageStatus(''); setServerTileStatus(''); setServerTileJobRoot(''); setServerTileWorkflowStep('prepare'); setServerTileProgress(null); setStagedAdtPath(''); setStagedAreaTablePath(''); setSelectedArtifacts({ adt: true, areaTable: false }); setBatchTileKeys([]); if (sourceType === 'standalone') setStandalonePath(''); };
   const selectedChunk = inspection?.chunks?.[selectedIndex] || null;
   const selectedMap = useMemo(() => {
     const map = maps.find(item => item.name === mapName);
@@ -262,6 +293,7 @@ export default function ADTEditorPage() {
     if (!query) return selectedMap?.tiles || [];
     return (selectedMap?.tiles || []).filter(tile => `${tile.x}_${tile.y}`.includes(query) || `${tile.x},${tile.y}`.includes(tileQuery.trim()));
   }, [selectedMap, tileQuery]);
+  const batchTiles = selectedMap?.tiles || [];
   const chunkSummary = useMemo(() => summarizeChunks(inspection?.overview?.topChunks), [inspection]);
   const filterAreaId = areaFilter === '' ? null : Number(areaFilter);
   const matchingChunkCount = inspection?.chunks?.filter(chunk => filterAreaId == null || chunk.areaId === filterAreaId).length || 0;
@@ -312,11 +344,13 @@ export default function ADTEditorPage() {
     setTileQuery('');
     setTileX(firstTile ? String(firstTile.x) : '');
     setTileY(firstTile ? String(firstTile.y) : '');
+    setBatchTileKeys(firstTile ? [`${firstTile.x}_${firstTile.y}`] : []);
   };
 
   const handleTileChange = (event) => {
     const [x, y] = event.target.value.split('_');
     setTileX(x || ''); setTileY(y || '');
+    setBatchTileKeys(x && y ? [`${x}_${y}`] : []);
   };
 
   const stageAreaIdChanges = async () => {
@@ -356,11 +390,12 @@ export default function ADTEditorPage() {
   };
 
   const prepareServerTile = async () => {
-    setServerTileLoading(true); setServerTileStatus(''); setError('');
+    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
     try {
-      const result = await window.azeroth.adt.prepareServerTile({ sourceType, standalonePath, mapName, tileX: tileX === '' ? null : Number(tileX), tileY: tileY === '' ? null : Number(tileY), stagedAdtPath, areaTablePath: stagedAreaTablePath, selectedArtifacts, buildPlan });
+      const selectedTiles = sourceType === 'standalone' ? [] : batchTiles.filter(tile => batchTileKeys.includes(`${tile.x}_${tile.y}`));
+      const result = await window.azeroth.adt.prepareServerTile({ sourceType, standalonePath, mapName, tileX: tileX === '' ? null : Number(tileX), tileY: tileY === '' ? null : Number(tileY), tiles: selectedTiles, stagedAdtPath, areaTablePath: stagedAreaTablePath, selectedArtifacts, buildPlan });
       if (!result.success) setError(result.error || 'Could not prepare server tile.');
-      else { setServerTileJobRoot(result.jobRoot || ''); setServerTileStatus(`${result.message} Output: ${result.jobRoot}`); }
+      else { setServerTileJobRoot(result.jobRoot || ''); setServerTileWorkflowStep(nextWorkflowStep(buildPlan)); setServerTileStatus(`${result.message} Output: ${result.jobRoot}`); }
     } catch (prepareError) {
       setError(prepareError?.message || 'Could not prepare server tile.');
     } finally {
@@ -370,11 +405,11 @@ export default function ADTEditorPage() {
 
   const runMapExtractor = async () => {
     if (!serverTileJobRoot) return;
-    setServerTileLoading(true); setServerTileStatus(''); setError('');
+    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
     try {
       const result = await window.azeroth.adt.runMapExtractor({ jobRoot: serverTileJobRoot });
       if (!result.success) setError(result.error || 'Could not generate the .map file.');
-      else setServerTileStatus(`${result.message} ${result.warnings?.length ? `Warnings: ${result.warnings.join('; ')}` : ''}`);
+      else { setServerTileWorkflowStep(buildPlan.vmap ? 'inspectVmap' : buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(`${result.message} ${result.warnings?.length ? `Warnings: ${result.warnings.join('; ')}` : ''}`); }
     } catch (extractError) {
       setError(extractError?.message || 'Could not generate the .map file.');
     } finally {
@@ -384,11 +419,11 @@ export default function ADTEditorPage() {
 
   const inspectVmapDependencies = async () => {
     if (!serverTileJobRoot) return;
-    setServerTileLoading(true); setServerTileStatus(''); setError('');
+    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
     try {
       const result = await window.azeroth.adt.inspectVmapDependencies({ jobRoot: serverTileJobRoot });
       if (!result.success) setError(result.error || 'Could not inspect VMap dependencies.');
-      else setServerTileStatus(`${result.message} ${result.missingModels?.length ? `Missing: ${result.missingModels.length}` : 'All referenced models are available.'}`);
+      else { setServerTileWorkflowStep(buildPlan.vmap ? 'vmap' : buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(result.message); }
     } catch (inspectError) {
       setError(inspectError?.message || 'Could not inspect VMap dependencies.');
     } finally {
@@ -398,13 +433,27 @@ export default function ADTEditorPage() {
 
   const runMmapExtractor = async () => {
     if (!serverTileJobRoot) return;
-    setServerTileLoading(true); setServerTileStatus(''); setError('');
+    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
     try {
       const result = await window.azeroth.adt.runMmapExtractor({ jobRoot: serverTileJobRoot });
       if (!result.success) setError(result.error || 'Could not generate the MMAP tile.');
-      else setServerTileStatus(`${result.message} ${result.bytes ? `(${result.bytes} bytes)` : ''}`);
+      else { setServerTileWorkflowStep('complete'); setServerTileStatus(`${result.message} ${result.bytes ? `(${result.bytes} bytes)` : ''}`); }
     } catch (mmapError) {
       setError(mmapError?.message || 'Could not generate the MMAP tile.');
+    } finally {
+      setServerTileLoading(false);
+    }
+  };
+
+  const runVmapExtractor = async () => {
+    if (!serverTileJobRoot) return;
+    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
+    try {
+      const result = await window.azeroth.adt.runVmapExtractor({ jobRoot: serverTileJobRoot });
+      if (!result.success) setError(result.error || 'Could not generate the VMap output.');
+      else { setServerTileWorkflowStep(buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(`${result.message} Delta: ${result.changedFileCount || 0} file(s), ${result.changedBytes || 0} bytes.`); }
+    } catch (vmapError) {
+      setError(vmapError?.message || 'Could not generate the VMap output.');
     } finally {
       setServerTileLoading(false);
     }
@@ -421,9 +470,9 @@ export default function ADTEditorPage() {
     {error && <div className="adt-error"><AlertTriangle size={14} /> {error}</div>}
     <div className="adt-source-note">Source: <strong>{SOURCE_OPTIONS.find(item => item.value === sourceType)?.label}</strong> · {sourceType === 'standalone' ? `Dependency source: ${worldmapMpqPath ? 'Configured Current Client' : 'None'}` : `Current Client: ${displayPath(worldmapMpqPath)}`}</div>
     {inspection ? <>
-      <ServerTileStagingPanel loading={serverTileLoading} status={serverTileStatus} onPrepare={prepareServerTile} onRunMap={runMapExtractor} onInspectVmap={inspectVmapDependencies} onRunMmap={runMmapExtractor} jobRoot={serverTileJobRoot} stagedAreaTablePath={stagedAreaTablePath} areaTableSourceAvailable={Boolean(worldmapMpqPath)} selectedArtifacts={selectedArtifacts} setSelectedArtifacts={setSelectedArtifacts} buildPlan={buildPlan} setBuildPlan={setBuildPlan} />
+      <ServerTileStagingPanel loading={serverTileLoading} status={serverTileStatus} progress={serverTileProgress} workflowStep={serverTileWorkflowStep} onPrepare={prepareServerTile} onRunMap={runMapExtractor} onInspectVmap={inspectVmapDependencies} onRunVmap={runVmapExtractor} onRunMmap={runMmapExtractor} jobRoot={serverTileJobRoot} stagedAreaTablePath={stagedAreaTablePath} areaTableSourceAvailable={Boolean(worldmapMpqPath)} selectedArtifacts={selectedArtifacts} setSelectedArtifacts={setSelectedArtifacts} buildPlan={buildPlan} setBuildPlan={setBuildPlan} batchTiles={batchTiles} batchTileKeys={batchTileKeys} setBatchTileKeys={setBatchTileKeys} sourceType={sourceType} />
       <AreaTableEditor sourceAreaChoices={sourceAreaChoices} targetAreaChoices={targetAreaChoices} newAreaSourceId={newAreaSourceId} onSourceChange={value => { setNewAreaSourceId(value); setAreaFilter(value); setNewAreaName(sourceAreaChoices.find(area => String(area.id) === value)?.name || ''); }} newAreaTemplateId={newAreaTemplateId} setNewAreaTemplateId={setNewAreaTemplateId} newAreaName={newAreaName} setNewAreaName={setNewAreaName} newAreaId={newAreaId} setNewAreaId={setNewAreaId} newAreaParentId={newAreaParentId} setNewAreaParentId={setNewAreaParentId} newAreaFlags={newAreaFlags} setNewAreaFlags={setNewAreaFlags} newAreaAmbienceId={newAreaAmbienceId} setNewAreaAmbienceId={setNewAreaAmbienceId} newAreaZoneMusicId={newAreaZoneMusicId} setNewAreaZoneMusicId={setNewAreaZoneMusicId} newAreaIntroSound={newAreaIntroSound} setNewAreaIntroSound={setNewAreaIntroSound} newAreaExplorationLevel={newAreaExplorationLevel} setNewAreaExplorationLevel={setNewAreaExplorationLevel} newAreaFactionGroupMask={newAreaFactionGroupMask} setNewAreaFactionGroupMask={setNewAreaFactionGroupMask} stageNewArea={stageNewArea} loading={areaTableStageLoading} status={areaTableStageStatus} />
-      <Panel title="Area comparison" meta={`${inspection.areaSummary.length} areas found`} className="adt-area-comparison"><div className="adt-compare-help">Source = the selected ADT and its comparison AreaTable. Target = your configured current client. Use the source dropdown below to find the area, then choose the target ID.</div><div className="adt-table-wrap"><table className="adt-table"><thead><tr><th>Source ID</th><th>Source name</th><th>Same ID in target</th><th>Chunks</th></tr></thead><tbody>{inspection.areaSummary.map(area => <tr key={area.areaId}><td>{area.areaId}</td><td>{area.sourceAreaName || 'Unavailable'}</td><td>{area.targetAreaName || 'Not found'}</td><td>{area.chunkCount}</td></tr>)}{!inspection.areaSummary.length && <tr><td colSpan="4" className="adt-empty-cell">No areas found</td></tr>}</tbody></table></div><div className="adt-new-area"><strong>Create custom target area</strong><span>Use a 3.3.5 target template and give the source area a new ID.</span><div className="adt-new-area-fields"><label>Source area<select value={newAreaSourceId} onChange={event => { const value = event.target.value; setNewAreaSourceId(value); setAreaFilter(value); setNewAreaName(sourceAreaChoices.find(area => String(area.id) === value)?.name || ''); }}><option value="">Select source area…</option>{sourceAreaChoices.map(area => <option key={`new-source-${area.id}`} value={area.id}>{area.id} · {area.name || 'Source name unavailable'}</option>)}</select></label><label>Target template<select value={newAreaTemplateId} onChange={event => setNewAreaTemplateId(event.target.value)} disabled={!targetAreaChoices.length}>{targetAreaChoices.map(area => <option key={`new-template-${area.id}`} value={area.id}>{area.id} · {area.name || 'Target name unavailable'}</option>)}</select></label><label>New name<input value={newAreaName} onChange={event => setNewAreaName(event.target.value)} placeholder="Sparkwater Port" /></label><label>New ID<input value={newAreaId} onChange={event => setNewAreaId(event.target.value)} placeholder="Auto" inputMode="numeric" /></label><button className="adt-btn primary" onClick={stageNewArea} disabled={areaTableStageLoading || !newAreaName.trim() || !newAreaSourceId}>{areaTableStageLoading ? 'Staging…' : 'Stage new area'}</button></div>{areaTableStageStatus && <div className="adt-stage-status">{areaTableStageStatus}</div>}</div></Panel><Panel title="ADT overview" meta={inspection.overview.readStatus} className="adt-overview"><div className="adt-values overview-values"><Value label="Source type">{inspection.source.label}</Value><Value label="Resolved source" mono>{displayPath(inspection.source.path)}</Value><Value label="Dependency source">{inspection.source.dependency}</Value><Value label="Relative ADT path" mono>{inspection.file.relativePath}</Value><Value label="Filename" mono>{inspection.file.name}</Value><Value label="File size">{fmtBytes(inspection.file.bytes)}</Value><Value label="SHA-256" mono>{inspection.file.sha256}</Value><Value label="MVER / type">{`${inspection.overview.version ?? '—'} · ${inspection.overview.detectedType}`}</Value></div><div className="adt-overview-bottom"><div><h3>Top-level chunks</h3><div className="adt-chip-list">{chunkSummary.map(chunk => <span className={`adt-chip ${statusClass(chunk.valid)}`} key={chunk.type}>{chunk.type}{chunk.count > 1 ? ` × ${chunk.count}` : ''} · {chunk.bytes} B total</span>)}</div></div><div><h3>Missing required chunks</h3><div className="adt-inline-text">{inspection.overview.missingRequired.length ? inspection.overview.missingRequired.join(', ') : 'None'}</div></div><div><h3>Parser warnings</h3><WarningList warnings={inspection.overview.warnings} /></div></div></Panel><Panel title="In gewone taal" meta="Wat deze tile praktisch betekent" className="adt-explainer"><div className="adt-explainer-grid"><div><strong>Terrain</strong><span>{tileStats.valid}/256 terrain chunks gelezen{tileStats.warnings ? ` · ${tileStats.warnings} met waarschuwingen` : ' · geen chunkwaarschuwingen'}</span></div><div><strong>Gebieden</strong><span>{tileStats.areas || 'Geen'} area-records gevonden</span></div><div><strong>Hoogte</strong><span>{tileStats.minHeight == null ? 'Niet beschikbaar' : `${fmt(tileStats.minHeight)} tot ${fmt(tileStats.maxHeight)}`}</span></div><div><strong>Assets</strong><span>{tileStats.textures} textures · {tileStats.m2} M2 · {tileStats.wmo} WMO</span></div><div><strong>Water</strong><span>{tileStats.water ? `${tileStats.water} liquid layers gevonden` : 'Geen waterlaag gevonden'}</span></div></div><p>Klik hieronder op een tile. Groen betekent dat de MCNK geldig is; geel betekent dat er iets gecontroleerd moet worden; rood betekent dat de chunk ontbreekt of ongeldig is.</p></Panel>
+      <Panel title="Area comparison" meta={`${inspection.areaSummary.length} areas found`} className="adt-area-comparison"><div className="adt-compare-help">Source = the selected ADT and its comparison AreaTable. Target = your configured current client. Use the source dropdown below to find the area, then choose the target ID.</div><div className="adt-table-wrap"><table className="adt-table"><thead><tr><th>Source ID</th><th>Source name</th><th>Same ID in target</th><th>Chunks</th></tr></thead><tbody>{inspection.areaSummary.map(area => <tr key={area.areaId}><td>{area.areaId}</td><td>{area.sourceAreaName || 'Unavailable'}</td><td>{area.targetAreaName || 'Not found'}</td><td>{area.chunkCount}</td></tr>)}{!inspection.areaSummary.length && <tr><td colSpan="4" className="adt-empty-cell">No areas found</td></tr>}</tbody></table></div><div className="adt-new-area"><strong>Create custom target area</strong><span>Use a 3.3.5 target template and give the source area a new ID.</span><div className="adt-new-area-fields"><label>Source area<select value={newAreaSourceId} onChange={event => { const value = event.target.value; setNewAreaSourceId(value); setAreaFilter(value); setNewAreaName(sourceAreaChoices.find(area => String(area.id) === value)?.name || ''); }}><option value="">Select source area…</option>{sourceAreaChoices.map(area => <option key={`new-source-${area.id}`} value={area.id}>{area.id} · {area.name || 'Source name unavailable'}</option>)}</select></label><label>Target template<select value={newAreaTemplateId} onChange={event => setNewAreaTemplateId(event.target.value)} disabled={!targetAreaChoices.length}>{targetAreaChoices.map(area => <option key={`new-template-${area.id}`} value={area.id}>{area.id} · {area.name || 'Target name unavailable'}</option>)}</select></label><label>New name<input value={newAreaName} onChange={event => setNewAreaName(event.target.value)} placeholder="Sparkwater Port" /></label><label>New ID<input value={newAreaId} onChange={event => setNewAreaId(event.target.value)} placeholder="Auto" inputMode="numeric" /></label><button className="adt-btn primary" onClick={stageNewArea} disabled={areaTableStageLoading || !newAreaName.trim() || !newAreaSourceId}>{areaTableStageLoading ? 'Staging…' : 'Stage new area'}</button></div>{areaTableStageStatus && <div className="adt-stage-status">{areaTableStageStatus}</div>}</div></Panel><Panel title="ADT overview" meta={inspection.overview.readStatus} className="adt-overview"><div className="adt-values overview-values"><Value label="Source type">{inspection.source.label}</Value><Value label="Resolved source" mono>{displayPath(inspection.source.path)}</Value><Value label="Dependency source">{inspection.source.dependency}</Value><Value label="Relative ADT path" mono>{inspection.file.relativePath}</Value><Value label="Filename" mono>{inspection.file.name}</Value><Value label="File size">{fmtBytes(inspection.file.bytes)}</Value><Value label="SHA-256" mono>{inspection.file.sha256}</Value><Value label="MVER / type">{`${inspection.overview.version ?? '—'} · ${inspection.overview.detectedType}`}</Value></div><div className="adt-overview-bottom"><div><h3>Top-level chunks</h3><div className="adt-chip-list">{chunkSummary.map(chunk => <span className={`adt-chip ${statusClass(chunk.valid)}`} key={chunk.type}>{chunk.type}{chunk.count > 1 ? ` × ${chunk.count}` : ''} · {chunk.bytes} B total</span>)}</div></div><div><h3>Missing required chunks</h3><div className="adt-inline-text">{inspection.overview.missingRequired.length ? inspection.overview.missingRequired.join(', ') : 'None'}</div></div><div><h3>Parser warnings</h3><WarningList warnings={inspection.overview.warnings} /></div></div></Panel><Panel title="In plain language" meta="What this tile means in practice" className="adt-explainer"><div className="adt-explainer-grid"><div><strong>Terrain</strong><span>{tileStats.valid}/256 terrain chunks read{tileStats.warnings ? ` · ${tileStats.warnings} with warnings` : ' · no chunk warnings'}</span></div><div><strong>Areas</strong><span>{tileStats.areas || 'None'} area records found</span></div><div><strong>Height</strong><span>{tileStats.minHeight == null ? 'Not available' : `${fmt(tileStats.minHeight)} tot ${fmt(tileStats.maxHeight)}`}</span></div><div><strong>Assets</strong><span>{tileStats.textures} textures · {tileStats.m2} M2 · {tileStats.wmo} WMO</span></div><div><strong>Water</strong><span>{tileStats.water ? `${tileStats.water} liquid layers found` : 'No water layer found'}</span></div></div><p>Click a tile below. Green means the MCNK is valid; yellow means it needs review; red means the chunk is missing or invalid.</p></Panel>
       <div className="adt-workspace"><div className="adt-main-column"><Panel title="MCNK 16 × 16 grid" meta={`${inspection.chunks.filter(chunk => chunk.valid).length}/256 available · ${nameView === 'source' ? 'Source names' : 'Compare names'} · ${filterAreaId == null ? 'click a tile' : `${matchingChunkCount} matching AreaID ${filterAreaId}`}`} className="adt-grid-panel"><div className="adt-grid-tools"><label>Filter source AreaID<select value={areaFilter} onChange={event => setAreaFilter(event.target.value)}><option value="">All source areas</option>{sourceAreaChoices.map(area => <option key={`filter-${area.id}`} value={area.id}>{area.id} · {area.name || 'Source name unavailable'}</option>)}</select></label><span className="adt-grid-match">{filterAreaId == null ? 'All chunks visible' : `${matchingChunkCount} matching chunks`}</span><label>Set matching IDs to target<select value={areaTarget} onChange={event => setAreaTarget(event.target.value)} disabled={!targetAreaChoices.length}><option value="">Select target area…</option>{targetAreaChoices.map(area => <option key={`target-${area.id}`} value={area.id}>{area.id} · {area.name || 'Target name unavailable'}</option>)}</select></label><button className="adt-btn primary" onClick={stageAreaIdChanges} disabled={stageLoading || filterAreaId == null || !Number.isInteger(Number(areaTarget)) || filterAreaId === Number(areaTarget)}>{stageLoading ? 'Staging…' : 'Stage AreaID changes'}</button></div><div className="adt-grid">{inspection.chunks.map(chunk => <GridCell key={chunk.index} chunk={chunk} selected={selectedIndex === chunk.index} nameView={nameView} matches={filterAreaId == null || chunk.areaId === filterAreaId} onSelect={setSelectedIndex} />)}</div><div className="adt-legend"><span><i className="ok" /> valid</span><span><i className="warn" /> warning</span><span><i className="missing" /> missing</span><span><i className="filtered-out" /> filtered out</span></div>{stageStatus && <div className="adt-stage-status">{stageStatus}</div>}</Panel><Panel title="Raw ADT structure tree" meta={`${inspection.overview.topChunks.length} top-level chunks`}><RawTree overview={inspection.overview} onSelect={setSelectedIndex} /></Panel><Panel title="Area summary" meta={`${inspection.areaSummary.length} source areas`}><div className="adt-table-wrap"><table className="adt-table"><thead><tr><th>Source ID</th><th>Source name</th><th>Target name for same ID</th><th>Chunks</th><th>Status</th></tr></thead><tbody>{inspection.areaSummary.map(area => <tr key={area.areaId}><td>{area.areaId}</td><td>{area.sourceAreaName || 'Unavailable'}</td><td>{area.targetAreaName || 'Not found in target'}</td><td>{area.chunkCount}</td><td><span className={`adt-status ${statusClass(area.status)}`}>{area.status}</span></td></tr>)}{!inspection.areaSummary.length && <tr><td colSpan="5" className="adt-empty-cell">No area records parsed</td></tr>}</tbody></table></div></Panel></div><Panel title="Selected MCNK detail" meta={`Index ${selectedIndex}`} className="adt-detail-panel"><ChunkDetail chunk={selectedChunk} textures={inspection.textures} water={inspection.water} /></Panel></div>
     </> : loading ? <div className="adt-empty-page"><LoaderCircle size={28} className="adt-spin" /><strong>Reading ADT…</strong><span>Parsing chunks and resolving optional dependencies.</span></div> : <div className="adt-empty-page"><FileSearch size={28} /><strong>Select a source and load an ADT</strong><span>The inspector never writes to client, server, MPQ, or ADT files.</span></div>}
   </div>;
