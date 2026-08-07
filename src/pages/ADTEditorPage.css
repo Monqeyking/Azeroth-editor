@@ -53,6 +53,17 @@
 .adt-server-stage-content span { color: var(--text-muted); font-size: 10px; line-height: 14px; }
 .adt-server-stage-content .adt-stage-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; flex-shrink: 0; gap: 6px; }
 .adt-server-stage-content .adt-btn { flex-shrink: 0; }
+.adt-workflow-next { padding: 0 10px 7px; color: var(--text-muted); font-size: 10px; }
+.adt-workflow-next strong { color: var(--accent); }
+.adt-extractor-progress { display: flex; flex-direction: column; gap: 5px; padding: 7px 10px 9px; border-top: 1px solid var(--border); background: rgba(227,173,50,.04); }
+.adt-extractor-progress-head { display: flex; justify-content: space-between; gap: 10px; color: var(--text-muted); font-size: 10px; }
+.adt-extractor-progress-head strong { color: var(--text-primary); font-size: 10px; }
+.adt-progress-dots::after { content: '.'; display: inline-block; width: 16px; text-align: left; animation: adt-progress-dots 1.2s steps(1, end) infinite; }
+@keyframes adt-progress-dots { 0%, 25% { content: ''; } 25.01%, 50% { content: '.'; } 50.01%, 75% { content: '..'; } 75.01%, 100% { content: '...'; } }
+.adt-extractor-progress-track { position: relative; height: 7px; overflow: hidden; background: rgba(255,255,255,.08); border-radius: 999px; }
+.adt-extractor-progress-fill { height: 100%; background: var(--accent); border-radius: inherit; transition: width .25s ease; }
+.adt-extractor-progress-fill.indeterminate { position: absolute; left: 0; top: 0; width: 35% !important; background: var(--accent); animation: adt-progress-slide 1.2s ease-in-out infinite; }
+@keyframes adt-progress-slide { 0% { transform: translateX(-110%); } 50% { transform: translateX(190%); } 100% { transform: translateX(300%); } }
 .adt-stage-sections { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 0 10px 10px; border-top: 1px solid var(--border); }
 .adt-stage-sections > div { min-width: 0; padding-top: 8px; }
 .adt-stage-sections h3 { margin: 0 0 6px; color: var(--text-muted); font-size: 9px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
@@ -67,6 +78,13 @@
 .adt-stage-selection-summary { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-top: 7px; color: var(--text-muted); border-top: 1px solid var(--border); font-size: 9px; }
 .adt-stage-selection-summary strong { color: var(--text-secondary); font: 10px monospace; }
 .adt-stage-selection-summary span { text-align: right; }
+.adt-batch-picker { min-width: 0; }
+.adt-batch-picker > span { display: block; margin-bottom: 6px; color: var(--text-muted); font-size: 9px; line-height: 12px; }
+.adt-batch-picker-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(58px, 1fr)); gap: 3px; max-height: 105px; overflow: auto; padding: 4px; background: rgba(10,12,18,.35); border: 1px solid var(--border); border-radius: 4px; }
+.adt-batch-picker-list label { display: flex; align-items: center; gap: 4px; padding: 3px 4px; color: var(--text-secondary); font: 9px monospace; cursor: pointer; }
+.adt-batch-picker-list label:hover { background: rgba(100,110,135,.14); }
+.adt-batch-picker-list input { margin: 0; accent-color: #d5a335; }
+.adt-batch-picker > small { display: block; margin-top: 5px; color: var(--text-muted); font-size: 9px; }
 .adt-area-editor-fields { display: grid; grid-template-columns: repeat(6, minmax(110px, 1fr)); gap: 7px; padding: 9px 10px 10px; }
 .adt-area-editor-fields label { display: flex; flex-direction: column; gap: 3px; color: var(--text-muted); font-size: 9px; text-transform: uppercase; }
 .adt-area-editor-fields select, .adt-area-editor-fields input { width: 100%; height: 26px; min-width: 0; padding: 0 6px; color: var(--text-primary); background: var(--bg-primary); border: 1px solid var(--border); border-radius: 4px; font-size: 11px; }

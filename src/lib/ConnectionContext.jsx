@@ -22,7 +22,7 @@ export function ConnectionProvider({ children }) {
   const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
   const [worldmapMpqPath, setWorldmapMpqPath] = useState('');
   const [mapsPath, setMapsPath] = useState('');
-  const [serverPaths, setServerPaths] = useState({ authExe: '', worldExe: '' });
+  const [serverPaths, setServerPaths] = useState({ authExe: '', worldExe: '', mpqEditorExe: '' });
   const [expansionsFolder, setExpansionsFolder] = useState('D:\\CaioCore\\CaioServer\\data\\Expansions');
   const [backupPath, setBackupPath] = useState('');
 

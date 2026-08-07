@@ -19,7 +19,7 @@ const http = require('http');
 const AdmZip = require('adm-zip');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
-const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, inspectVmapDependencies, runTargetMmap } = require('./adt-server-extractors');
+const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, resolveServerTools, inspectVmapDependencies, runTargetVmap, runTargetMmap } = require('./adt-server-extractors');
 let mpqReader = null;
 const MPQ_STUB = {
   isDataPath: () => false,
@@ -4373,7 +4373,7 @@ function adtPathInside(root, candidate) {
   return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
 }
 
-ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', standalonePath = '', mapName = '', tileX = null, tileY = null, stagedAdtPath = '', areaTablePath = '', selectedArtifacts = {}, buildPlan = {} } = {}) => {
+ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', standalonePath = '', mapName = '', tileX = null, tileY = null, tiles = [], stagedAdtPath = '', areaTablePath = '', selectedArtifacts = {}, buildPlan = {} } = {}) => {
   try {
     const artifacts = {
       adt: selectedArtifacts.adt !== false,
@@ -4403,6 +4403,12 @@ ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', stan
     if (!resolvedMap || !Number.isInteger(resolvedX) || !Number.isInteger(resolvedY)) return { success: false, error: 'A map and numeric tile coordinates are required.' };
 
     const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const primaryTile = { x: resolvedX, y: resolvedY };
+    const requestedTiles = (tiles.length ? tiles : [primaryTile]).map(tile => ({ x: Number(tile.x), y: Number(tile.y) }))
+      .filter(tile => Number.isInteger(tile.x) && Number.isInteger(tile.y));
+    const uniqueTiles = [...new Map(requestedTiles.map(tile => [`${tile.x}_${tile.y}`, tile])).values()];
+    if (sourceType === 'standalone' && uniqueTiles.length > 1) return { success: false, error: 'A standalone ADT file can only prepare one tile at a time.' };
+    if (!uniqueTiles.some(tile => tile.x === resolvedX && tile.y === resolvedY)) uniqueTiles.unshift(primaryTile);
     let adtBuffer;
     let inputPath = source.standalonePath || source.resolvedPath || null;
     if (stagedAdtPath) {
@@ -4418,14 +4424,28 @@ ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', stan
     }
     if (!adtBuffer || adtBuffer.length < 8) return { success: false, error: 'The selected ADT could not be read.' };
 
+    const adtInputs = [{ tile: primaryTile, buffer: adtBuffer }];
+    for (const tile of uniqueTiles) {
+      if (tile.x === resolvedX && tile.y === resolvedY) continue;
+      if (sourceType === 'standalone') continue;
+      const buffer = source.overlayDataPath
+        ? await getMpqReader().readAdtBufferLayered(source.dataPath, source.overlayDataPath, resolvedMap, tile.x, tile.y)
+        : await getMpqReader().readAdtBuffer(source.dataPath, resolvedMap, tile.x, tile.y);
+      if (!buffer || buffer.length < 8) return { success: false, error: `The selected client ADT ${resolvedMap} ${tile.x},${tile.y} could not be read.` };
+      adtInputs.push({ tile, buffer });
+    }
+
     const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-    const jobId = `${stamp}-${adtSafeOutputSegment(resolvedMap)}-${resolvedX}-${resolvedY}`;
+    const jobId = `${stamp}-${adtSafeOutputSegment(resolvedMap)}-${resolvedX}-${resolvedY}${adtInputs.length > 1 ? `-batch-${adtInputs.length}` : ''}`;
     const jobRoot = path.join(uiOutputRoot, 'server-build', jobId);
     const mapFolder = adtSafeOutputSegment(resolvedMap);
     const overlayRoot = path.join(jobRoot, 'client-overlay');
-    const overlayAdtPath = path.join(overlayRoot, 'World', 'Maps', mapFolder, `${mapFolder}_${resolvedX}_${resolvedY}.adt`);
-    fs.mkdirSync(path.dirname(overlayAdtPath), { recursive: true });
-    fs.writeFileSync(overlayAdtPath, adtBuffer);
+    const overlayAdtPaths = adtInputs.map(({ tile, buffer }) => path.join(overlayRoot, 'World', 'Maps', mapFolder, `${mapFolder}_${tile.x}_${tile.y}.adt`));
+    for (let index = 0; index < adtInputs.length; index += 1) {
+      fs.mkdirSync(path.dirname(overlayAdtPaths[index]), { recursive: true });
+      fs.writeFileSync(overlayAdtPaths[index], adtInputs[index].buffer);
+    }
+    const overlayAdtPath = overlayAdtPaths[0];
 
     let overlayAreaTablePath = null;
     let areaTableBuffer = null;
@@ -4454,23 +4474,27 @@ ipcMain.handle('adt:prepareServerTile', async (_, { sourceType = 'current', stan
     const manifest = {
       schemaVersion: 2,
       status: 'staged',
+      warnings: [],
+      errors: [],
       createdAt: new Date().toISOString(),
       map: { name: resolvedMap, id: mapIdForName(resolvedMap) ?? null },
       tile: { x: resolvedX, y: resolvedY },
+      tiles: adtInputs.map(({ tile, buffer }, index) => ({ x: tile.x, y: tile.y, adt: path.relative(jobRoot, overlayAdtPaths[index]).replace(/\\/g, '\\'), bytes: buffer.length, sha256: hashBuffer(buffer) })),
       source: { type: sourceType, inputPath },
       overlay: {
         adt: path.relative(jobRoot, overlayAdtPath).replace(/\\/g, '\\'),
+        adts: overlayAdtPaths.map(value => path.relative(jobRoot, value).replace(/\\/g, '\\')),
         areaTable: overlayAreaTablePath ? path.relative(jobRoot, overlayAreaTablePath).replace(/\\/g, '\\') : null,
       },
       selectedArtifacts: artifacts,
       buildPlan: outputs,
-      files: { adtBytes: adtBuffer.length, adtSha256: hashBuffer(adtBuffer), areaTableBytes: areaTableBuffer?.length || null, areaTableSha256: areaTableBuffer ? hashBuffer(areaTableBuffer) : null, areaTableSource },
+      files: { adtBytes: adtBuffer.length, adtSha256: hashBuffer(adtBuffer), adtCount: adtInputs.length, areaTableBytes: areaTableBuffer?.length || null, areaTableSha256: areaTableBuffer ? hashBuffer(areaTableBuffer) : null, areaTableSource },
       extractors: { map: outputs.map ? 'planned' : 'not selected', vmap: outputs.vmap ? 'planned' : 'not selected', mmap: outputs.mmap ? 'planned' : 'not selected' },
       note: 'Safe staging only. No client or server source files were modified.'
     };
     const manifestPath = path.join(jobRoot, 'manifest.json');
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-    return { success: true, jobId, jobRoot, overlayAdtPath, overlayAreaTablePath, manifestPath, selectedArtifacts: artifacts, buildPlan: outputs, message: `Prepared server-data staging for ${resolvedMap} ${resolvedX},${resolvedY}. ${Object.values(artifacts).filter(Boolean).length} client item(s) selected; no extractor was run.` };
+    return { success: true, jobId, jobRoot, overlayAdtPath, overlayAdtPaths, tileCount: adtInputs.length, overlayAreaTablePath, manifestPath, selectedArtifacts: artifacts, buildPlan: outputs, message: `Prepared server-data staging for ${resolvedMap} ${resolvedX},${resolvedY} and ${adtInputs.length - 1} neighboring tile(s). ${Object.values(artifacts).filter(Boolean).length} client item(s) selected; no extractor was run.` };
   } catch (e) { console.error('adt:prepareServerTile error:', e); return { success: false, error: e.message }; }
 });
 
@@ -4484,16 +4508,23 @@ ipcMain.handle('adt:runMapExtractor', async (_, { jobRoot = '' } = {}) => {
     if (!fs.existsSync(manifestPath)) return { success: false, error: 'The staging manifest was not found. Prepare the server tile first.' };
     const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
     if (manifest.buildPlan?.map === false) return { success: false, error: 'The .map output is not selected in this staging job.' };
-    const relativeAdt = String(manifest.overlay?.adt || '').replace(/[\\/]+/g, path.sep);
-    const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
-    if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) return { success: false, error: 'The staged ADT is missing from the job overlay.' };
-    const result = extractAdtMapTile({ adtPath, outputRoot: path.join(resolvedJobRoot, 'server-output'), mapName: manifest.map?.name, mapId: manifest.map?.id, tileX: Number(manifest.tile?.x), tileY: Number(manifest.tile?.y) });
+    const manifestTiles = Array.isArray(manifest.tiles) && manifest.tiles.length ? manifest.tiles : [{ x: manifest.tile?.x, y: manifest.tile?.y, adt: manifest.overlay?.adt }];
+    const results = [];
+    for (const tile of manifestTiles) {
+      const relativeAdt = String(tile.adt || '').replace(/[\\/]+/g, path.sep);
+      const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
+      if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) return { success: false, error: `The staged ADT is missing for tile ${tile.x},${tile.y}.` };
+      results.push(extractAdtMapTile({ adtPath, outputRoot: path.join(resolvedJobRoot, 'server-output'), mapName: manifest.map?.name, mapId: manifest.map?.id, tileX: Number(tile.x), tileY: Number(tile.y) }));
+    }
+    const result = results[0];
     manifest.status = 'map-generated';
     manifest.extractors = { ...(manifest.extractors || {}), map: 'generated' };
-    manifest.outputs = { ...(manifest.outputs || {}), map: { path: path.relative(resolvedJobRoot, result.outputPath).replace(/\\/g, '\\'), bytes: result.bytes, sha256: result.sha256, warnings: result.warnings } };
+    const mapWarnings = results.flatMap(item => item.warnings || []);
+    manifest.warnings = [...(manifest.warnings || []).filter(item => item.phase !== 'map'), ...mapWarnings.map(message => ({ phase: 'map', message }))];
+    manifest.outputs = { ...(manifest.outputs || {}), map: { path: path.relative(resolvedJobRoot, result.outputPath).replace(/\\/g, '\\'), files: results.map(item => ({ path: path.relative(resolvedJobRoot, item.outputPath).replace(/\\/g, '\\'), bytes: item.bytes, sha256: item.sha256, warnings: item.warnings })), count: results.length, bytes: result.bytes, sha256: result.sha256, warnings: mapWarnings } };
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-    return { success: true, ...result, manifestPath, message: `Generated .map for ${manifest.map?.name} ${manifest.tile?.x},${manifest.tile?.y}. Output: ${result.outputPath}` };
-  } catch (e) { console.error('adt:runMapExtractor error:', e); return { success: false, error: e.message }; }
+    return { success: true, ...result, results, manifestPath, message: `Generated .map for ${manifest.map?.name} ${manifestTiles.length} tile(s). Output: ${results.map(item => item.outputPath).join(', ')}` };
+  } catch (e) { recordAdtManifestDiagnostic(jobRoot, 'error', 'map', e.message); console.error('adt:runMapExtractor error:', e); return { success: false, error: e.message }; }
 });
 
 function adtServerDataPaths(config) {
@@ -4502,10 +4533,12 @@ function adtServerDataPaths(config) {
   const mapsPath = path.resolve(configuredMapsPath);
   if (path.basename(mapsPath).toLowerCase() !== 'maps') return { error: 'The configured maps path must point to the server data\\maps folder.' };
   const dataRoot = path.dirname(mapsPath);
-  const toolRoot = config?.serverPaths?.worldExe && fs.existsSync(config.serverPaths.worldExe)
+  const preferredRoot = config?.serverPaths?.worldExe && fs.existsSync(config.serverPaths.worldExe)
     ? path.dirname(config.serverPaths.worldExe)
     : path.dirname(dataRoot);
-  return { mapsPath, vmapsPath: path.join(dataRoot, 'vmaps'), mmapsPath: path.join(dataRoot, 'mmaps'), dataRoot, toolRoot };
+  const serverRoot = path.dirname(dataRoot);
+  const toolPaths = resolveServerTools({ serverRoot, preferredRoot });
+  return { mapsPath, vmapsPath: path.join(dataRoot, 'vmaps'), mmapsPath: path.join(dataRoot, 'mmaps'), dataRoot, serverRoot, toolRoot: preferredRoot, toolPaths };
 }
 
 function adtManifestPath(jobRoot) {
@@ -4521,11 +4554,34 @@ function loadAdtBuildManifest(jobRoot, uiOutputRoot) {
   return { resolvedJobRoot, manifestPath, manifest: JSON.parse(fs.readFileSync(manifestPath, 'utf8')) };
 }
 
+function recordAdtManifestDiagnostic(jobRoot, type, phase, message) {
+  try {
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const { manifestPath, manifest } = loadAdtBuildManifest(jobRoot, uiOutputRoot);
+    const key = type === 'error' ? 'errors' : 'warnings';
+    manifest[key] = Array.isArray(manifest[key]) ? manifest[key] : [];
+    manifest[key].push({ phase, message, at: new Date().toISOString() });
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+  } catch { /* diagnostic persistence must not hide the original extractor error */ }
+}
+
 function stagedAdtFromManifest(resolvedJobRoot, manifest) {
   const relativeAdt = String(manifest.overlay?.adt || '').replace(/[\\/]+/g, path.sep);
   const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
   if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) throw new Error('The staged ADT is missing from the job overlay.');
   return adtPath;
+}
+
+function stagedAdtsFromManifest(resolvedJobRoot, manifest) {
+  const entries = Array.isArray(manifest.tiles) && manifest.tiles.length
+    ? manifest.tiles
+    : [{ x: manifest.tile?.x, y: manifest.tile?.y, adt: manifest.overlay?.adt }];
+  return entries.map(tile => {
+    const relativeAdt = String(tile.adt || '').replace(/[\\/]+/g, path.sep);
+    const adtPath = path.resolve(resolvedJobRoot, relativeAdt);
+    if (!adtPathInside(resolvedJobRoot, adtPath) || !fs.existsSync(adtPath)) throw new Error(`The staged ADT is missing for tile ${tile.x},${tile.y}.`);
+    return { tileX: Number(tile.x), tileY: Number(tile.y), path: adtPath };
+  });
 }
 
 ipcMain.handle('adt:inspectVmapDependencies', async (_, { jobRoot = '' } = {}) => {
@@ -4538,13 +4594,95 @@ ipcMain.handle('adt:inspectVmapDependencies', async (_, { jobRoot = '' } = {}) =
     if (server.error) return { success: false, error: server.error };
     if (!fs.existsSync(server.vmapsPath)) return { success: false, error: `Server vmaps directory not found: ${server.vmapsPath}` };
     const mapId = Number.isInteger(Number(manifest.map?.id)) ? Number(manifest.map.id) : mapIdForName(manifest.map?.name);
-    const adtPath = stagedAdtFromManifest(resolvedJobRoot, manifest);
-    const result = inspectVmapDependencies({ adtPath, serverVmapsPath: server.vmapsPath, mapId, tileX: Number(manifest.tile?.x), tileY: Number(manifest.tile?.y) });
+    const stagedAdts = stagedAdtsFromManifest(resolvedJobRoot, manifest);
+    const stagedBuffers = stagedAdts.map(item => fs.readFileSync(item.path));
+    const result = inspectVmapDependencies({
+      adtPath: stagedAdts[0].path,
+      adtBuffers: stagedBuffers.slice(1),
+      adtEntries: stagedAdts.map((item, index) => ({ tileX: item.tileX, tileY: item.tileY, buffer: stagedBuffers[index] })),
+      serverVmapsPath: server.vmapsPath,
+      mapId,
+      tileX: stagedAdts[0].tileX,
+      tileY: stagedAdts[0].tileY,
+    });
     manifest.extractors = { ...(manifest.extractors || {}), vmap: 'dependencies-inspected' };
     manifest.vmapDependencies = result;
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
     return { success: true, ...result, manifestPath, message: result.message };
-  } catch (e) { console.error('adt:inspectVmapDependencies error:', e); return { success: false, error: e.message }; }
+  } catch (e) { recordAdtManifestDiagnostic(jobRoot, 'error', 'vmap-dependencies', e.message); console.error('adt:inspectVmapDependencies error:', e); return { success: false, error: e.message }; }
+});
+
+ipcMain.handle('adt:runVmapExtractor', async (_, { jobRoot = '' } = {}) => {
+  try {
+    const uiOutputRoot = path.resolve(getUiOutputRoot());
+    const { resolvedJobRoot, manifestPath, manifest } = loadAdtBuildManifest(jobRoot, uiOutputRoot);
+    if (manifest.buildPlan?.vmap === false) return { success: false, error: 'The VMap output is not selected in this staging job.' };
+    const configPath = getConfigPath();
+    const config = fs.existsSync(configPath) ? JSON.parse(fs.readFileSync(configPath, 'utf8')) : {};
+    const server = adtServerDataPaths(config);
+    if (server.error) return { success: false, error: server.error };
+    const clientDataPath = String(config.worldmapMpqPath || '').trim();
+    if (!clientDataPath || !getMpqReader().isDataPath(clientDataPath)) return { success: false, error: 'Configure a valid Current Client Data path in Settings first.' };
+    const mapId = Number.isInteger(Number(manifest.map?.id)) ? Number(manifest.map.id) : mapIdForName(manifest.map?.name);
+    const tileX = Number(manifest.tile?.x), tileY = Number(manifest.tile?.y);
+    if (!Number.isInteger(mapId)) return { success: false, error: `No numeric map ID is known for ${manifest.map?.name || 'this map'}.` };
+    const stagedAdts = stagedAdtsFromManifest(resolvedJobRoot, manifest);
+    const reader = getMpqReader();
+    const readClientFile = async names => {
+      for (const name of names) {
+        const buffer = await reader.readFileFromMpqs(clientDataPath, name);
+        if (buffer) return buffer;
+      }
+      return null;
+    };
+    const mapDbcBuffer = await readClientFile(['DBFilesClient\\Map.dbc', 'Map.dbc']);
+    const gameObjectDbcBuffer = await readClientFile(['DBFilesClient\\GameObjectDisplayInfo.dbc', 'GameObjectDisplayInfo.dbc']);
+    const result = await runTargetVmap({
+      jobRoot: resolvedJobRoot,
+      clientDataPath,
+      serverVmapsPath: server.vmapsPath,
+      mpqEditorPath: config?.serverPaths?.mpqEditorExe || '',
+      stagedAdtPath: stagedAdts[0].path,
+      stagedAdts,
+      mapDbcBuffer,
+      gameObjectDbcBuffer,
+      mapId,
+      mapName: manifest.map?.name,
+      tileX,
+      tileY,
+      toolPaths: server.toolPaths,
+      onProgress: progress => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('adt:progress', progress);
+      },
+    });
+    manifest.status = 'vmap-generated';
+    manifest.extractors = { ...(manifest.extractors || {}), vmap: 'generated' };
+    manifest.outputs = {
+      ...(manifest.outputs || {}),
+      vmap: { path: result.outputTile ? path.relative(resolvedJobRoot, result.outputTile).replace(/\\/g, '\\') : null, files: (result.outputTiles || []).map(item => ({ tileX: item.tileX, tileY: item.tileY, path: item.outputTile ? path.relative(resolvedJobRoot, item.outputTile).replace(/\\/g, '\\') : null, generated: item.generated !== false, included: item.included !== false, changed: item.changed === true, status: item.status || (item.generated === false ? 'no-collision' : item.changed ? 'changed' : 'unchanged'), referenceCount: item.referenceCount || 0, bytes: item.bytes })), count: result.outputTiles?.length || 1, bytes: result.tileBytes },
+      vmapTree: { path: result.outputTree ? path.relative(resolvedJobRoot, result.outputTree).replace(/\\/g, '\\') : null, changed: result.treeChanged === true, bytes: result.treeBytes },
+      vmapDelta: { changedFileCount: result.changedFileCount, changedBytes: result.changedBytes, generatedFileCount: result.generatedFileCount, files: result.changedFiles },
+    };
+    manifest.vmapDependencies = result.modelDependencies;
+    const unresolved = result.modelDependencies?.unresolvedModels || [];
+    const unresolvedByTile = (result.modelDependencies?.perTile || [])
+      .filter(item => item.counts?.unresolved)
+      .map(item => `${item.tileX},${item.tileY}: ${item.counts.unresolved}`)
+      .join('; ');
+    const unresolvedMessage = unresolvedByTile
+      ? `${unresolved.length} referenced model asset(s) remain unresolved after VMap generation (${unresolvedByTile}).`
+      : `${unresolved.length} referenced model asset(s) remain unresolved after VMap generation.`;
+    manifest.warnings = [...(manifest.warnings || []).filter(item => item.phase !== 'vmap'), ...(unresolved.length ? [{ phase: 'vmap', code: 'unresolved-model-assets', message: unresolvedMessage }] : [])];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('adt:progress', { jobRoot: resolvedJobRoot, phase: 'complete', message: 'VMap generation complete', percent: 100 });
+    const modelMessage = result.modelDependencies?.generatedModelAssets?.length
+      ? ` ${result.modelDependencies.generatedModelAssets.length} collision model asset(s) generated.`
+      : ' No new collision model assets were generated.';
+    const tileMessage = result.outputTiles?.some(item => item.outputTile)
+      ? `Output: ${result.outputTiles.filter(item => item.outputTile).map(item => item.outputTile).join(', ')}`
+      : 'No changed collision tile was needed; the live VMap already matches.';
+    return { success: true, ...result, manifestPath, message: `Generated VMap for ${manifest.map?.name} ${result.outputTiles?.length || 1} tile(s). ${tileMessage}.${modelMessage}` };
+  } catch (e) { recordAdtManifestDiagnostic(jobRoot, 'error', 'vmap', e.message); console.error('adt:runVmapExtractor error:', e); return { success: false, error: e.message }; }
 });
 
 ipcMain.handle('adt:runMmapExtractor', async (_, { jobRoot = '' } = {}) => {
@@ -4557,19 +4695,32 @@ ipcMain.handle('adt:runMmapExtractor', async (_, { jobRoot = '' } = {}) => {
     const server = adtServerDataPaths(config);
     if (server.error) return { success: false, error: server.error };
     const mapId = Number.isInteger(Number(manifest.map?.id)) ? Number(manifest.map.id) : mapIdForName(manifest.map?.name);
-    const tileX = Number(manifest.tile?.x), tileY = Number(manifest.tile?.y);
-    const mapRelative = String(manifest.outputs?.map?.path || '').replace(/[\\/]+/g, path.sep);
-    const mapOutputPath = path.resolve(resolvedJobRoot, mapRelative || path.join('server-output', 'maps', mapFileName(mapId, tileX, tileY)));
-    if (!adtPathInside(resolvedJobRoot, mapOutputPath) || !fs.existsSync(mapOutputPath)) return { success: false, error: 'Generate the staged .map before generating MMAP.' };
-    const result = await runTargetMmap({ jobRoot: resolvedJobRoot, serverMapsPath: server.mapsPath, serverVmapsPath: server.vmapsPath, toolRoot: server.toolRoot, mapId, tileX, tileY, mapOutputPath, configPath: path.join(server.toolRoot, 'mmaps-config.yaml') });
-    const outputs = { ...(manifest.outputs || {}), mmap: { path: path.relative(resolvedJobRoot, result.outputTile).replace(/\\/g, '\\'), bytes: result.bytes } };
+    const tiles = Array.isArray(manifest.tiles) && manifest.tiles.length ? manifest.tiles : [{ x: manifest.tile?.x, y: manifest.tile?.y }];
+    const mapFiles = Array.isArray(manifest.outputs?.map?.files) ? manifest.outputs.map.files : [];
+    const mmapTiles = tiles.map(tile => {
+      const listed = mapFiles.find(item => Number(item.tileX ?? item.x) === Number(tile.x) && Number(item.tileY ?? item.y) === Number(tile.y));
+      const mapRelative = String(listed?.path || (Number(tile.x) === Number(manifest.tile?.x) && Number(tile.y) === Number(manifest.tile?.y) ? manifest.outputs?.map?.path : '') || '').replace(/[\\/]+/g, path.sep);
+      return { tileX: Number(tile.x), tileY: Number(tile.y), mapOutputPath: path.resolve(resolvedJobRoot, mapRelative || path.join('server-output', 'maps', mapFileName(mapId, Number(tile.x), Number(tile.y)))) };
+    });
+    if (mmapTiles.some(tile => !adtPathInside(resolvedJobRoot, tile.mapOutputPath) || !fs.existsSync(tile.mapOutputPath))) return { success: false, error: 'Generate all staged .map tiles before generating MMAP.' };
+    const { tileX, tileY } = mmapTiles[0];
+    const result = await runTargetMmap({ jobRoot: resolvedJobRoot, serverMapsPath: server.mapsPath, serverMmapsPath: server.mmapsPath, serverVmapsPath: server.vmapsPath, toolRoot: server.toolRoot, executablePath: server.toolPaths?.mmapGenerator, mapId, tileX, tileY, mapOutputPath: mmapTiles[0].mapOutputPath, tiles: mmapTiles, configPath: server.toolPaths?.mmapsConfig || path.join(server.toolRoot, 'mmaps-config.yaml'), onProgress: progress => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('adt:progress', progress);
+    } });
+    const outputs = { ...(manifest.outputs || {}), mmap: { path: path.relative(resolvedJobRoot, result.outputTile).replace(/\\/g, '\\'), files: (result.outputTiles || []).map(item => ({ tileX: item.tileX, tileY: item.tileY, path: path.relative(resolvedJobRoot, item.outputTile).replace(/\\/g, '\\'), bytes: item.bytes })), count: result.outputTiles?.length || 1, bytes: result.bytes, inputMapCount: result.inputMapCount, rootMatchesLive: result.rootMatchesLive, vmapInput: result.vmapInput } };
     if (result.outputMmap) outputs.mmapRoot = { path: path.relative(resolvedJobRoot, result.outputMmap).replace(/\\/g, '\\'), bytes: fs.statSync(result.outputMmap).size };
     manifest.status = 'mmap-generated';
     manifest.extractors = { ...(manifest.extractors || {}), mmap: 'generated' };
+    manifest.warnings = [...(manifest.warnings || []).filter(item => item.phase !== 'mmap'), ...(result.rootMatchesLive === false ? [{ phase: 'mmap', code: 'root-mismatch', message: 'Generated 001.mmap differs from the live navmesh root.' }] : [])];
     manifest.outputs = outputs;
     fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2), 'utf8');
-    return { success: true, ...result, manifestPath, message: `Generated MMAP for ${manifest.map?.name} ${tileX},${tileY}. Output: ${result.outputTile}` };
-  } catch (e) { console.error('adt:runMmapExtractor error:', e); return { success: false, error: e.message }; }
+    const rootNote = result.rootMatchesLive === false ? ' WARNING: generated 001.mmap differs from the live navmesh root; do not deploy this output yet.' : result.rootMatchesLive === true ? ' Navmesh root matches the live server.' : '';
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('adt:progress', { jobRoot: resolvedJobRoot, phase: 'complete', message: 'MMAP generation complete', percent: 100 });
+    const vmapNote = result.vmapInput?.source === 'staged-vmap-overlay'
+      ? ` Used ${result.vmapInput.stagedFileCount} staged VMap file(s) over the live VMap base.`
+      : ' Used the live server VMaps because this job has no generated VMap overlay.';
+    return { success: true, ...result, manifestPath, message: `Generated MMAP for ${manifest.map?.name} ${result.outputTiles?.length || 1} tile(s) using ${result.inputMapCount} map input(s). Output: ${result.outputTiles?.map(item => item.outputTile).join(', ')}.${rootNote}${vmapNote}` };
+  } catch (e) { recordAdtManifestDiagnostic(jobRoot, 'error', 'mmap', e.message); console.error('adt:runMmapExtractor error:', e); return { success: false, error: e.message }; }
 });
 
 function parseAdt(buf) {
