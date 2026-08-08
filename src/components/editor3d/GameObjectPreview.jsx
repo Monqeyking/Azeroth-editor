@@ -101,7 +101,7 @@ function sampleParticleKeys(keys, phase, fallback) {
   return a + ((b - a) * amount);
 }
 
-function makeAnimator(animationData) {
+export function makeAnimator(animationData) {
   if (!animationData?.animations?.length || !animationData.bones?.length) return null;
   const positions = toF32(animationData.positionsM2);
   const normals = toF32(animationData.normalsM2);
@@ -162,6 +162,7 @@ function makeAnimator(animationData) {
   const bonePosition = new THREE.Vector3();
 
   return {
+    isAnimated: hasAnimatedMesh,
     getBonePosition(boneIndex, point, timeMs) {
       const matrix = buildWorldMatrices(timeMs)[boneIndex];
       if (!matrix) return point;

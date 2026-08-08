@@ -4,9 +4,11 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const os = require('os');
 const net = require('net');
 const { spawn, execFile } = require('child_process');
 const { Worker } = require('worker_threads');
+const { performance } = require('perf_hooks');
 let nodePty = null;
 try { nodePty = require('node-pty'); } catch (e) { console.warn('node-pty not available, falling back to pipe spawn'); }
 
@@ -71,6 +73,48 @@ let iconsZip = null;
 let iconCache = {};
 let spellDbcCache = null;
 let soapRequestId = 0;
+
+function getRuntimeResourceProfile() {
+  const cores = Math.max(1, os.cpus()?.length || 4);
+  const totalMemoryMb = Math.round(os.totalmem() / 1024 / 1024);
+  const freeMemoryMb = Math.round(os.freemem() / 1024 / 1024);
+  const memoryPressure = freeMemoryMb < 2048 || freeMemoryMb / Math.max(1, totalMemoryMb) < 0.12;
+  const conservative = memoryPressure || cores <= 4 || totalMemoryMb <= 8192;
+  const performance = !conservative && cores >= 8 && totalMemoryMb >= 16384;
+  return {
+    tier: conservative ? 'conservative' : performance ? 'performance' : 'balanced',
+    cores,
+    totalMemoryMb,
+    freeMemoryMb,
+    memoryPressure,
+    textureWorkers: conservative ? 1 : 2,
+    wmoWorkers: conservative ? 1 : performance ? 2 : 1,
+    assetIoConcurrency: conservative ? 3 : 6,
+    terrainBatchMax: conservative ? 10 : performance ? 16 : 12,
+    textureBatchMax: conservative ? 2 : performance ? 4 : 3,
+    wmoBatchMax: conservative ? 6 : performance ? 10 : 8,
+    waterBatchMax: conservative ? 3 : performance ? 6 : 4,
+    terrainRequestConcurrency: conservative ? 1 : 2,
+    textureRequestConcurrency: conservative ? 1 : 2,
+    wmoRequestConcurrency: conservative ? 1 : 2,
+    waterRequestConcurrency: conservative ? 1 : 2,
+    textureUploadsPerFrame: conservative ? 2 : performance ? 6 : 4,
+    wmoAssetConcurrency: conservative ? 2 : 3,
+    doodadConcurrency: conservative ? 2 : 4,
+    m2RequestConcurrency: conservative ? 2 : 4,
+    dprMax: conservative ? 1 : performance ? 1.5 : 1.25,
+  };
+}
+
+ipcMain.handle('system:getResourceProfile', async (event) => {
+  const profile = getRuntimeResourceProfile();
+  try {
+    const memory = await event.sender.getProcessMemoryInfo();
+    profile.rendererWorkingSetMb = Math.round((memory?.workingSetSize || 0) / 1024);
+    profile.rendererPrivateMb = Math.round((memory?.privateBytes || 0) / 1024);
+  } catch (_) {}
+  return profile;
+});
 
 // Server process management
 let authProc = null;
@@ -574,7 +618,8 @@ function createWindow() {
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
-      nodeIntegration: false
+      nodeIntegration: false,
+      backgroundThrottling: false
     }
   });
 
@@ -3363,38 +3408,91 @@ function downsampleMask(src, w, h) {
   return mask;
 }
 
-let assetWorker = null;
 let assetWorkerRequestId = 0;
+const assetWorkerPool = [];
+const assetWorkerQueue = [];
 const assetWorkerPending = new Map();
 let m2AssetWorker = null;
 const m2AssetWorkerPending = new Map();
 
-function getAssetWorker() {
-  if (assetWorker) return assetWorker;
+function createAssetWorker() {
   const decoderSource = [rgb565, dxt1Colors, writeDXTPixels, decodeDXT1, decodeDXT3, decodeDXT5, decodeBLP1, decodeBLP]
     .map(fn => fn.toString()).join('\n');
-  assetWorker = new Worker(path.join(__dirname, 'asset-worker.js'), { workerData: { decoderSource } });
-  assetWorker.on('message', ({ id, result, error }) => {
+  const entry = { thread: null, busy: false, current: null, removing: false };
+  entry.thread = new Worker(path.join(__dirname, 'asset-worker.js'), {
+    workerData: { decoderSource, assetIoConcurrency: getRuntimeResourceProfile().assetIoConcurrency },
+  });
+  entry.thread.on('message', ({ id, result, error }) => {
     const pending = assetWorkerPending.get(id);
     if (!pending) return;
     assetWorkerPending.delete(id);
+    entry.busy = false;
+    entry.current = null;
     if (error) pending.reject(new Error(error)); else pending.resolve(result);
+    pumpAssetWorkerQueue();
   });
   const fail = (error) => {
-    for (const { reject } of assetWorkerPending.values()) reject(error);
-    assetWorkerPending.clear();
-    assetWorker = null;
+    const index = assetWorkerPool.indexOf(entry);
+    if (index >= 0) assetWorkerPool.splice(index, 1);
+    if (entry.current) {
+      const pending = assetWorkerPending.get(entry.current.id);
+      if (pending) {
+        assetWorkerPending.delete(entry.current.id);
+        pending.reject(error);
+      }
+    }
+    entry.busy = false;
+    entry.current = null;
+    if (!entry.removing) ensureAssetWorkerPool();
+    pumpAssetWorkerQueue();
   };
-  assetWorker.on('error', fail);
-  assetWorker.on('exit', code => { if (code) fail(new Error(`Asset worker stopped (${code})`)); });
-  return assetWorker;
+  entry.thread.on('error', fail);
+  entry.thread.on('exit', code => {
+    if (code && !entry.removing) fail(new Error(`Asset worker stopped (${code})`));
+  });
+  assetWorkerPool.push(entry);
+  return entry;
+}
+
+let assetWorkerTargetCount = 1;
+
+function ensureAssetWorkerPool(target = assetWorkerTargetCount) {
+  assetWorkerTargetCount = Math.max(1, Math.min(2, Number(target) || 1));
+  while (assetWorkerPool.length < assetWorkerTargetCount) createAssetWorker();
+  for (const entry of [...assetWorkerPool]) {
+    if (assetWorkerPool.length <= assetWorkerTargetCount || entry.busy) continue;
+    entry.removing = true;
+    assetWorkerPool.splice(assetWorkerPool.indexOf(entry), 1);
+    void entry.thread.terminate();
+  }
+}
+
+function pumpAssetWorkerQueue() {
+  ensureAssetWorkerPool();
+  for (const entry of assetWorkerPool) {
+    if (entry.busy || !assetWorkerQueue.length) continue;
+    const task = assetWorkerQueue.shift();
+    entry.busy = true;
+    entry.current = task;
+    assetWorkerPending.set(task.id, { resolve: task.resolve, reject: task.reject });
+    try {
+      entry.thread.postMessage({ id: task.id, type: task.type, payload: task.payload });
+    } catch (error) {
+      assetWorkerPending.delete(task.id);
+      entry.busy = false;
+      entry.current = null;
+      task.reject(error);
+      pumpAssetWorkerQueue();
+    }
+  }
 }
 
 function runAssetWorker(type, payload) {
+  if (type === 'decodeBlps') ensureAssetWorkerPool(getRuntimeResourceProfile().textureWorkers);
   const id = ++assetWorkerRequestId;
   return new Promise((resolve, reject) => {
-    assetWorkerPending.set(id, { resolve, reject });
-    getAssetWorker().postMessage({ id, type, payload });
+    assetWorkerQueue.push({ id, type, payload, resolve, reject });
+    pumpAssetWorkerQueue();
   });
 }
 
@@ -3402,7 +3500,9 @@ function getM2AssetWorker() {
   if (m2AssetWorker) return m2AssetWorker;
   const decoderSource = [rgb565, dxt1Colors, writeDXTPixels, decodeDXT1, decodeDXT3, decodeDXT5, decodeBLP1, decodeBLP]
     .map(fn => fn.toString()).join('\n');
-  m2AssetWorker = new Worker(path.join(__dirname, 'asset-worker.js'), { workerData: { decoderSource } });
+  m2AssetWorker = new Worker(path.join(__dirname, 'asset-worker.js'), {
+    workerData: { decoderSource, assetIoConcurrency: getRuntimeResourceProfile().assetIoConcurrency },
+  });
   const fail = (error) => {
     for (const { reject } of m2AssetWorkerPending.values()) reject(error);
     m2AssetWorkerPending.clear();
@@ -3424,6 +3524,93 @@ function runM2AssetWorker(type, payload) {
   return new Promise((resolve, reject) => {
     m2AssetWorkerPending.set(id, { resolve, reject });
     getM2AssetWorker().postMessage({ id, type, payload });
+  });
+}
+
+const wmoAssetWorkerPool = [];
+const wmoAssetWorkerQueue = [];
+const wmoAssetWorkerPending = new Map();
+let wmoAssetWorkerTargetCount = 1;
+
+function createWmoAssetWorker() {
+  const decoderSource = [rgb565, dxt1Colors, writeDXTPixels, decodeDXT1, decodeDXT3, decodeDXT5, decodeBLP1, decodeBLP]
+    .map(fn => fn.toString()).join('\n');
+  const entry = { thread: null, busy: false, current: null, removing: false };
+  entry.thread = new Worker(path.join(__dirname, 'asset-worker.js'), {
+    workerData: {
+      decoderSource,
+      assetIoConcurrency: getRuntimeResourceProfile().assetIoConcurrency,
+    },
+  });
+  const fail = (error) => {
+    const index = wmoAssetWorkerPool.indexOf(entry);
+    if (index >= 0) wmoAssetWorkerPool.splice(index, 1);
+    if (entry.current) {
+      const pending = wmoAssetWorkerPending.get(entry.current.id);
+      if (pending) {
+        wmoAssetWorkerPending.delete(entry.current.id);
+        pending.reject(error);
+      }
+    }
+    entry.busy = false;
+    entry.current = null;
+    if (!entry.removing) ensureWmoAssetWorkerPool();
+    pumpWmoAssetWorkerQueue();
+  };
+  entry.thread.on('message', ({ id, result, error }) => {
+    const pending = wmoAssetWorkerPending.get(id);
+    if (!pending) return;
+    wmoAssetWorkerPending.delete(id);
+    entry.busy = false;
+    entry.current = null;
+    if (error) pending.reject(new Error(error)); else pending.resolve(result);
+    pumpWmoAssetWorkerQueue();
+  });
+  entry.thread.on('error', fail);
+  entry.thread.on('exit', code => {
+    if (code && !entry.removing) fail(new Error(`WMO asset worker stopped (${code})`));
+  });
+  wmoAssetWorkerPool.push(entry);
+  return entry;
+}
+
+function ensureWmoAssetWorkerPool(target = wmoAssetWorkerTargetCount) {
+  wmoAssetWorkerTargetCount = Math.max(1, Math.min(2, Number(target) || 1));
+  while (wmoAssetWorkerPool.length < wmoAssetWorkerTargetCount) createWmoAssetWorker();
+  for (const entry of [...wmoAssetWorkerPool]) {
+    if (wmoAssetWorkerPool.length <= wmoAssetWorkerTargetCount || entry.busy) continue;
+    entry.removing = true;
+    wmoAssetWorkerPool.splice(wmoAssetWorkerPool.indexOf(entry), 1);
+    void entry.thread.terminate();
+  }
+}
+
+function pumpWmoAssetWorkerQueue() {
+  ensureWmoAssetWorkerPool();
+  for (const entry of wmoAssetWorkerPool) {
+    if (entry.busy || !wmoAssetWorkerQueue.length) continue;
+    const task = wmoAssetWorkerQueue.shift();
+    entry.busy = true;
+    entry.current = task;
+    wmoAssetWorkerPending.set(task.id, { resolve: task.resolve, reject: task.reject });
+    try {
+      entry.thread.postMessage({ id: task.id, type: task.type, payload: task.payload });
+    } catch (error) {
+      wmoAssetWorkerPending.delete(task.id);
+      entry.busy = false;
+      entry.current = null;
+      task.reject(error);
+      pumpWmoAssetWorkerQueue();
+    }
+  }
+}
+
+function runWmoAssetWorker(type, payload) {
+  if (type === 'readWmoAsset') ensureWmoAssetWorkerPool(getRuntimeResourceProfile().wmoWorkers);
+  const id = ++assetWorkerRequestId;
+  return new Promise((resolve, reject) => {
+    wmoAssetWorkerQueue.push({ id, type, payload, resolve, reject });
+    pumpWmoAssetWorkerQueue();
   });
 }
 
@@ -4748,6 +4935,7 @@ function parseAdt(buf) {
     const ds       = mcnkOff + 8; // MCNK data start
     const ix       = buf.readUInt32LE(ds + 4);
     const iy       = buf.readUInt32LE(ds + 8);
+    const holes    = buf.readUInt16LE(ds + 60);
     const offsMCVT = buf.readUInt32LE(ds + 20);
     const posX     = buf.readFloatLE(ds + 104);
     const posY     = buf.readFloatLE(ds + 108);
@@ -4776,10 +4964,136 @@ function parseAdt(buf) {
         const v = buf.readFloatLE(hStart + (r * 17 + 9 + c) * 4);
         inner[r * 8 + c] = isFinite(v) ? v : 0;
       }
-    chunks.push({ ix, iy, posX, posY, posZ, outer, inner });
+    chunks.push({ ix, iy, posX, posY, posZ, holes, outer, inner });
   }
   return chunks;
 }
+
+function parseAdtHoles(buf) {
+  let offset = 0;
+  let mcinData = -1;
+  while (offset + 8 <= buf.length) {
+    const magic = buf.slice(offset, offset + 4).toString('ascii');
+    const size = buf.readUInt32LE(offset + 4);
+    if (magic === 'NICM') { mcinData = offset + 8; break; }
+    if (!size) break;
+    offset += 8 + size;
+  }
+  if (mcinData < 0 || mcinData + 256 * 16 > buf.length) return null;
+
+  const holes = new Uint16Array(256);
+  for (let index = 0; index < 256; index++) {
+    const mcnkOff = buf.readUInt32LE(mcinData + index * 16);
+    if (!mcnkOff || mcnkOff + 8 + 62 > buf.length) continue;
+    if (buf.toString('ascii', mcnkOff, mcnkOff + 4) !== 'KNCM') continue;
+    const dataStart = mcnkOff + 8;
+    const ix = buf.readUInt32LE(dataStart + 4);
+    const iy = buf.readUInt32LE(dataStart + 8);
+    if (ix < 16 && iy < 16) holes[iy * 16 + ix] = buf.readUInt16LE(dataStart + 60);
+  }
+  return holes;
+}
+
+function findAdtTopChunk(buf, expectedType) {
+  for (let offset = 0; offset + 8 <= buf.length;) {
+    const rawType = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    if (adtChunkId(rawType) === expectedType) return { data: offset + 8, size };
+    if (!Number.isFinite(size) || offset + 8 + size > buf.length) break;
+    offset += 8 + size;
+  }
+  return null;
+}
+
+function parseAdtWater(buf, tileX, tileY) {
+  const chunk = findAdtTopChunk(buf, 'MH2O');
+  if (!chunk || chunk.size < 16 * 16 * 12) return [];
+
+  const dataStart = chunk.data;
+  const dataEnd = chunk.data + chunk.size;
+  const tileSize = 533.33333;
+  const unitSize = 33.33333 / 8;
+  const baseWowY = (32 - tileY) * tileSize;
+  const baseWowX = (32 - tileX) * tileSize;
+  const layers = [];
+
+  for (let chunkIndex = 0; chunkIndex < 256; chunkIndex++) {
+    const header = dataStart + chunkIndex * 12;
+    const offsetInstances = buf.readUInt32LE(header);
+    const layerCount = buf.readUInt32LE(header + 4);
+    if (!offsetInstances || !layerCount || offsetInstances + layerCount * 24 > chunk.size) continue;
+    const chunkX = chunkIndex % 16;
+    const chunkY = Math.floor(chunkIndex / 16);
+
+    for (let layerIndex = 0; layerIndex < layerCount; layerIndex++) {
+      const info = dataStart + offsetInstances + layerIndex * 24;
+      const liquidType = buf.readUInt16LE(info);
+      const liquidObjectOrLvf = buf.readUInt16LE(info + 2);
+      const heightLevel1 = buf.readFloatLE(info + 4);
+      const heightLevel2 = buf.readFloatLE(info + 8);
+      const xOffset = buf[info + 12];
+      const yOffset = buf[info + 13];
+      const width = Math.min(8 - Math.min(8, xOffset), buf[info + 14]);
+      const height = Math.min(8 - Math.min(8, yOffset), buf[info + 15]);
+      const offsetExistsBitmap = buf.readUInt32LE(info + 16);
+      const offsetVertexData = buf.readUInt32LE(info + 20);
+      if (!width || !height || xOffset > 8 || yOffset > 8) continue;
+
+      const bitmapSize = Math.ceil((width * height) / 8);
+      const bitmapStart = offsetExistsBitmap ? dataStart + offsetExistsBitmap : -1;
+      const hasBitmap = bitmapStart >= dataStart
+        && bitmapStart + bitmapSize <= dataEnd;
+
+      const lvf = liquidObjectOrLvf < 42 ? liquidObjectOrLvf & 3 : 0;
+      const vertexCount = (width + 1) * (height + 1);
+      const vertexDataSize = [vertexCount * 5, vertexCount * 8, vertexCount, vertexCount * 9][lvf] || vertexCount * 4;
+      const vertexStart = offsetVertexData ? dataStart + offsetVertexData : -1;
+      const vertexEnd = vertexStart >= 0 ? Math.min(dataEnd, vertexStart + vertexDataSize) : -1;
+      const positions = [];
+      const indices = [];
+      const vertexHeight = (x, y) => {
+        const index = y * (width + 1) + x;
+        const offset = vertexStart + index * 4;
+        if (vertexStart >= 0 && [0, 1, 3].includes(lvf) && offset + 4 <= vertexEnd) {
+          const value = buf.readFloatLE(offset);
+          if (Number.isFinite(value)) return value;
+        }
+        return Number.isFinite(heightLevel1)
+          ? heightLevel1
+          : (Number.isFinite(heightLevel2) ? heightLevel2 : 0);
+      };
+      const addVertex = (x, y) => {
+        const gridX = chunkX * 8 + xOffset + x;
+        const gridY = chunkY * 8 + yOffset + y;
+        positions.push(
+          -(baseWowY - gridX * unitSize),
+          vertexHeight(x, y),
+          -(baseWowX - gridY * unitSize),
+        );
+        return positions.length / 3 - 1;
+      };
+
+      for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
+        const bit = y * width + x;
+        const visible = !hasBitmap || (buf[bitmapStart + Math.floor(bit / 8)] & (1 << (bit % 8))) !== 0;
+        if (!visible) continue;
+        const tl = addVertex(x, y);
+        const tr = addVertex(x + 1, y);
+        const bl = addVertex(x, y + 1);
+        const br = addVertex(x + 1, y + 1);
+        indices.push(tl, bl, tr, tr, bl, br);
+      }
+      if (indices.length) layers.push({
+        chunkX, chunkY, layerIndex, liquidType, flags: liquidObjectOrLvf, lvf,
+        minHeight: heightLevel1, maxHeight: heightLevel2,
+        positions: new Float32Array(positions),
+        indices: new Uint32Array(indices),
+      });
+    }
+  }
+  return layers;
+}
+
 const MAP_NAME_TO_ID = { Azeroth: 0, Kalimdor: 1, Expansion01: 530, Northrend: 571 };
 
 function parseMapFile(buf) {
@@ -4817,9 +5131,11 @@ function parseMapFile(buf) {
 function chunksToV9V8(chunks) {
   const v9 = new Float32Array(129 * 129);
   const v8 = new Float32Array(128 * 128);
+  const holes = new Uint16Array(256);
   for (const chunk of chunks) {
     if (!chunk) continue;
     const { ix, iy, posZ, outer, inner } = chunk;
+    if (ix >= 0 && ix < 16 && iy >= 0 && iy < 16) holes[iy * 16 + ix] = chunk.holes || 0;
     const baseZ = isFinite(posZ) ? posZ : 0;
     for (let r = 0; r < 9; r++)
       for (let c = 0; c < 9; c++)
@@ -4828,7 +5144,7 @@ function chunksToV9V8(chunks) {
       for (let c = 0; c < 8; c++)
         v8[(iy * 8 + r) * 128 + (ix * 8 + c)] = baseZ + inner[r * 8 + c];
   }
-  return { v9, v8 };
+  return { v9, v8, holes };
 }
 
 ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
@@ -4838,6 +5154,7 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
 
     const mapsPath = cfg.mapsPath;
+    const dataPath = cfg.worldmapMpqPath;
     if (mapsPath && fs.existsSync(mapsPath)) {
       const mapId = MAP_NAME_TO_ID[mapName] ?? 0;
       const result = [];
@@ -4850,13 +5167,17 @@ ipcMain.handle('adt:getTerrain', async (_, { mapName, tiles }) => {
         const rawBuf = fs.readFileSync(fpath);
         const parsed = parseMapFile(rawBuf);
         if (parsed) {
-          result.push({ tileX, tileY, ...parsed });
+          let holes = null;
+          if (dataPath && getMpqReader().isDataPath(dataPath)) {
+            const adtBuf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
+            holes = adtBuf ? parseAdtHoles(adtBuf) : null;
+          }
+          result.push({ tileX, tileY, ...parsed, ...(holes ? { holes } : {}) });
         }
       }
       return { success: true, data: result };
     }
 
-    const dataPath = cfg.worldmapMpqPath;
     if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
 
     const result = [];
@@ -5334,6 +5655,27 @@ ipcMain.handle('worldcheck:scanDurotar', async (_, { dataPath, serverMapsPath, s
     };
   } catch (e) {
     console.error('worldcheck:scanDurotar error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('adt:getWater', async (_, { mapName, tiles }) => {
+  try {
+    const cfgPath = getConfigPath();
+    if (!fs.existsSync(cfgPath)) return { success: true, data: [] };
+    const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+    const dataPath = cfg.worldmapMpqPath;
+    if (!dataPath || !getMpqReader().isDataPath(dataPath)) return { success: true, data: [] };
+    const reader = getMpqReader();
+    const rows = await Promise.all((tiles || []).map(async ({ tileX, tileY }) => {
+      const buf = await reader.readAdtBuffer(dataPath, mapName, tileY, tileX);
+      if (!buf) return null;
+      const layers = parseAdtWater(buf, tileX, tileY);
+      return layers.length ? { tileX, tileY, layers } : null;
+    }));
+    return { success: true, data: rows.filter(Boolean) };
+  } catch (e) {
+    console.error('adt:getWater error:', e);
     return { success: false, error: e.message };
   }
 });
@@ -5825,61 +6167,69 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
 
     const wdtBigAlpha = await getWdtBigAlpha(dataPath, mapName);
 
-    const result = [];
-    for (const { tileX, tileY } of tiles) {
-      const buf = await getMpqReader().readAdtBuffer(dataPath, mapName, tileY, tileX);
-      if (!buf) continue;
+    const reader = getMpqReader();
+    const parsedTiles = (await Promise.all((tiles ?? []).map(async ({ tileX, tileY }) => {
+      const buf = await reader.readAdtBuffer(dataPath, mapName, tileY, tileX);
+      if (!buf) return null;
       const parsed = parseAdtTextureLayers(buf, wdtBigAlpha);
-      if (!parsed?.texturePaths.length) {
-        continue;
-      }
-
- // Verzamel unieke texture-indices
+      if (!parsed?.texturePaths.length) return null;
       const usedIdx = new Set();
       for (const chunk of parsed.chunks) {
-        if (chunk) for (const l of chunk.layers) usedIdx.add(l.textureIdx);
+        if (chunk) for (const layer of chunk.layers) usedIdx.add(layer.textureIdx);
       }
+      return { tileX, tileY, parsed, usedIdx };
+    }))).filter(Boolean);
 
- // Laad BLPs parallel ruwe RGBA (geen PNG encode, dat doet de worker)
+    // Decode every unique BLP once for the complete request. Neighboring ADTs share
+    // many base textures, so decoding per tile duplicated a substantial amount of work.
+    const pendingDecode = [];
+    const pendingByPath = new Map();
+    for (const tile of parsedTiles) {
+      for (const idx of tile.usedIdx) {
+        if (idx >= tile.parsed.texturePaths.length) continue;
+        const rawPath = tile.parsed.texturePaths[idx];
+        const cacheKey = rawPath.replace(/\//g, '\\').toLowerCase();
+        if (terrainBlpCache.has(cacheKey) || pendingByPath.has(cacheKey)) continue;
+        const entry = { textureIdx: pendingDecode.length, path: rawPath, cacheKey };
+        pendingDecode.push(entry);
+        pendingByPath.set(cacheKey, entry);
+      }
+    }
+    if (pendingDecode.length) {
+      const decoded = await runAssetWorker('decodeBlps', {
+        dataPath,
+        entries: pendingDecode,
+        ioConcurrency: getRuntimeResourceProfile().assetIoConcurrency,
+      });
+      for (const row of decoded) {
+        const source = pendingDecode[row.textureIdx];
+        if (!source) continue;
+        setTerrainBlpCache(source.cacheKey, row.data
+          ? { data: new Uint8Array(row.data), w: row.w, h: row.h }
+          : null);
+      }
+    }
+
+    // Build per-tile texture palettes; the renderer performs the layer blending on the GPU.
+    const result = parsedTiles.map(({ tileX, tileY, parsed, usedIdx }) => {
       const blpRgba = {};
-      const pendingDecode = [];
       for (const idx of usedIdx) {
         if (idx >= parsed.texturePaths.length) continue;
-        const rawPath = parsed.texturePaths[idx];
-        const cacheKey = rawPath.replace(/\//g, '\\').toLowerCase();
-        if (terrainBlpCache.has(cacheKey)) {
-          const hit = getTerrainBlpCache(cacheKey);
-          if (hit) blpRgba[idx] = hit;
-          continue;
-        }
-        pendingDecode.push({ textureIdx: idx, path: rawPath, cacheKey });
+        const cacheKey = parsed.texturePaths[idx].replace(/\//g, '\\').toLowerCase();
+        const entry = getTerrainBlpCache(cacheKey);
+        if (entry) blpRgba[idx] = entry;
       }
-      if (pendingDecode.length) {
-        const decoded = await runAssetWorker('decodeBlps', { dataPath, entries: pendingDecode });
-        for (const row of decoded) {
-          const source = pendingDecode.find(entry => entry.textureIdx === row.textureIdx);
-          if (!source) continue;
-          const entry = row.data ? { data: new Uint8Array(row.data), w: row.w, h: row.h } : null;
-          setTerrainBlpCache(source.cacheKey, entry);
-          if (entry) blpRgba[row.textureIdx] = entry;
-        }
-      }
-
-      if (!Object.keys(blpRgba).length) continue;
-
- // Bouw per-tile texture-palette + per-chunk layer/alpha-data geen CPU-compositing meer,
- // de renderer blend dit real-time in een shader (zie Editor3DScene.jsx TerrainTile).
-      const chunks = parsed.chunks.map(c => {
-        if (!c) return null;
+      if (!Object.keys(blpRgba).length) return null;
+      const chunks = parsed.chunks.map(chunk => {
+        if (!chunk) return null;
         return {
-          ix: c.ix, iy: c.iy,
-          layers: c.layers.map(l => ({ textureIdx: l.textureIdx, alphaMap: l.alphaMap ?? null })),
+          ix: chunk.ix, iy: chunk.iy,
+          layers: chunk.layers.map(layer => ({ textureIdx: layer.textureIdx, alphaMap: layer.alphaMap ?? null })),
         };
       });
       const { paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha } = buildTilePalette(blpRgba, chunks);
-
-      result.push({ tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha });
-    }
+      return { tileX, tileY, paletteRgba, paletteW, paletteH, paletteCount, chunkTexIndices, chunkAlpha };
+    }).filter(Boolean);
     return { success: true, data: result };
   } catch (e) {
     console.error('adt:getTextureLayers error:', e);
@@ -5987,6 +6337,18 @@ const {
   parseSkinFile, resolveVisibleGeosets, buildGeosetDebugInfo, buildIndicesFromSkin,
   parseCharHairGeosets, parseFacialHairGeosets, parseCreatureDisplayInfoExtra,
 } = require('./m2-geoset');
+
+function buildSubmeshIndexRanges(skin, visibleIndices) {
+  const ranges = new Map();
+  let start = 0;
+  for (let i = 0; i < skin.submeshes.length; i++) {
+    if (!visibleIndices.has(i)) continue;
+    const count = skin.submeshes[i].indexCount;
+    ranges.set(i, { start, count });
+    start += count;
+  }
+  return ranges;
+}
 
 function modelNeedsCreatureTexture(geo) {
   if (!geo?.textures?.length) return false;
@@ -6673,6 +7035,7 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
   const visible = resolveVisibleGeosets(geo.skin.submeshes, cdi, extra, charHair, facialHair);
   const geosetDebug = buildGeosetDebugInfo(geo.skin.submeshes, visible, cdi, extra, charHair, facialHair);
   const indexList = buildIndicesFromSkin(geo.skin, visible);
+  const indexRanges = buildSubmeshIndexRanges(geo.skin, visible);
   if (!indexList.length) return null;
 
   const modelDir = modelPath.includes('\\') ? modelPath.substring(0, modelPath.lastIndexOf('\\') + 1) : '';
@@ -6698,8 +7061,9 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
     const textureIndex = geo.textureLookup?.[unit.textureId];
     const texture = Number.isInteger(textureIndex) ? geo.textures?.[textureIndex] : null;
     const flag = geo.renderFlags?.[unit.flagsIndex] || { flags: 0, blend: 0 };
-    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : tex?.blpPath, blend: flag.blend, renderFlags: flag.flags, order: unit.order, noDepthWrite: !!(flag.flags & 16) };
-  }).filter(pass => geo.skin.submeshes[pass.submeshIndex]);
+    const range = indexRanges.get(unit.submeshIndex);
+    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : tex?.blpPath, blend: flag.blend, renderFlags: flag.flags, order: unit.order, noDepthWrite: !!(flag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
+  }).filter(pass => geo.skin.submeshes[pass.submeshIndex] && indexRanges.has(pass.submeshIndex));
   const passPaths = [...new Set(rawPasses.map(pass => pass.texturePath).filter(Boolean))];
   const decodedPassTextures = passPaths.length ? await runM2AssetWorker('decodeBlps', { dataPath, entries: passPaths.map((path, textureIdx) => ({ textureIdx, path })) }) : [];
   const passTextureByPath = new Map(decodedPassTextures.filter(row => row.data).map(row => [passPaths[row.textureIdx].toLowerCase(), { rgba: new Uint8Array(row.data), w: row.w, h: row.h, path: passPaths[row.textureIdx] }]));
@@ -6877,6 +7241,7 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
         return out;
       })
     : buildIndicesFromSkin(geo.skin, visible);
+  const indexRanges = buildSubmeshIndexRanges(geo.skin, visible);
   pushStep('indices', 'visible=' + visible.size + ' final=' + indexList.length + (isLoginBackdrop ? ' (login backdrop: all submeshes)' : ''));
   if (!indexList.length) {
     pushStep('abort', 'no indices');
@@ -6887,8 +7252,9 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
     const textureIndex = geo.textureLookup?.[unit.textureId];
     const texture = Number.isInteger(textureIndex) ? geo.textures?.[textureIndex] : null;
     const renderFlag = geo.renderFlags?.[unit.flagsIndex] || { flags: 0, blend: 0 };
-    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : null, blend: renderFlag.blend, renderFlags: renderFlag.flags, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16) };
-  }).filter(pass => geo.skin.submeshes[pass.submeshIndex]);
+    const range = indexRanges.get(unit.submeshIndex);
+    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : null, blend: renderFlag.blend, renderFlags: renderFlag.flags, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
+  }).filter(pass => geo.skin.submeshes[pass.submeshIndex] && indexRanges.has(pass.submeshIndex));
   const modelDir = modelPath.includes('\\') ? modelPath.slice(0, modelPath.lastIndexOf('\\') + 1) : '';
   const discovered = reader.discoverCreatureBlps ? await reader.discoverCreatureBlps(dataPath, modelDir, m2ModelStem(modelPath)) : [];
   const candidates = [...new Set([textureOverride, ...candidateModelTextures(modelPath, geo, discovered)].filter(Boolean))];
@@ -6954,6 +7320,21 @@ ipcMain.handle('m2:loadModelByPath', async (_, { modelPath, texturePath = '' }) 
     return result || { success: false, error: 'Client model asset ontbreekt: ' + resolvedModelPath };
   } catch (e) {
     console.error('[m2:loadModelByPath]', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('wmo:loadAsset', async (_, { modelPath, includeTextures = true } = {}) => {
+  try {
+    if (!modelPath) return { success: false, error: 'Geen WMO modelPath' };
+    const dataPath = getM2DataPath();
+    if (!dataPath) return { success: false, error: 'Geen MPQ pad ingesteld' };
+    const normalizedPath = String(modelPath).replace(/\//g, '\\').replace(/\.mdx$/i, '.wmo');
+    const data = await runWmoAssetWorker('readWmoAsset', { dataPath, modelPath: normalizedPath, includeTextures });
+    if (!data?.meshes?.length) return { success: false, error: `Geen WMO geometry gevonden: ${normalizedPath}` };
+    return { success: true, data };
+  } catch (e) {
+    console.error('[wmo:loadAsset]', e);
     return { success: false, error: e.message };
   }
 });

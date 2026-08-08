@@ -1,17 +1,26 @@
-import { Suspense, useMemo, useEffect, useRef } from 'react';
+import { Suspense, useMemo, useEffect, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
-import Editor3DSpawn from './Editor3DSpawn';
 import { CameraFlyControls, CameraFrameFocus, useAltHeld } from './Editor3DCameraControls';
 import { threeToWow } from './wowCoords';
-import M2Prefetch from './M2Prefetch';
-import M2InstanceLayers from './M2InstanceLayers';
-import SpawnLodUpdater from './SpawnLodUpdater';
-import SpawnBillboardLayer from './SpawnBillboardLayer';
+import WmoPlacementLayer from './WmoPlacementLayer';
+import AdtM2PlacementLayer from './AdtM2PlacementLayer';
+import Editor3DSpawn from './Editor3DSpawn';
 
 const UNIT_SIZE = 33.33333 / 8;
 const TILE_SIZE = UNIT_SIZE * 128;
+const START_CAMERA_HEIGHT = 400;
+const START_CAMERA_DISTANCE = 420;
+const START_CAMERA_YAW = -Math.PI * (2 / 3);
+
+function startCameraPosition(tx = 0, ty = 0, tz = 0) {
+  return [
+    tx + Math.sin(START_CAMERA_YAW) * START_CAMERA_DISTANCE,
+    ty + START_CAMERA_HEIGHT,
+    tz + Math.cos(START_CAMERA_YAW) * START_CAMERA_DISTANCE,
+  ];
+}
 
 function GridFloor() {
   return <gridHelper args={[200, 40, '#444455', '#2a2a3a']} position={[0, 0, 0]} />;
@@ -36,8 +45,8 @@ function CameraSetup({ target }) {
     if (prev.current === key) return;
     prev.current = key;
     const [tx, ty, tz] = target;
-    camera.position.set(tx, ty + 250, tz + 180);
-    controls.target.set(tx, ty + 20, tz);
+    camera.position.set(...startCameraPosition(tx, ty, tz));
+    controls.target.set(tx, ty + 40, tz);
     controls.update();
   }, [target, controls, camera]);
 
@@ -111,6 +120,11 @@ function buildTileGeometry(tile) {
 
   for (let row = 0; row < 128; row++) {
     for (let c = 0; c < 128; c++) {
+      const chunkX = c >> 3;
+      const chunkY = row >> 3;
+      const holeMask = tile.holes?.[chunkY * 16 + chunkX] ?? 0;
+      const holeBit = ((row & 7) >> 1) * 4 + ((c & 7) >> 1);
+      if (holeMask & (1 << holeBit)) continue;
       const tl = row * OG + c, tr = tl + 1;
       const bl = tl + OG,      br = bl + 1;
       const ct = V9C + row * IG + c;
@@ -373,24 +387,201 @@ function TerrainMesh({ terrainTiles, tileTextures }) {
   ));
 }
 
-function CameraTracker({ posRef }) {
+const LIQUID_STYLES = {
+  1: { color: '#3b9ed0', opacity: 0.48, flowSpeed: 0.34, waveAmplitude: 0.025 },
+  2: { color: '#2d78ad', opacity: 0.5, flowSpeed: 0.58, waveAmplitude: 0.04 },
+  3: { color: '#d15d2b', opacity: 0.78, flowSpeed: 0.16, waveAmplitude: 0.012 },
+  4: { color: '#78a936', opacity: 0.62, flowSpeed: 0.22, waveAmplitude: 0.02 },
+  5: { color: '#3b9ed0', opacity: 0.48, flowSpeed: 0.3, waveAmplitude: 0.025 },
+};
+
+const WATER_VERTEX = /* glsl */ `
+uniform float time;
+uniform float flowSpeed;
+uniform float waveAmplitude;
+varying vec2 vWaterUv;
+
+void main() {
+  vWaterUv = uv;
+  vec3 transformed = position;
+  float waveA = sin((position.x * 0.08 + position.z * 0.06) + time * flowSpeed);
+  float waveB = cos((position.x * 0.04 - position.z * 0.1) + time * flowSpeed * 0.7);
+  transformed.y += (waveA + waveB * 0.45) * waveAmplitude;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+}
+`;
+
+const WATER_FRAGMENT = /* glsl */ `
+uniform vec3 waterColor;
+uniform float opacity;
+uniform float time;
+uniform float flowSpeed;
+varying vec2 vWaterUv;
+
+void main() {
+  float rippleA = sin((vWaterUv.x + time * flowSpeed) * 10.0) * 0.5 + 0.5;
+  float rippleB = cos((vWaterUv.y - time * flowSpeed * 0.7) * 14.0 + rippleA) * 0.5 + 0.5;
+  float shimmer = mix(0.78, 1.12, rippleA * 0.45 + rippleB * 0.55);
+  gl_FragColor = vec4(waterColor * shimmer, opacity);
+}
+`;
+
+function WaterAnimation() {
+  const invalidate = useThree(state => state.invalidate);
+  useEffect(() => {
+    let timer = null;
+    const tick = () => {
+      invalidate();
+      timer = setTimeout(tick, 100);
+    };
+    timer = setTimeout(tick, 100);
+    return () => clearTimeout(timer);
+  }, [invalidate]);
+  return null;
+}
+
+function WaterLayer({ layer }) {
+  const materialRef = useRef(null);
+  const style = LIQUID_STYLES[Number(layer.liquidType)] || LIQUID_STYLES[1];
+  const geometry = useMemo(() => {
+    const geo = new THREE.BufferGeometry();
+    const positions = layer.positions instanceof Float32Array
+      ? layer.positions
+      : new Float32Array(layer.positions || []);
+    const indices = layer.indices instanceof Uint32Array
+      ? layer.indices
+      : new Uint32Array(layer.indices || []);
+    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    const uvs = new Float32Array((positions.length / 3) * 2);
+    for (let index = 0; index < positions.length / 3; index++) {
+      uvs[index * 2] = positions[index * 3] * 0.02;
+      uvs[index * 2 + 1] = positions[index * 3 + 2] * 0.02;
+    }
+    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.setIndex(new THREE.BufferAttribute(indices, 1));
+    return geo;
+  }, [layer]);
+
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  const uniforms = useMemo(() => ({
+    time: { value: 0 },
+    waterColor: { value: new THREE.Color(style.color) },
+    opacity: { value: style.opacity },
+    flowSpeed: { value: style.flowSpeed },
+    waveAmplitude: { value: style.waveAmplitude },
+  }), [style]);
+
+  useFrame(state => {
+    if (materialRef.current) materialRef.current.uniforms.time.value = state.clock.elapsedTime;
+  });
+
+  return (
+    <mesh geometry={geometry} renderOrder={2} frustumCulled dispose={null}>
+      <shaderMaterial
+        ref={materialRef}
+        uniforms={uniforms}
+        vertexShader={WATER_VERTEX}
+        fragmentShader={WATER_FRAGMENT}
+        transparent
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-1}
+        polygonOffsetUnits={-1}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+function WaterMesh({ waterLayers }) {
+  const groupedLayers = useMemo(() => {
+    const groups = new Map();
+    for (const layer of waterLayers) {
+      const key = `${layer.tileKey}-${layer.liquidType}`;
+      if (!groups.has(key)) groups.set(key, { ...layer, positions: [], indices: [] });
+      const group = groups.get(key);
+      const positions = layer.positions instanceof Float32Array
+        ? layer.positions
+        : new Float32Array(layer.positions || []);
+      const indices = layer.indices instanceof Uint32Array
+        ? layer.indices
+        : new Uint32Array(layer.indices || []);
+      const vertexOffset = group.positions.length / 3;
+      group.positions.push(...positions);
+      for (const index of indices) group.indices.push(index + vertexOffset);
+    }
+    return [...groups.entries()].map(([groupKey, layer]) => ({
+      ...layer,
+      groupKey,
+      positions: new Float32Array(layer.positions),
+      indices: new Uint32Array(layer.indices),
+    }));
+  }, [waterLayers]);
+
+  if (!waterLayers?.length) return null;
+  return (
+    <>
+      <WaterAnimation />
+      {groupedLayers.map(layer => (
+        <WaterLayer
+          key={layer.groupKey}
+          layer={layer}
+        />
+      ))}
+    </>
+  );
+}
+
+function CameraTracker({ posRef, onCameraMove }) {
   const { camera, controls } = useThree();
+  const lastNotified = useRef(null);
   useFrame(() => {
     if (!posRef) return;
     const p = controls?.target ?? camera.position;
     const w = threeToWow(p.x, p.y, p.z);
     posRef.current = { wx: w.x, wy: w.y };
+    const previous = lastNotified.current;
+    const moved = !previous || Math.hypot(w.x - previous.wx, w.y - previous.wy) >= 12;
+    if (moved) {
+      lastNotified.current = { wx: w.x, wy: w.y };
+      onCameraMove?.();
+    }
   });
   return null;
 }
 
-function SceneControls({ activeTool, focusTarget, focusTick }) {
+function RendererStats({ onStats }) {
+  const { gl } = useThree();
+  const lastPublishedAt = useRef(0);
+  const lastSignature = useRef('');
+
+  useFrame(() => {
+    const now = performance.now();
+    if (now - lastPublishedAt.current < 500) return;
+    const render = gl.info?.render ?? {};
+    const memory = gl.info?.memory ?? {};
+    const stats = {
+      calls: render.calls ?? 0,
+      triangles: render.triangles ?? 0,
+      geometries: memory.geometries ?? 0,
+      textures: memory.textures ?? 0,
+    };
+    const signature = `${stats.calls}|${stats.triangles}|${stats.geometries}|${stats.textures}`;
+    if (signature === lastSignature.current) return;
+    lastPublishedAt.current = now;
+    lastSignature.current = signature;
+    onStats?.(stats);
+  });
+  return null;
+}
+
+function SceneControls({ activeTool, focusTarget, focusTick, viewDistance, terrainClamp }) {
   const altHeld = useAltHeld();
   const toolBlocksOrbit = activeTool === 'select' || activeTool === 'move' || activeTool === 'rotate';
 
   return (
     <>
-      <CameraFlyControls />
+      <CameraFlyControls terrainClamp={terrainClamp} />
       <CameraFrameFocus target={focusTarget} focusTick={focusTick} />
       <OrbitControls
         makeDefault
@@ -408,7 +599,7 @@ function SceneControls({ activeTool, focusTarget, focusTick }) {
         zoomSpeed={1.1}
         screenSpacePanning
         minDistance={2}
-        maxDistance={30000}
+        maxDistance={viewDistance}
       />
     </>
   );
@@ -416,57 +607,72 @@ function SceneControls({ activeTool, focusTarget, focusTick }) {
 
 
 export default function Editor3DScene({
-  spawns, selectedId, onSelect, activeTool, onTransform, terrain, tileTextures, wdl, initialTarget,
-  resetKeys = {}, focusTarget, focusTick, transforms = {}, camPosRef, invalidateRef,
+  spawns, selectedId, onSelect, activeTool, onTransform, terrain, water = [], tileTextures, wdl, initialTarget,
+  resetKeys = {}, focusTarget, focusTick, transforms = {}, camPosRef, invalidateRef, wmoPlacements = [],
+  adtM2Placements = [], staticWorldMode = false, onCameraMove, onWmoPendingChange, onM2PendingChange,
+  onWmoBatchCount, onM2BatchCount, onRendererStats,
+  resourceProfile = null,
+  viewDistance = 2048,
 }) {
+  const [wmoPriorityReady, setWmoPriorityReady] = useState(!staticWorldMode);
   return (
     <Canvas
       frameloop="demand"
-      dpr={[1, 1.5]}
+      dpr={[1, resourceProfile?.dprMax ?? 1.5]}
       gl={{ powerPreference: 'high-performance' }}
-      camera={{ position: [0, 42, 65], fov: 60, near: 0.5, far: 60000 }}
+      camera={{ position: startCameraPosition(), fov: 60, near: 0.5, far: viewDistance }}
       style={{ background: '#1a1a2e' }}
       onPointerMissed={() => onSelect(null)}
     >
       <InvalidateExporter invalidateRef={invalidateRef} />
+      <RendererStats onStats={onRendererStats} />
       <Lights />
       <GridFloor />
       <AxesHelper />
       <CameraSetup target={initialTarget} />
-      <SpawnLodUpdater spawns={spawns} transforms={transforms} selectedId={selectedId} />
-      <M2Prefetch spawns={spawns} transforms={transforms} />
-      <M2InstanceLayers
-        spawns={spawns}
-        transforms={transforms}
-        selectedId={selectedId}
-        onSelect={onSelect}
-      />
-      <SpawnBillboardLayer
-        spawns={spawns}
-        transforms={transforms}
-        selectedId={selectedId}
-        onSelect={onSelect}
-      />
-
       {wdl && <WdlMesh tiles={wdl} />}
       {terrain && <TerrainMesh terrainTiles={terrain} tileTextures={tileTextures} />}
+      <WaterMesh waterLayers={water} />
+      <WmoPlacementLayer
+        placements={wmoPlacements}
+        resourceProfile={resourceProfile}
+        onPendingChange={onWmoPendingChange}
+        onPriorityReady={setWmoPriorityReady}
+        onBatchCount={onWmoBatchCount}
+      />
+      {staticWorldMode && (
+        <AdtM2PlacementLayer
+          placements={adtM2Placements}
+          resourceProfile={resourceProfile}
+          onPendingChange={onM2PendingChange}
+          onBatchCount={onM2BatchCount}
+          wmoPriorityReady={wmoPriorityReady}
+        />
+      )}
 
-      {/* Alleen de selected spawn mounten voor gizmo's */}
-      <Suspense fallback={null}>
-        {spawns.filter(s => s.guid === selectedId).map(spawn => (
-          <Editor3DSpawn
-            key={`${spawn.guid}_${resetKeys[spawn.guid] ?? 0}`}
-            spawn={spawn}
-            selected
-            onSelect={onSelect}
-            activeTool={activeTool}
-            onTransform={onTransform}
-          />
-        ))}
-      </Suspense>
+      {!staticWorldMode && (
+        <Suspense fallback={null}>
+          {spawns.filter(s => s.guid === selectedId).map(spawn => (
+            <Editor3DSpawn
+              key={`${spawn.guid}_${resetKeys[spawn.guid] ?? 0}`}
+              spawn={spawn}
+              selected
+              onSelect={onSelect}
+              activeTool={activeTool}
+              onTransform={onTransform}
+            />
+          ))}
+        </Suspense>
+      )}
 
-      <CameraTracker posRef={camPosRef} />
-      <SceneControls activeTool={activeTool} focusTarget={focusTarget} focusTick={focusTick} />
+      <CameraTracker posRef={camPosRef} onCameraMove={onCameraMove} />
+      <SceneControls
+        activeTool={activeTool}
+        focusTarget={focusTarget}
+        focusTick={focusTick}
+        viewDistance={viewDistance}
+        terrainClamp
+      />
 
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
         <GizmoViewport axisColors={['#e74c3c', '#2ecc71', '#3498db']} labelColor="white" />

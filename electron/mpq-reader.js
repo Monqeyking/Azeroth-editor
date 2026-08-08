@@ -30,6 +30,7 @@ function ensureMounted(dataPath) {
   if (mountedPath === dataPath) return;
 
   if (mountedPath) {
+    closeCachedArchives();
     try { FS.unmount(MOUNT_POINT); } catch (_) {}
     mountedPath = null;
     mountedRoot = null;
@@ -111,6 +112,34 @@ const zoneCache     = new Map();   // dataPath → string[]
 const tileCache     = new Map();   // `dataPath|zone|idx` → Buffer
 const fileFoundIn   = new Map();   // `${dataPath}|${lcPath}` → mpqAbsPath  (memoïseert welke archive een bestand bevat)
 const archiveDiscoveryCache = new Map(); // `${dataPath}|${lcPath}` → mpqAbsPath | null  (listfile-miss discovery)
+const cachedArchives = new Map(); // mpqAbsPath → open archive handle, per worker
+const archiveCacheStats = { opens: 0, hits: 0 };
+
+function closeCachedArchives() {
+  for (const archive of cachedArchives.values()) {
+    try { archive.close(); } catch (_) {}
+  }
+  cachedArchives.clear();
+}
+
+async function getCachedArchive(dataPath, mpqAbsPath) {
+  const key = String(mpqAbsPath || '').toLowerCase();
+  if (!key) return null;
+  if (cachedArchives.has(key)) {
+    archiveCacheStats.hits += 1;
+    return cachedArchives.get(key);
+  }
+  const archive = await openArchive(dataPath, mpqAbsPath);
+  if (archive) {
+    archiveCacheStats.opens += 1;
+    cachedArchives.set(key, archive);
+  }
+  return archive;
+}
+
+function getArchiveCacheStats() {
+  return { ...archiveCacheStats, size: cachedArchives.size };
+}
 
 // ── Zones ophalen via listfile ─────────────────────────────────────────────────
 async function listWorldmapZones(dataPath) {
@@ -172,30 +201,25 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
     try { return fs.readFileSync(filePath); } catch (_) { return null; }
   }
 
-  // Normaal MPQ-archief via StormLib
-  let archive;
-  try { archive = await MPQ.open(toStormPath(dataPath, mpqAbsPath), 'r'); }
-  catch (e) {
-    console.log(`[mpq] open mislukt voor ${path.basename(mpqAbsPath)}: ${e.message}`);
-    return null;
-  }
+  // Normaal MPQ-archief via StormLib. Reuse the handle for all reads in this worker.
+  const archive = await getCachedArchive(dataPath, mpqAbsPath);
+  if (!archive) return null;
 
   let buf = null;
   try {
     if (archive.hasFile(internalPath)) {
-      const f   = archive.openFile(internalPath);
-      const raw = f.read();
+      const raw = archive.readFile(internalPath);
       // raw is een Uint8Array-view in WASM-heap; kopieer naar eigen ArrayBuffer
       // VÓÓR f.close()/archive.close() anders wordt het geheugen hergebruikt
       const copy = new Uint8Array(raw.byteLength);
       copy.set(raw);
       buf = Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
-      f.close();
     }
   } catch (e) {
     console.log(`[mpq] hasFile/read fout in ${path.basename(mpqAbsPath)} voor ${internalPath}: ${e.message}`);
+    cachedArchives.delete(String(mpqAbsPath).toLowerCase());
+    try { archive.close(); } catch (_) {}
   }
-  archive.close();
   return buf;
 }
 
@@ -779,8 +803,10 @@ async function openArchive(dataPath, mpqAbsPath) {
       if (!archive.hasFile(p)) return null;
       const f = archive.openFile(p);
       const raw = f.read();
+      const copy = new Uint8Array(raw.byteLength);
+      copy.set(raw);
       f.close();
-      return Buffer.from(raw);
+      return Buffer.from(copy.buffer, copy.byteOffset, copy.byteLength);
     },
     close: () => { try { archive.close(); } catch (_) {} },
   };
@@ -899,5 +925,6 @@ module.exports = {
   isDataPath, resolveDataPath, resolveLayeredSource, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readAdtBufferLayered, readMinimapBlp, readMinimapBlpBatch, readMinimapBlpBatchLayered, readWdlBuffer, readWdtBuffer,
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
+  getArchiveCacheStats,
   buildM2Index, readM2FromMpqs, readM2Companion,
 };

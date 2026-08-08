@@ -48,6 +48,14 @@
   color: #aaaaff;
 }
 
+.ed3-world-mode {
+  padding: 5px 8px;
+  color: #d7a34a;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 /* ── Workspace (hierarchy | viewport | inspector) ── */
 .ed3-workspace {
   display: flex;

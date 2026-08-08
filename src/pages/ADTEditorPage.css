@@ -38,12 +38,12 @@
 .adt-toolbar label:has(input[type="number"]) { display: none; }
 .adt-area-comparison .adt-table-wrap { display: none; }
 .adt-area-comparison .adt-panel-title span { font-size: 0; }
-.adt-area-comparison .adt-panel-title span::after { content: 'AreaTable target voorbereiden'; font-size: 11px; }
+.adt-area-comparison .adt-panel-title span::after { content: 'Prepare AreaTable target'; font-size: 11px; }
 .adt-overview-bottom { display: none; }
 .adt-main-column { grid-template-rows: minmax(300px, 1fr) auto; }
-.adt-main-column > .adt-panel:nth-child(2) { display: none; }
+.adt-main-column > .adt-panel:nth-child(2), .adt-main-column > .adt-panel:nth-child(3) { display: none; }
 .adt-area-comparison .adt-compare-help { font-size: 0; }
-.adt-area-comparison .adt-compare-help::after { content: 'Maak een nieuwe AreaTable-entry op basis van de huidige client.'; font-size: 10px; }
+.adt-area-comparison .adt-compare-help::after { content: 'Create a new AreaTable entry from the current client.'; font-size: 10px; }
 .adt-area-comparison, .adt-explainer { display: none; }
 .adt-area-editor-panel { flex-shrink: 0; }
 .adt-server-stage-panel { flex-shrink: 0; }

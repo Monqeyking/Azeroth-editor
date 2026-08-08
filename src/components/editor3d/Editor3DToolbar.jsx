@@ -13,7 +13,7 @@ const MAPS = [
   { id: 571, name: 'Northrend'        },
 ];
 
-export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMapChange, loading, spawnCount, spawnsVisible, onToggleSpawns }) {
+export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMapChange, loading, spawnCount, spawnsVisible, onToggleSpawns, staticWorldMode = false }) {
   return (
     <div className="ed3-toolbar">
       {TOOLS.map(({ id, icon: Icon, label }) => (
@@ -42,18 +42,20 @@ export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMap
         ))}
       </select>
 
-      <button
-        className={`ed3-tool-btn ${spawnsVisible ? 'active' : ''}`}
-        onClick={onToggleSpawns}
-        title="Spawns tonen/verbergen"
-      >
-        {spawnsVisible ? <Eye size={15} /> : <EyeOff size={15} />}
-        <span>Spawns</span>
-      </button>
+      {staticWorldMode ? <span className="ed3-world-mode">Static world</span> : (
+        <button
+          className={`ed3-tool-btn ${spawnsVisible ? 'active' : ''}`}
+          onClick={onToggleSpawns}
+          title="Spawns tonen/verbergen"
+        >
+          {spawnsVisible ? <Eye size={15} /> : <EyeOff size={15} />}
+          <span>Spawns</span>
+        </button>
+      )}
 
       {loading
         ? <Loader size={13} className="ed3-loading-spin" />
-        : spawnCount != null && <span className="ed3-spawn-count">{spawnCount} spawns</span>
+        : !staticWorldMode && spawnCount != null && <span className="ed3-spawn-count">{spawnCount} spawns</span>
       }
 
       <span

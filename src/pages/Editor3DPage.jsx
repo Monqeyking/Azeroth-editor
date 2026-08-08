@@ -13,8 +13,47 @@ import { setTerrainData } from '../components/editor3d/spawnLod';
 
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
-const ENABLE_MINIMAP_FALLBACK = false;
 const INITIAL_WORLD_READY_TILES = 9;
+const STATIC_WORLD_MODE = true;
+const VIEW_DISTANCE = 1536;
+const TERRAIN_RADIUS = 2;
+const TEXTURE_RADIUS = 2;
+const TEXTURE_INITIAL_RADIUS = 1;
+const WMO_RADIUS = 1;
+const M2_RADIUS = 1;
+const WATER_RADIUS = 1;
+const HARDWARE_THREADS = typeof navigator !== 'undefined' ? navigator.hardwareConcurrency || 4 : 4;
+const AGGRESSIVE_STREAMING = HARDWARE_THREADS >= 8;
+const TERRAIN_BATCH_MAX = AGGRESSIVE_STREAMING ? 16 : 12;
+const TEXTURE_BATCH_MAX = AGGRESSIVE_STREAMING ? 4 : 3;
+const WMO_BATCH_MAX = AGGRESSIVE_STREAMING ? 10 : 8;
+const WATER_BATCH_MAX = AGGRESSIVE_STREAMING ? 6 : 4;
+const TERRAIN_REQUEST_CONCURRENCY = AGGRESSIVE_STREAMING ? 2 : 1;
+const TEXTURE_REQUEST_CONCURRENCY = AGGRESSIVE_STREAMING ? 2 : 1;
+const WMO_REQUEST_CONCURRENCY = AGGRESSIVE_STREAMING ? 2 : 1;
+const WATER_REQUEST_CONCURRENCY = AGGRESSIVE_STREAMING ? 2 : 1;
+const TEXTURE_UPLOADS_PER_FRAME = AGGRESSIVE_STREAMING ? 4 : 2;
+const STREAM_MOVE_DISTANCE = 96;
+const DEFAULT_RESOURCE_PROFILE = Object.freeze({
+  tier: 'conservative',
+  memoryPressure: false,
+  textureWorkers: 1,
+  wmoWorkers: 1,
+  assetIoConcurrency: 3,
+  terrainBatchMax: 10,
+  textureBatchMax: 2,
+  wmoBatchMax: 6,
+  waterBatchMax: 3,
+  terrainRequestConcurrency: 1,
+  textureRequestConcurrency: 1,
+  wmoRequestConcurrency: 1,
+  waterRequestConcurrency: 1,
+  textureUploadsPerFrame: 2,
+  wmoAssetConcurrency: 2,
+  doodadConcurrency: 2,
+  m2RequestConcurrency: 2,
+  dprMax: 1,
+});
 
 const MAP_ADT_NAME = {
   0:   'Azeroth',
@@ -52,31 +91,106 @@ export default function Editor3DPage() {
   const [spawnsVisible, setSpawnsVisible] = useState(false);
   const [loading,    setLoading]    = useState(false);
   const [terrain,    setTerrain]    = useState(null);
+  const [water,      setWater]      = useState([]);
   const [tileTextures, setTileTextures] = useState({});
 
   const [error,      setError]      = useState(null);
   const [focusTick,  setFocusTick]  = useState(0);
   const [streamKey,  setStreamKey]  = useState(0);
   const [worldLoading, setWorldLoading] = useState(true);
-  const [perfMetrics, setPerfMetrics] = useState({ terrain: null, textures: null });
+  const [nearbyTexturesReady, setNearbyTexturesReady] = useState(false);
+  const [resourceProfile, setResourceProfile] = useState(null);
+  const [wmoPlacements, setWmoPlacements] = useState([]);
+  const [adtM2Placements, setAdtM2Placements] = useState([]);
+  const [streamDiagnostics, setStreamDiagnostics] = useState({
+    terrainTiles: 0,
+    waterTiles: 0,
+    wmoPlacements: 0,
+    m2Placements: 0,
+    pendingTerrain: 0,
+    pendingTextures: 0,
+    pendingWmo: 0,
+    pendingWater: 0,
+  });
+  const [perfMetrics, setPerfMetrics] = useState({ terrain: null, textures: null, wmo: null });
+  const [wmoAssetPending, setWmoAssetPending] = useState(0);
+  const [m2AssetPending, setM2AssetPending] = useState(0);
+  const [wmoBatchCount, setWmoBatchCount] = useState(0);
+  const [m2BatchCount, setM2BatchCount] = useState(0);
+  const [rendererStats, setRendererStats] = useState(null);
   const worldLoadTimeoutRef = useRef(null);
   const camPosRef = useRef({ wx: 0, wy: 0 });
   const invalidateRef = useRef(null);
-  const perfSamplesRef = useRef({ terrain: [], textures: [] });
+  const perfSamplesRef = useRef({ terrain: [], textures: [], wmo: [] });
   const textureUploadQueueRef = useRef([]);
   const textureUploadFrameRef = useRef(null);
+  const streamWindowRef = useRef({ texture: new Set() });
+  const cameraMoveRef = useRef(null);
+  const activeResourceProfile = resourceProfile || DEFAULT_RESOURCE_PROFILE;
+  const resourceProfileRef = useRef(activeResourceProfile);
+  resourceProfileRef.current = activeResourceProfile;
+  const requestMinimapDraw = useCallback(() => cameraMoveRef.current?.(), []);
+  const handleWmoPendingChange = useCallback((count) => setWmoAssetPending(count), []);
+  const handleM2PendingChange = useCallback((count) => setM2AssetPending(count), []);
+  const handleWmoBatchCount = useCallback((count) => setWmoBatchCount(count), []);
+  const handleM2BatchCount = useCallback((count) => setM2BatchCount(count), []);
 
+  useEffect(() => {
+    let disposed = false;
+    const refreshProfile = async () => {
+      try {
+        const next = await window.azeroth?.system?.getResourceProfile?.();
+        if (!next || disposed) return;
+        setResourceProfile(previous => {
+          const keys = [
+            'tier', 'memoryPressure', 'textureWorkers', 'wmoWorkers', 'assetIoConcurrency',
+            'terrainBatchMax', 'textureBatchMax', 'wmoBatchMax', 'waterBatchMax',
+            'terrainRequestConcurrency', 'textureRequestConcurrency', 'wmoRequestConcurrency',
+            'waterRequestConcurrency', 'textureUploadsPerFrame', 'wmoAssetConcurrency',
+            'doodadConcurrency', 'm2RequestConcurrency', 'dprMax',
+          ];
+          if (previous && keys.every(key => previous[key] === next[key])) return previous;
+          return next;
+        });
+      } catch (_) {}
+    };
+    void refreshProfile();
+    const id = setInterval(refreshProfile, 5000);
+    return () => { disposed = true; clearInterval(id); };
+  }, []);
+  const handleRendererStats = useCallback((next) => {
+    setRendererStats(previous => {
+      if (previous
+        && previous.calls === next.calls
+        && previous.triangles === next.triangles
+        && previous.geometries === next.geometries
+        && previous.textures === next.textures) return previous;
+      return next;
+    });
+  }, []);
   const queueTextureUploads = useCallback((rows) => {
     if (!rows?.length) return;
     textureUploadQueueRef.current.push(...rows);
     if (textureUploadFrameRef.current) return;
     const flush = () => {
       textureUploadFrameRef.current = null;
-      const next = textureUploadQueueRef.current.shift();
-      if (!next) return;
-      setTileTextures(prev => ({ ...prev, [`${next.tileX}_${next.tileY}`]: next }));
-      invalidateRef.current?.();
-      if (textureUploadQueueRef.current.length) textureUploadFrameRef.current = requestAnimationFrame(flush);
+      const ready = [];
+      for (let i = 0; i < resourceProfileRef.current.textureUploadsPerFrame && textureUploadQueueRef.current.length; i++) {
+        const next = textureUploadQueueRef.current.shift();
+        const key = `${next.tileX}_${next.tileY}`;
+        if (streamWindowRef.current.texture.has(key)) ready.push([key, next]);
+      }
+      if (ready.length) {
+        setTileTextures(prev => {
+          const next = { ...prev };
+          ready.forEach(([key, row]) => { next[key] = row; });
+          return next;
+        });
+        invalidateRef.current?.();
+      }
+      if (textureUploadQueueRef.current.length) {
+        textureUploadFrameRef.current = requestAnimationFrame(flush);
+      }
     };
     textureUploadFrameRef.current = requestAnimationFrame(flush);
   }, []);
@@ -102,31 +216,22 @@ export default function Editor3DPage() {
       setError(null);
       setSpawns([]);
       setTerrain(null);
+      setWater([]);
       setTileTextures({});
+      setWmoPlacements([]);
+      setAdtM2Placements([]);
+      setStreamDiagnostics({ terrainTiles: 0, waterTiles: 0, wmoPlacements: 0, m2Placements: 0, pendingTerrain: 0, pendingTextures: 0, pendingWmo: 0, pendingWater: 0 });
+      setWmoAssetPending(0);
+      setM2AssetPending(0);
+      setWmoBatchCount(0);
+      setM2BatchCount(0);
+      perfSamplesRef.current = { terrain: [], textures: [], wmo: [] };
+      setPerfMetrics({ terrain: null, textures: null, wmo: null });
       textureUploadQueueRef.current = [];
       setSelectedId(null);
       setTransforms({});
 
-      try {
-        const res = await window.azeroth.spawns.load({ mapId, limit: 1000 });
-        if (cancelled) return;
-        if (!res.success) { setError(res.error ?? 'Could not load spawns'); return; }
-        setSpawns(res.data);
-
-        if (res.data.length && camPosRef.current.wx === 0 && camPosRef.current.wy === 0) {
-          const n = res.data.length;
-          const wx = res.data.reduce((s, sp) => s + sp.x, 0) / n;
-          const wy = res.data.reduce((s, sp) => s + sp.y, 0) / n;
-          camPosRef.current = { wx, wy };
-          invalidateRef.current?.();
-        }
-
-        // Terrein wordt gestreamd rond de camera (zie streaming-effect hieronder)
-      } catch (e) {
-        if (!cancelled) setError(e.message);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+      if (!cancelled) setLoading(false);
     }
 
     load();
@@ -136,154 +241,364 @@ export default function Editor3DPage() {
   // ── World loading overlay ────────────────────────────────────────────────────
   useEffect(() => {
     setWorldLoading(true);
+    setNearbyTexturesReady(false);
     clearTimeout(worldLoadTimeoutRef.current);
-    worldLoadTimeoutRef.current = setTimeout(() => setWorldLoading(false), 20000);
+    worldLoadTimeoutRef.current = setTimeout(() => setWorldLoading(false), 30000);
     return () => clearTimeout(worldLoadTimeoutRef.current);
-  }, [mapId]);
+  }, [mapId, streamKey]);
 
-  // Keep the initial overlay until the nearby terrain and its texture layers are usable.
-  const terrainReady = (terrain?.length ?? 0) >= INITIAL_WORLD_READY_TILES
-    && Object.keys(tileTextures).length >= INITIAL_WORLD_READY_TILES;
+  // Wait for terrain plus the nearby texture ring before revealing the world.
+  const terrainReady = (terrain?.length ?? 0) >= INITIAL_WORLD_READY_TILES;
   useEffect(() => {
-    if (terrainReady) {
+    if (terrainReady && nearbyTexturesReady) {
       clearTimeout(worldLoadTimeoutRef.current);
       setWorldLoading(false);
     }
-  }, [terrainReady]);
+  }, [terrainReady, nearbyTexturesReady]);
 
-  // Sync terrain tiles naar spawnLod module voor height snapping
   useEffect(() => { setTerrainData(terrain); }, [terrain]);
 
-  // ── Terrain streaming: laad tiles rond de camera, evict wat ver weg is ──────
-  const TILE_RADIUS = 4;   // 9×9 blok rond camera
-  const MAX_TILES   = 81; // 9x9 active terrain window; prevents GPU texture accumulation
-  const BATCH_MAX   = 16;  // max tiles per IPC zodat main process responsief blijft
-
+  // Independent terrain, texture and WMO queues. Each queue is tile-prioritized
+  // and may have one IPC batch in flight without blocking the other queues.
   useEffect(() => {
     const mapName = MAP_ADT_NAME[mapId];
     if (!mapName) return;
 
     let disposed = false;
-    let terrainInFlight = false;
-    let textureInFlight = false;
-    const loaded   = new Set();
-    const missing  = new Set();
-    const texQueue = []; // tiles die terrain hebben maar nog geen texture
-    const TEXTURE_YIELD_MS = 24;
+    let terrainPumpActive = 0;
+    let texturePumpActive = 0;
+    let wmoPumpActive = 0;
+    let waterPumpActive = 0;
+    let centerTile = null;
+    let lastRefreshPosition = null;
+    const terrainByTile = new Map();
+    const terrainQueue = new Map();
+    const terrainInFlight = new Set();
+    const terrainMissing = new Set();
+    const textureQueue = new Map();
+    const textureInFlight = new Set();
+    const textureDone = new Set();
+    const wmoByTile = new Map();
+    const m2ByTile = new Map();
+    const waterByTile = new Map();
+    const wmoQueue = new Map();
+    const wmoInFlight = new Set();
+    const wmoDone = new Set();
+    const m2Done = new Set();
+    const waterQueue = new Map();
+    const waterInFlight = new Set();
+    const waterDone = new Set();
+    const active = { terrain: new Set(), texture: new Set(), wmo: new Set(), m2: new Set(), water: new Set() };
+    let textureRadius = TEXTURE_INITIAL_RADIUS;
+    let lastDiagnosticsKey = '';
+    streamWindowRef.current = { texture: active.texture };
 
-    async function tickTerrain() {
-      if (disposed || terrainInFlight || textureInFlight) return;
-      const { wx, wy } = camPosRef.current;
-      if (wx === 0 && wy === 0) return;
-
-      const { tileX: cX, tileY: cY } = worldToTile(wx, wy);
-      const want = [];
-      for (let dy = -TILE_RADIUS; dy <= TILE_RADIUS; dy++) {
-        for (let dx = -TILE_RADIUS; dx <= TILE_RADIUS; dx++) {
-          const tx = cX + dx, ty = cY + dy;
-          if (tx < 0 || tx >= 64 || ty < 0 || ty >= 64) continue;
-          const key = `${tx}_${ty}`;
-          if (loaded.has(key) || missing.has(key)) continue;
-          want.push({ tileX: tx, tileY: ty, d: Math.abs(dx) + Math.abs(dy) });
-        }
+    const keyFor = (tileX, tileY) => `${tileX}_${tileY}`;
+    const distanceOf = item => centerTile
+      ? Math.abs(item.tileX - centerTile.tileX) + Math.abs(item.tileY - centerTile.tileY)
+      : 0;
+    const wantedTiles = radius => {
+      if (!centerTile) return [];
+      const result = [];
+      for (let dy = -radius; dy <= radius; dy++) for (let dx = -radius; dx <= radius; dx++) {
+        const tileX = centerTile.tileX + dx, tileY = centerTile.tileY + dy;
+        if (tileX < 0 || tileX >= 64 || tileY < 0 || tileY >= 64) continue;
+        result.push({ tileX, tileY, key: keyFor(tileX, tileY), d: Math.abs(dx) + Math.abs(dy) });
       }
-      if (!want.length) return;
+      return result.sort((a, b) => a.d - b.d);
+    };
+    const setFrom = tiles => new Set(tiles.map(tile => tile.key));
+    const wantedTextureTiles = () => wantedTiles(textureRadius);
+    const dedupeWmo = (tileKey, rows) => {
+      const seen = new Set();
+      return (rows ?? []).filter(row => row?.path).map((row, index) => {
+        const path = String(row.path).replace(/\//g, '\\');
+        const position = Array.isArray(row.position) ? row.position.map(Number) : [];
+        const rotation = Array.isArray(row.rotation) ? row.rotation.map(Number) : [];
+        if (position.length !== 3 || !position.every(Number.isFinite)) return null;
+        const identity = `${path.toLowerCase()}|${row.uniqueId ?? index}|${position.join(',')}|${rotation.join(',')}`;
+        if (seen.has(identity)) return null;
+        seen.add(identity);
+        return { ...row, key: `${tileKey}|${identity}`, tileKey, path, position, rotation };
+      }).filter(Boolean);
+    };
+    const dedupeM2 = (tileKey, rows) => {
+      const seen = new Set();
+      return (rows ?? []).filter(row => row?.path).map((row, index) => {
+        const path = String(row.path).replace(/\//g, '\\');
+        const position = Array.isArray(row.position) ? row.position.map(Number) : [];
+        const rotation = Array.isArray(row.rotation) ? row.rotation.map(Number) : [];
+        if (position.length !== 3 || !position.every(Number.isFinite)) return null;
+        const identity = `${path.toLowerCase()}|${row.uniqueId ?? index}|${position.join(',')}|${rotation.join(',')}`;
+        if (seen.has(identity)) return null;
+        seen.add(identity);
+        return { ...row, key: `${tileKey}|${identity}`, tileKey, path, position, rotation };
+      }).filter(Boolean);
+    };
+    const publishDiagnostics = () => {
+      if (disposed) return;
+      const next = {
+        terrainTiles: terrainByTile.size,
+        waterTiles: waterByTile.size,
+        wmoPlacements: [...wmoByTile.values()].reduce((total, rows) => total + rows.length, 0),
+        m2Placements: [...m2ByTile.values()].reduce((total, rows) => total + rows.length, 0),
+        pendingTerrain: terrainQueue.size + terrainInFlight.size,
+        pendingTextures: textureQueue.size + textureInFlight.size,
+        pendingWmo: wmoQueue.size + wmoInFlight.size,
+        pendingWater: waterQueue.size + waterInFlight.size,
+      };
+      const key = Object.values(next).join('|');
+      if (key === lastDiagnosticsKey) return;
+      lastDiagnosticsKey = key;
+      setStreamDiagnostics(next);
+    };
 
-      want.sort((a, b) => a.d - b.d);
-      const batch = want.slice(0, BATCH_MAX).map(({ tileX, tileY }) => ({ tileX, tileY }));
-      batch.forEach(t => loaded.add(`${t.tileX}_${t.tileY}`));
+    function evictOutsideWindow() {
+      let terrainChanged = false;
+      for (const key of terrainByTile.keys()) {
+        if (!active.terrain.has(key)) { terrainByTile.delete(key); terrainChanged = true; }
+      }
+      for (const key of terrainMissing) if (!active.terrain.has(key)) terrainMissing.delete(key);
+      for (const key of terrainQueue.keys()) if (!active.terrain.has(key)) terrainQueue.delete(key);
 
-      terrainInFlight = true;
-      try {
-        const started = performance.now();
-        const tr = await window.azeroth.adt.getTerrain({ mapName, tiles: batch });
-        recordPerf('terrain', performance.now() - started, tr?.data?.length ?? 0);
-        if (disposed) return;
-        if (!tr.success) { batch.forEach(t => loaded.delete(`${t.tileX}_${t.tileY}`)); return; }
+      let wmoChanged = false;
+      for (const key of wmoByTile.keys()) {
+        if (!active.wmo.has(key)) { wmoByTile.delete(key); wmoChanged = true; }
+      }
+      for (const key of wmoDone) if (!active.wmo.has(key)) wmoDone.delete(key);
+      for (const key of wmoQueue.keys()) if (!active.wmo.has(key)) wmoQueue.delete(key);
+      let m2Changed = false;
+      for (const key of m2ByTile.keys()) {
+        if (!active.m2.has(key)) { m2ByTile.delete(key); m2Changed = true; }
+      }
+      for (const key of m2Done) if (!active.m2.has(key)) m2Done.delete(key);
 
-        const got = new Set(tr.data.map(t => `${t.tileX}_${t.tileY}`));
-        batch.forEach(t => {
-          const key = `${t.tileX}_${t.tileY}`;
-          if (!got.has(key)) { missing.add(key); loaded.delete(key); }
-        });
-        if (!tr.data.length) return;
-
-        const evicted = [];
-        const { tileX: curX, tileY: curY } = worldToTile(camPosRef.current.wx, camPosRef.current.wy);
-        setTerrain(prev => {
-          const merged = [...(prev ?? []), ...tr.data];
-          if (merged.length > MAX_TILES) {
-            merged.sort((a, b) =>
-              (Math.abs(a.tileX - curX) + Math.abs(a.tileY - curY)) -
-              (Math.abs(b.tileX - curX) + Math.abs(b.tileY - curY)));
-            for (const t of merged.splice(MAX_TILES)) {
-              const key = `${t.tileX}_${t.tileY}`;
-              loaded.delete(key);
-              evicted.push(key);
-            }
+      for (const key of textureDone) if (!active.texture.has(key)) textureDone.delete(key);
+      for (const key of textureQueue.keys()) if (!active.texture.has(key)) textureQueue.delete(key);
+      if (terrainChanged) setTerrain([...terrainByTile.values()]);
+      if (wmoChanged) setWmoPlacements([...wmoByTile.values()].flat());
+      if (m2Changed) setAdtM2Placements([...m2ByTile.values()].flat());
+      for (const key of waterByTile.keys()) {
+        if (!active.water.has(key)) waterByTile.delete(key);
+      }
+      for (const key of waterDone) if (!active.water.has(key)) waterDone.delete(key);
+      for (const key of waterQueue.keys()) if (!active.water.has(key)) waterQueue.delete(key);
+      if (waterByTile.size) setWater([...waterByTile.values()].flat());
+      else if (active.water.size === 0) setWater([]);
+      if (active.texture.size) {
+        setTileTextures(prev => {
+          const next = { ...prev };
+          let changed = false;
+          for (const key of Object.keys(next)) {
+            if (!active.texture.has(key)) { delete next[key]; changed = true; }
           }
-          return merged;
+          return changed ? next : prev;
         });
-
-        const tileBatch = tr.data.map(({ tileX, tileY }) => ({ tileX, tileY }));
-
-        // Minimap tiles look plausible but hide failed splat textures. During
-        // validation, failed tiles deliberately keep their height coloring.
-        if (ENABLE_MINIMAP_FALLBACK) {
-          window.azeroth.adt.getTileTextures({ mapName, tiles: tileBatch }).then(tex => {
-            if (disposed || !tex.success) return;
-            setTileTextures(prev => {
-              const next = { ...prev };
-              for (const key of evicted) delete next[key];
-              for (const { tileX, tileY, png } of tex.data) {
-                const key = `${tileX}_${tileY}`;
-                if (!next[key] || typeof next[key] === 'string') next[key] = png;
-              }
-              return next;
-            });
-            invalidateRef.current?.();
-          });
-        }
-
-        // Voeg toe aan texture queue (in batches van TEX_BATCH verwerkt door tickTexture)
-        for (const { tileX, tileY } of tileBatch) texQueue.push({ tileX, tileY, evicted });
-      } finally {
-        terrainInFlight = false;
-        if (!disposed && texQueue.length) setTimeout(tickTexture, 0);
       }
     }
 
-    async function tickTexture() {
-      if (disposed || textureInFlight || terrainInFlight || !texQueue.length) return;
-      const TEX_BATCH = 4; // klein houden: compositing blokkeert main process
-      const items = texQueue.splice(0, TEX_BATCH).filter(({ tileX, tileY }) => loaded.has(`${tileX}_${tileY}`));
-      if (!items.length) {
-        if (texQueue.length) setTimeout(tickTexture, 0);
-        return;
+    function enqueueWindow() {
+      for (const tile of wantedTiles(TERRAIN_RADIUS)) {
+        if (!terrainByTile.has(tile.key) && !terrainMissing.has(tile.key)
+          && !terrainQueue.has(tile.key) && !terrainInFlight.has(tile.key)) terrainQueue.set(tile.key, tile);
       }
-      const tileBatch = items.map(({ tileX, tileY }) => ({ tileX, tileY }));
+      for (const tile of wantedTextureTiles()) {
+        if (!textureDone.has(tile.key)
+          && !textureQueue.has(tile.key) && !textureInFlight.has(tile.key)) textureQueue.set(tile.key, tile);
+      }
+      for (const tile of wantedTiles(WMO_RADIUS)) {
+        if (!wmoDone.has(tile.key) && !wmoQueue.has(tile.key) && !wmoInFlight.has(tile.key)) wmoQueue.set(tile.key, tile);
+      }
+      for (const tile of wantedTiles(WATER_RADIUS)) {
+        if (!waterDone.has(tile.key) && !waterQueue.has(tile.key) && !waterInFlight.has(tile.key)) waterQueue.set(tile.key, tile);
+      }
+    }
 
-      textureInFlight = true;
+    function refreshWindow(force = false) {
+      const { wx, wy } = camPosRef.current;
+      if (!Number.isFinite(wx) || !Number.isFinite(wy)) return;
+      if (!force && lastRefreshPosition
+        && Math.hypot(wx - lastRefreshPosition.wx, wy - lastRefreshPosition.wy) < STREAM_MOVE_DISTANCE) return;
+      lastRefreshPosition = { wx, wy };
+      centerTile = worldToTile(wx, wy);
+      active.terrain = setFrom(wantedTiles(TERRAIN_RADIUS));
+      active.texture = setFrom(wantedTextureTiles());
+      active.wmo = setFrom(wantedTiles(WMO_RADIUS));
+      active.m2 = setFrom(wantedTiles(M2_RADIUS));
+      active.water = setFrom(wantedTiles(WATER_RADIUS));
+      streamWindowRef.current.texture = active.texture;
+      evictOutsideWindow();
+      enqueueWindow();
+      publishDiagnostics();
+    }
+
+    function maybeExpandTextureWindow() {
+      if (textureRadius >= TEXTURE_RADIUS || !centerTile) return;
+      const nearby = wantedTiles(TEXTURE_INITIAL_RADIUS);
+      if (nearby.length && nearby.every(tile => textureDone.has(tile.key))) {
+        textureRadius = TEXTURE_RADIUS;
+        setNearbyTexturesReady(true);
+      }
+    }
+
+    async function pumpTerrain() {
+      const profile = resourceProfileRef.current;
+      if (disposed || terrainPumpActive >= profile.terrainRequestConcurrency || !terrainQueue.size) return;
+      terrainPumpActive += 1;
+      const batch = [...terrainQueue.values()].sort((a, b) => distanceOf(a) - distanceOf(b)).slice(0, profile.terrainBatchMax);
+      batch.forEach(tile => { terrainQueue.delete(tile.key); terrainInFlight.add(tile.key); });
+      publishDiagnostics();
       try {
         const started = performance.now();
-        const tex = await window.azeroth.adt.getTextureLayers({ mapName, tiles: tileBatch });
-        recordPerf('textures', performance.now() - started, tex?.data?.length ?? 0);
-        if (!disposed && tex.success && tex.data.length) {
-          queueTextureUploads(tex.data);
+        const result = await window.azeroth.adt.getTerrain({ mapName, tiles: batch.map(({ tileX, tileY }) => ({ tileX, tileY })) });
+        recordPerf('terrain', performance.now() - started, result?.data?.length ?? 0);
+        if (!result?.success) throw new Error(result?.error || 'Terrain request failed');
+        const got = new Map((result.data ?? []).map(tile => [keyFor(tile.tileX, tile.tileY), tile]));
+        for (const tile of batch) {
+          terrainInFlight.delete(tile.key);
+          if (!active.terrain.has(tile.key)) continue;
+          if (got.has(tile.key)) terrainByTile.set(tile.key, got.get(tile.key));
+          else terrainMissing.add(tile.key);
         }
+        if (!disposed) {
+          setTerrain([...terrainByTile.values()]);
+          enqueueWindow();
+        }
+      } catch (error) {
+        for (const tile of batch) { terrainInFlight.delete(tile.key); if (active.terrain.has(tile.key)) terrainMissing.add(tile.key); }
+        if (!disposed) setError(error.message);
       } finally {
-        textureInFlight = false;
-        if (!disposed && texQueue.length) setTimeout(tickTexture, TEXTURE_YIELD_MS);
+        terrainPumpActive -= 1;
+        publishDiagnostics();
       }
     }
 
-    const id = setInterval(() => { tickTerrain(); tickTexture(); }, 600);
-    return () => { disposed = true; clearInterval(id); };
+    async function pumpTextures() {
+      const profile = resourceProfileRef.current;
+      if (disposed || texturePumpActive >= profile.textureRequestConcurrency || !textureQueue.size) return;
+      texturePumpActive += 1;
+      const maxBatch = textureRadius === TEXTURE_INITIAL_RADIUS
+        ? Math.min(profile.textureBatchMax, 2)
+        : profile.textureBatchMax;
+      const batch = [...textureQueue.values()].sort((a, b) => distanceOf(a) - distanceOf(b)).slice(0, maxBatch);
+      batch.forEach(tile => { textureQueue.delete(tile.key); textureInFlight.add(tile.key); });
+      publishDiagnostics();
+      try {
+        const started = performance.now();
+        const result = await window.azeroth.adt.getTextureLayers({ mapName, tiles: batch.map(({ tileX, tileY }) => ({ tileX, tileY })) });
+        recordPerf('textures', performance.now() - started, result?.data?.length ?? 0);
+        if (!result?.success) throw new Error(result?.error || 'Texture request failed');
+        for (const tile of batch) {
+          textureInFlight.delete(tile.key);
+          if (active.texture.has(tile.key)) textureDone.add(tile.key);
+        }
+        maybeExpandTextureWindow();
+        if (!disposed && result.data?.length) queueTextureUploads(result.data);
+      } catch (error) {
+        for (const tile of batch) textureInFlight.delete(tile.key);
+        if (!disposed) setError(error.message);
+      } finally {
+        texturePumpActive -= 1;
+        publishDiagnostics();
+      }
+    }
+
+    async function pumpWmo() {
+      const profile = resourceProfileRef.current;
+      if (disposed || wmoPumpActive >= profile.wmoRequestConcurrency || !wmoQueue.size) return;
+      wmoPumpActive += 1;
+      const batch = [...wmoQueue.values()].sort((a, b) => distanceOf(a) - distanceOf(b)).slice(0, profile.wmoBatchMax);
+      batch.forEach(tile => { wmoQueue.delete(tile.key); wmoInFlight.add(tile.key); });
+      publishDiagnostics();
+      try {
+        const started = performance.now();
+        const result = await window.azeroth.adt.getPlacements({ mapName, tiles: batch.map(({ tileX, tileY }) => ({ tileX, tileY })) });
+        recordPerf('wmo', performance.now() - started, result?.data?.length ?? 0);
+        if (!result?.success) throw new Error(result?.error || 'WMO request failed');
+        const rowsByTile = new Map((result.data ?? []).map(row => [keyFor(row.tileX, row.tileY), row]));
+        for (const tile of batch) {
+          wmoInFlight.delete(tile.key);
+          if (!active.wmo.has(tile.key)) continue;
+          const rows = rowsByTile.get(tile.key);
+          wmoByTile.set(tile.key, dedupeWmo(tile.key, rows?.wmo));
+          wmoDone.add(tile.key);
+          if (active.m2.has(tile.key)) {
+            m2ByTile.set(tile.key, dedupeM2(tile.key, rows?.m2));
+            m2Done.add(tile.key);
+          }
+        }
+        if (!disposed) {
+          setWmoPlacements([...wmoByTile.values()].flat());
+          setAdtM2Placements([...m2ByTile.values()].flat());
+        }
+      } catch (error) {
+        for (const tile of batch) wmoInFlight.delete(tile.key);
+        if (!disposed) setError(error.message);
+      } finally {
+        wmoPumpActive -= 1;
+        publishDiagnostics();
+      }
+    }
+
+    async function pumpWater() {
+      const profile = resourceProfileRef.current;
+      if (disposed || waterPumpActive >= profile.waterRequestConcurrency || !waterQueue.size) return;
+      waterPumpActive += 1;
+      const batch = [...waterQueue.values()].sort((a, b) => distanceOf(a) - distanceOf(b)).slice(0, profile.waterBatchMax);
+      batch.forEach(tile => { waterQueue.delete(tile.key); waterInFlight.add(tile.key); });
+      publishDiagnostics();
+      try {
+        const result = await window.azeroth.adt.getWater({
+          mapName,
+          tiles: batch.map(({ tileX, tileY }) => ({ tileX, tileY })),
+        });
+        if (!result?.success) throw new Error(result?.error || 'Water request failed');
+        const rowsByTile = new Map((result.data ?? []).map(row => [keyFor(row.tileX, row.tileY), row]));
+        for (const tile of batch) {
+          waterInFlight.delete(tile.key);
+          if (!active.water.has(tile.key)) continue;
+          const row = rowsByTile.get(tile.key);
+          waterByTile.set(tile.key, (row?.layers ?? []).map(layer => ({ ...layer, tileKey: tile.key })));
+          waterDone.add(tile.key);
+        }
+        if (!disposed) setWater([...waterByTile.values()].flat());
+      } catch (error) {
+        for (const tile of batch) waterInFlight.delete(tile.key);
+        if (!disposed) setError(error.message);
+      } finally {
+        waterPumpActive -= 1;
+        publishDiagnostics();
+      }
+    }
+
+    const pump = () => {
+      refreshWindow();
+      void pumpTerrain();
+      void pumpTextures();
+      void pumpWmo();
+      void pumpWater();
+    };
+    refreshWindow(true);
+    pump();
+    const id = setInterval(pump, 150);
+    return () => {
+      disposed = true;
+      clearInterval(id);
+      streamWindowRef.current = { texture: new Set() };
+    };
   }, [mapId, streamKey, queueTextureUploads]);
 
   useEffect(() => {
     setTerrain(null);
+    setWater([]);
     setTileTextures({});
+    setWmoPlacements([]);
+    setAdtM2Placements([]);
+    setStreamDiagnostics({ terrainTiles: 0, waterTiles: 0, wmoPlacements: 0, m2Placements: 0, pendingTerrain: 0, pendingTextures: 0, pendingWmo: 0, pendingWater: 0 });
+    setWmoAssetPending(0);
+    setM2AssetPending(0);
+    setWmoBatchCount(0);
+    setM2BatchCount(0);
     setStreamKey(k => k + 1);
   }, [mapsPath]);
 
@@ -446,6 +761,7 @@ export default function Editor3DPage() {
         spawnCount={loading ? null : spawns.length}
         spawnsVisible={spawnsVisible}
         onToggleSpawns={() => setSpawnsVisible(v => !v)}
+        staticWorldMode={STATIC_WORLD_MODE}
       />
 
       {error && <div className="ed3-error-bar">Error: {error}</div>}
@@ -462,7 +778,7 @@ export default function Editor3DPage() {
         <div className="ed3-viewport">
           {worldLoading && (
             <div className="ed3-world-overlay">
-              <span className="ed3-world-overlay-text">Loading world assets…</span>
+              <span className="ed3-world-overlay-text">Loading nearby world textures...</span>
             </div>
           )}
           <Editor3DErrorBoundary>
@@ -473,6 +789,7 @@ export default function Editor3DPage() {
               activeTool={activeTool}
               onTransform={handleTransform}
               terrain={terrain}
+              water={water}
               tileTextures={tileTextures}
               wdl={null}
               initialTarget={spawnCenter}
@@ -482,14 +799,32 @@ export default function Editor3DPage() {
               transforms={transforms}
               camPosRef={camPosRef}
               invalidateRef={invalidateRef}
+              staticWorldMode={STATIC_WORLD_MODE}
+              viewDistance={VIEW_DISTANCE}
+              resourceProfile={activeResourceProfile}
+              wmoPlacements={wmoPlacements}
+              adtM2Placements={adtM2Placements}
+              onWmoPendingChange={handleWmoPendingChange}
+              onM2PendingChange={handleM2PendingChange}
+              onWmoBatchCount={handleWmoBatchCount}
+              onM2BatchCount={handleM2BatchCount}
+              onRendererStats={handleRendererStats}
+              onCameraMove={requestMinimapDraw}
             />
           </Editor3DErrorBoundary>
-          <MinimapOverlay mapId={mapId} camPosRef={camPosRef} />
-          {(perfMetrics.terrain || perfMetrics.textures) && (
+          <MinimapOverlay mapId={mapId} camPosRef={camPosRef} cameraMoveRef={cameraMoveRef} />
+          {(perfMetrics.terrain || perfMetrics.textures || perfMetrics.wmo || streamDiagnostics.terrainTiles || streamDiagnostics.waterTiles || streamDiagnostics.wmoPlacements || streamDiagnostics.m2Placements || wmoAssetPending || m2AssetPending || wmoBatchCount || m2BatchCount || rendererStats) && (
             <div className="ed3-perf-panel">
               <strong>Streaming</strong>
+              <span>View: {VIEW_DISTANCE} yd · Terrain: 5×5 · Textures: near 3×3 → 5×5 · Objects/water: 3×3</span>
+              <span>Profile: {activeResourceProfile.tier} · texture workers: {activeResourceProfile.textureWorkers} · WMO workers: {activeResourceProfile.wmoWorkers} · DPR max: {activeResourceProfile.dprMax}</span>
+              <span>Active: {streamDiagnostics.terrainTiles} terrain · {streamDiagnostics.waterTiles} water tiles · {streamDiagnostics.wmoPlacements} WMO · {streamDiagnostics.m2Placements} static M2</span>
+              <span>GPU batches: {wmoBatchCount} WMO/M2 doodad · {m2BatchCount} static M2</span>
+              {rendererStats && <span>Renderer: {rendererStats.calls} draw calls · {rendererStats.triangles.toLocaleString()} triangles · {rendererStats.geometries} geometries · {rendererStats.textures} textures</span>}
+              <span>Pending: {streamDiagnostics.pendingTerrain} terrain · {streamDiagnostics.pendingTextures} textures · {streamDiagnostics.pendingWater} water · {streamDiagnostics.pendingWmo} WMO scans · {wmoAssetPending} WMO assets · {m2AssetPending} static M2 assets</span>
               {perfMetrics.terrain && <span>Terrain: {Math.round(perfMetrics.terrain.elapsedMs)} ms / {Math.round(perfMetrics.terrain.tiles)} tiles</span>}
               {perfMetrics.textures && <span>Textures: {Math.round(perfMetrics.textures.elapsedMs)} ms / {Math.round(perfMetrics.textures.tiles)} tiles</span>}
+              {perfMetrics.wmo && <span>WMO scan: {Math.round(perfMetrics.wmo.elapsedMs)} ms / {Math.round(perfMetrics.wmo.tiles)} tiles</span>}
             </div>
           )}
         </div>

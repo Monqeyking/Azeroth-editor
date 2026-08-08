@@ -34,12 +34,12 @@ function worldToImgPx(wx, wy, area, dx, dy) {
   return { px, py };
 }
 
-export default function MinimapOverlay({ mapId, camPosRef }) {
+export default function MinimapOverlay({ mapId, camPosRef, cameraMoveRef }) {
   const { dbcPath, worldmapMpqPath } = useConnection();
   const canvasRef  = useRef(null);
   const dataRef    = useRef({ img: null, area: null });
   const zoomRef    = useRef(1);
-  const rafRef     = useRef(null);
+  const drawRef    = useRef(null);
   const lastKey    = useRef('');
   const offsetRef  = useRef(loadOffset(mapId));
 
@@ -53,12 +53,14 @@ export default function MinimapOverlay({ mapId, camPosRef }) {
     offsetRef.current = o;
     setOffset(o);
     lastKey.current = '';
+    drawRef.current?.();
   }, [mapId]);
 
   // Sync offsetRef bij wijziging
   useEffect(() => {
     offsetRef.current = offset;
     lastKey.current = '';
+    drawRef.current?.();
   }, [offset]);
 
   const adjustOffset = (field, delta) => {
@@ -92,7 +94,11 @@ export default function MinimapOverlay({ mapId, camPosRef }) {
       if (cancelled) return;
 
       let img = null;
-      if (imgRes.success) { img = new Image(); img.src = imgRes.data; }
+      if (imgRes.success) {
+        img = new Image();
+        img.onload = () => drawRef.current?.();
+        img.src = imgRes.data;
+      }
 
       let area = null;
       if (areasRes.success) {
@@ -115,6 +121,7 @@ export default function MinimapOverlay({ mapId, camPosRef }) {
 
       dataRef.current = { img, area };
       lastKey.current = '';
+      drawRef.current?.();
     });
 
     return () => { cancelled = true; };
@@ -130,20 +137,19 @@ export default function MinimapOverlay({ mapId, camPosRef }) {
       const delta = e.deltaY > 0 ? -1 : 1;
       zoomRef.current = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, zoomRef.current + delta));
       lastKey.current = '';
+      drawRef.current?.();
     };
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
 
-  // RAF draw
+  // Draw only when camera, image, zoom or calibration changes.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
 
     function draw() {
-      rafRef.current = requestAnimationFrame(draw);
-
       const { img, area } = dataRef.current;
       const pos  = camPosRef?.current;
       const zoom = zoomRef.current;
@@ -187,9 +193,14 @@ export default function MinimapOverlay({ mapId, camPosRef }) {
       }
     }
 
-    rafRef.current = requestAnimationFrame(draw);
-    return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); };
-  }, [camPosRef]);
+    drawRef.current = draw;
+    if (cameraMoveRef) cameraMoveRef.current = draw;
+    draw();
+    return () => {
+      if (drawRef.current === draw) drawRef.current = null;
+      if (cameraMoveRef?.current === draw) cameraMoveRef.current = null;
+    };
+  }, [camPosRef, cameraMoveRef]);
 
   if (!worldmapMpqPath) return null;
 

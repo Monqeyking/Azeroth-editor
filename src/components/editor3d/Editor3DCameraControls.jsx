@@ -39,7 +39,7 @@ export function useAltHeld() {
   return altHeld;
 }
 
-export function CameraFlyControls() {
+export function CameraFlyControls({ terrainClamp = true }) {
   const { camera, controls, gl, invalidate } = useThree();
   const rightDown = useRef(false);
   const forward = useMemo(() => new THREE.Vector3(), []);
@@ -133,14 +133,16 @@ export function CameraFlyControls() {
       }
     }
 
-    const ground = getTerrainHeight(-camera.position.z, -camera.position.x);
-    const minCameraY = ground == null ? null : ground + GROUND_CLEARANCE;
-    if (minCameraY != null && camera.position.y < minCameraY) {
-      const lift = minCameraY - camera.position.y;
-      camera.position.y += lift;
-      controls.target.y += lift;
-      controls.update();
-      state.invalidate();
+    if (terrainClamp) {
+      const ground = getTerrainHeight(-camera.position.z, -camera.position.x);
+      const minCameraY = ground == null ? null : ground + GROUND_CLEARANCE;
+      if (minCameraY != null && camera.position.y < minCameraY) {
+        const lift = minCameraY - camera.position.y;
+        camera.position.y += lift;
+        controls.target.y += lift;
+        controls.update();
+        state.invalidate();
+      }
     }
   });
 

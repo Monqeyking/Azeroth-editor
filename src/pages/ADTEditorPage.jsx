@@ -41,22 +41,9 @@ function AreaFlagPicker({ value, onChange }) {
     <details>
       <summary>Choose AreaTable flags</summary>
       <div className="adt-flag-options">{AREA_FLAG_OPTIONS.map(([bit, label]) => <label key={bit}><input type="checkbox" checked={(mask & bit) === bit} onChange={() => toggle(bit)} /><span>{label}</span><code>0x{bit.toString(16).padStart(8, '0')}</code></label>)}</div>
-      <div className="adt-flag-presets"><span>Quick presets</span><button type="button" className="adt-btn" onClick={() => onChange(String(0x40100040))}>Drygulch</button><button type="button" className="adt-btn" onClick={() => onChange(String(0x40300040))}>Razor Hill</button></div>
     </details>
   </div>;
 }
-function summarizeChunks(chunks = []) {
-  const groups = new Map();
-  for (const chunk of chunks) {
-    const current = groups.get(chunk.type) || { type: chunk.type, count: 0, bytes: 0, valid: true };
-    current.count++;
-    current.bytes += Number(chunk.size) || 0;
-    current.valid = current.valid && chunk.valid;
-    groups.set(chunk.type, current);
-  }
-  return [...groups.values()];
-}
-
 function Panel({ title, meta, children, className = '' }) {
   return <section className={`adt-panel ${className}`}><div className="adt-panel-title"><span>{title}</span>{meta && <small>{meta}</small>}</div>{children}</section>;
 }
@@ -68,6 +55,18 @@ function Value({ label, children, mono = false }) {
 function WarningList({ warnings = [] }) {
   if (!warnings.length) return <div className="adt-empty-inline"><CheckCircle2 size={13} /> No parser warnings</div>;
   return <ul className="adt-warning-list">{warnings.map((warning, index) => <li key={`${warning}-${index}`}><AlertTriangle size={12} /> <span>{warning}</span></li>)}</ul>;
+}
+
+function summarizeChunks(chunks = []) {
+  const groups = new Map();
+  for (const chunk of chunks) {
+    const current = groups.get(chunk.type) || { type: chunk.type, count: 0, bytes: 0, valid: true };
+    current.count++;
+    current.bytes += Number(chunk.size) || 0;
+    current.valid = current.valid && chunk.valid;
+    groups.set(chunk.type, current);
+  }
+  return [...groups.values()];
 }
 
 function RawTree({ overview, onSelect }) {
@@ -160,7 +159,6 @@ const BUILD_OUTPUTS = [
 const WORKFLOW_LABELS = {
   prepare: 'Prepare server tile',
   map: 'Generate .map',
-  inspectVmap: 'Inspect VMap deps',
   vmap: 'Generate VMap',
   mmap: 'Generate MMAP',
   complete: 'Workflow complete',
@@ -168,7 +166,7 @@ const WORKFLOW_LABELS = {
 
 function nextWorkflowStep(plan) {
   if (plan.map) return 'map';
-  if (plan.vmap) return 'inspectVmap';
+  if (plan.vmap) return 'vmap';
   if (plan.mmap && plan.map) return 'mmap';
   return 'complete';
 }
@@ -180,7 +178,7 @@ function StageCheckbox({ item, checked, onChange, locked = false }) {
   </label>;
 }
 
-function ServerTileStagingPanel({ loading, status, progress, workflowStep, onPrepare, onRunMap, onInspectVmap, onRunVmap, onRunMmap, jobRoot, stagedAreaTablePath, areaTableSourceAvailable, selectedArtifacts, setSelectedArtifacts, buildPlan, setBuildPlan, batchTiles, batchTileKeys, setBatchTileKeys, sourceType }) {
+function ServerTileStagingPanel({ loading, status, progress, workflowStep, onPrepare, onRunMap, onRunVmap, onRunMmap, jobRoot, stagedAreaTablePath, areaTableSourceAvailable, selectedArtifacts, setSelectedArtifacts, buildPlan, setBuildPlan, batchTiles, batchTileKeys, setBatchTileKeys, sourceType }) {
   const selectedStageCount = Object.values(selectedArtifacts).filter(Boolean).length;
   const selectedBuildCount = Object.values(buildPlan).filter(Boolean).length;
   const areaTableReady = Boolean(stagedAreaTablePath || areaTableSourceAvailable);
@@ -189,7 +187,7 @@ function ServerTileStagingPanel({ loading, status, progress, workflowStep, onPre
   const canAct = step => !loading && workflowStep === step;
   const nextLabel = WORKFLOW_LABELS[workflowStep] || WORKFLOW_LABELS.prepare;
   return <Panel title="Server tile staging" meta="Safe batch preparation · output outside the live server" className="adt-server-stage-panel">
-    <div className="adt-server-stage-content"><div><strong>Select what belongs in this staging job</strong><span>Only selected files and the build plan are recorded in the manifest. Client and server data remain unchanged.</span></div><div className="adt-stage-actions"><button className="adt-btn primary" onClick={onPrepare} disabled={!canAct('prepare') || !selectedArtifacts.adt}>{loading ? 'Preparing…' : 'Prepare server tile'}</button>{jobRoot && <><button className="adt-btn" onClick={onRunMap} disabled={!canAct('map') || !buildPlan.map}>{loading ? 'Generating…' : 'Generate .map'}</button><button className="adt-btn" onClick={onInspectVmap} disabled={!canAct('inspectVmap') || !buildPlan.vmap}>{loading ? 'Checking…' : 'Inspect VMap deps'}</button><button className="adt-btn" onClick={onRunVmap} disabled={!canAct('vmap') || !buildPlan.vmap}>{loading ? 'Generating…' : 'Generate VMap'}</button><button className="adt-btn" onClick={onRunMmap} disabled={!canAct('mmap') || !buildPlan.mmap || !buildPlan.map}>{loading ? 'Generating…' : 'Generate MMAP'}</button></>}</div></div>
+    <div className="adt-server-stage-content"><div><strong>Select what belongs in this staging job</strong><span>Only selected files and the build plan are recorded in the manifest. Client and server data remain unchanged.</span></div><div className="adt-stage-actions"><button className="adt-btn primary" onClick={onPrepare} disabled={!canAct('prepare') || !selectedArtifacts.adt}>{loading ? 'Preparing…' : 'Prepare server tile'}</button>{jobRoot && <><button className="adt-btn" onClick={onRunMap} disabled={!canAct('map') || !buildPlan.map}>{loading ? 'Generating…' : 'Generate .map'}</button><button className="adt-btn" onClick={onRunVmap} disabled={!canAct('vmap') || !buildPlan.vmap}>{loading ? 'Generating…' : 'Generate VMap'}</button><button className="adt-btn" onClick={onRunMmap} disabled={!canAct('mmap') || !buildPlan.mmap || !buildPlan.map}>{loading ? 'Generating…' : 'Generate MMAP'}</button></>}</div></div>
     {jobRoot && <div className="adt-workflow-next">Next step: <strong>{nextLabel}</strong></div>}
     {progress && <div className="adt-extractor-progress"><div className="adt-extractor-progress-head"><strong>{progress.message}{progress.indeterminate && <span className="adt-progress-dots" aria-hidden="true" />}</strong><span>{progress.indeterminate ? 'Native tool running…' : `${progress.percent || 0}%`}</span></div><div className="adt-extractor-progress-track"><div className={`adt-extractor-progress-fill ${progress.indeterminate ? 'indeterminate' : ''}`} style={{ width: `${Math.max(3, Math.min(100, Number(progress.percent) || 0))}%` }} /></div></div>}
     <div className="adt-stage-sections">
@@ -293,7 +291,15 @@ export default function ADTEditorPage() {
     if (!query) return selectedMap?.tiles || [];
     return (selectedMap?.tiles || []).filter(tile => `${tile.x}_${tile.y}`.includes(query) || `${tile.x},${tile.y}`.includes(tileQuery.trim()));
   }, [selectedMap, tileQuery]);
-  const batchTiles = selectedMap?.tiles || [];
+  const batchTiles = useMemo(() => {
+    const seen = new Set();
+    return (selectedMap?.tiles || []).filter(tile => {
+      const key = `${tile.x}_${tile.y}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [selectedMap]);
   const chunkSummary = useMemo(() => summarizeChunks(inspection?.overview?.topChunks), [inspection]);
   const filterAreaId = areaFilter === '' ? null : Number(areaFilter);
   const matchingChunkCount = inspection?.chunks?.filter(chunk => filterAreaId == null || chunk.areaId === filterAreaId).length || 0;
@@ -336,7 +342,6 @@ export default function ADTEditorPage() {
       maxHeight: heights.length ? Math.max(...heights) : null,
     };
   }, [inspection]);
-
   const handleMapChange = (event) => {
     const nextMap = event.target.value;
     const firstTile = [...(maps.find(item => item.name === nextMap)?.tiles || [])].sort(compareTiles)[0];
@@ -409,23 +414,9 @@ export default function ADTEditorPage() {
     try {
       const result = await window.azeroth.adt.runMapExtractor({ jobRoot: serverTileJobRoot });
       if (!result.success) setError(result.error || 'Could not generate the .map file.');
-      else { setServerTileWorkflowStep(buildPlan.vmap ? 'inspectVmap' : buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(`${result.message} ${result.warnings?.length ? `Warnings: ${result.warnings.join('; ')}` : ''}`); }
+      else { setServerTileWorkflowStep(buildPlan.vmap ? 'vmap' : buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(`${result.message} ${result.warnings?.length ? `Warnings: ${result.warnings.join('; ')}` : ''}`); }
     } catch (extractError) {
       setError(extractError?.message || 'Could not generate the .map file.');
-    } finally {
-      setServerTileLoading(false);
-    }
-  };
-
-  const inspectVmapDependencies = async () => {
-    if (!serverTileJobRoot) return;
-    setServerTileLoading(true); setServerTileStatus(''); setServerTileProgress(null); setError('');
-    try {
-      const result = await window.azeroth.adt.inspectVmapDependencies({ jobRoot: serverTileJobRoot });
-      if (!result.success) setError(result.error || 'Could not inspect VMap dependencies.');
-      else { setServerTileWorkflowStep(buildPlan.vmap ? 'vmap' : buildPlan.mmap && buildPlan.map ? 'mmap' : 'complete'); setServerTileStatus(result.message); }
-    } catch (inspectError) {
-      setError(inspectError?.message || 'Could not inspect VMap dependencies.');
     } finally {
       setServerTileLoading(false);
     }
@@ -470,7 +461,7 @@ export default function ADTEditorPage() {
     {error && <div className="adt-error"><AlertTriangle size={14} /> {error}</div>}
     <div className="adt-source-note">Source: <strong>{SOURCE_OPTIONS.find(item => item.value === sourceType)?.label}</strong> · {sourceType === 'standalone' ? `Dependency source: ${worldmapMpqPath ? 'Configured Current Client' : 'None'}` : `Current Client: ${displayPath(worldmapMpqPath)}`}</div>
     {inspection ? <>
-      <ServerTileStagingPanel loading={serverTileLoading} status={serverTileStatus} progress={serverTileProgress} workflowStep={serverTileWorkflowStep} onPrepare={prepareServerTile} onRunMap={runMapExtractor} onInspectVmap={inspectVmapDependencies} onRunVmap={runVmapExtractor} onRunMmap={runMmapExtractor} jobRoot={serverTileJobRoot} stagedAreaTablePath={stagedAreaTablePath} areaTableSourceAvailable={Boolean(worldmapMpqPath)} selectedArtifacts={selectedArtifacts} setSelectedArtifacts={setSelectedArtifacts} buildPlan={buildPlan} setBuildPlan={setBuildPlan} batchTiles={batchTiles} batchTileKeys={batchTileKeys} setBatchTileKeys={setBatchTileKeys} sourceType={sourceType} />
+      <ServerTileStagingPanel loading={serverTileLoading} status={serverTileStatus} progress={serverTileProgress} workflowStep={serverTileWorkflowStep} onPrepare={prepareServerTile} onRunMap={runMapExtractor} onRunVmap={runVmapExtractor} onRunMmap={runMmapExtractor} jobRoot={serverTileJobRoot} stagedAreaTablePath={stagedAreaTablePath} areaTableSourceAvailable={Boolean(worldmapMpqPath)} selectedArtifacts={selectedArtifacts} setSelectedArtifacts={setSelectedArtifacts} buildPlan={buildPlan} setBuildPlan={setBuildPlan} batchTiles={batchTiles} batchTileKeys={batchTileKeys} setBatchTileKeys={setBatchTileKeys} sourceType={sourceType} />
       <AreaTableEditor sourceAreaChoices={sourceAreaChoices} targetAreaChoices={targetAreaChoices} newAreaSourceId={newAreaSourceId} onSourceChange={value => { setNewAreaSourceId(value); setAreaFilter(value); setNewAreaName(sourceAreaChoices.find(area => String(area.id) === value)?.name || ''); }} newAreaTemplateId={newAreaTemplateId} setNewAreaTemplateId={setNewAreaTemplateId} newAreaName={newAreaName} setNewAreaName={setNewAreaName} newAreaId={newAreaId} setNewAreaId={setNewAreaId} newAreaParentId={newAreaParentId} setNewAreaParentId={setNewAreaParentId} newAreaFlags={newAreaFlags} setNewAreaFlags={setNewAreaFlags} newAreaAmbienceId={newAreaAmbienceId} setNewAreaAmbienceId={setNewAreaAmbienceId} newAreaZoneMusicId={newAreaZoneMusicId} setNewAreaZoneMusicId={setNewAreaZoneMusicId} newAreaIntroSound={newAreaIntroSound} setNewAreaIntroSound={setNewAreaIntroSound} newAreaExplorationLevel={newAreaExplorationLevel} setNewAreaExplorationLevel={setNewAreaExplorationLevel} newAreaFactionGroupMask={newAreaFactionGroupMask} setNewAreaFactionGroupMask={setNewAreaFactionGroupMask} stageNewArea={stageNewArea} loading={areaTableStageLoading} status={areaTableStageStatus} />
       <Panel title="Area comparison" meta={`${inspection.areaSummary.length} areas found`} className="adt-area-comparison"><div className="adt-compare-help">Source = the selected ADT and its comparison AreaTable. Target = your configured current client. Use the source dropdown below to find the area, then choose the target ID.</div><div className="adt-table-wrap"><table className="adt-table"><thead><tr><th>Source ID</th><th>Source name</th><th>Same ID in target</th><th>Chunks</th></tr></thead><tbody>{inspection.areaSummary.map(area => <tr key={area.areaId}><td>{area.areaId}</td><td>{area.sourceAreaName || 'Unavailable'}</td><td>{area.targetAreaName || 'Not found'}</td><td>{area.chunkCount}</td></tr>)}{!inspection.areaSummary.length && <tr><td colSpan="4" className="adt-empty-cell">No areas found</td></tr>}</tbody></table></div><div className="adt-new-area"><strong>Create custom target area</strong><span>Use a 3.3.5 target template and give the source area a new ID.</span><div className="adt-new-area-fields"><label>Source area<select value={newAreaSourceId} onChange={event => { const value = event.target.value; setNewAreaSourceId(value); setAreaFilter(value); setNewAreaName(sourceAreaChoices.find(area => String(area.id) === value)?.name || ''); }}><option value="">Select source area…</option>{sourceAreaChoices.map(area => <option key={`new-source-${area.id}`} value={area.id}>{area.id} · {area.name || 'Source name unavailable'}</option>)}</select></label><label>Target template<select value={newAreaTemplateId} onChange={event => setNewAreaTemplateId(event.target.value)} disabled={!targetAreaChoices.length}>{targetAreaChoices.map(area => <option key={`new-template-${area.id}`} value={area.id}>{area.id} · {area.name || 'Target name unavailable'}</option>)}</select></label><label>New name<input value={newAreaName} onChange={event => setNewAreaName(event.target.value)} placeholder="Sparkwater Port" /></label><label>New ID<input value={newAreaId} onChange={event => setNewAreaId(event.target.value)} placeholder="Auto" inputMode="numeric" /></label><button className="adt-btn primary" onClick={stageNewArea} disabled={areaTableStageLoading || !newAreaName.trim() || !newAreaSourceId}>{areaTableStageLoading ? 'Staging…' : 'Stage new area'}</button></div>{areaTableStageStatus && <div className="adt-stage-status">{areaTableStageStatus}</div>}</div></Panel><Panel title="ADT overview" meta={inspection.overview.readStatus} className="adt-overview"><div className="adt-values overview-values"><Value label="Source type">{inspection.source.label}</Value><Value label="Resolved source" mono>{displayPath(inspection.source.path)}</Value><Value label="Dependency source">{inspection.source.dependency}</Value><Value label="Relative ADT path" mono>{inspection.file.relativePath}</Value><Value label="Filename" mono>{inspection.file.name}</Value><Value label="File size">{fmtBytes(inspection.file.bytes)}</Value><Value label="SHA-256" mono>{inspection.file.sha256}</Value><Value label="MVER / type">{`${inspection.overview.version ?? '—'} · ${inspection.overview.detectedType}`}</Value></div><div className="adt-overview-bottom"><div><h3>Top-level chunks</h3><div className="adt-chip-list">{chunkSummary.map(chunk => <span className={`adt-chip ${statusClass(chunk.valid)}`} key={chunk.type}>{chunk.type}{chunk.count > 1 ? ` × ${chunk.count}` : ''} · {chunk.bytes} B total</span>)}</div></div><div><h3>Missing required chunks</h3><div className="adt-inline-text">{inspection.overview.missingRequired.length ? inspection.overview.missingRequired.join(', ') : 'None'}</div></div><div><h3>Parser warnings</h3><WarningList warnings={inspection.overview.warnings} /></div></div></Panel><Panel title="In plain language" meta="What this tile means in practice" className="adt-explainer"><div className="adt-explainer-grid"><div><strong>Terrain</strong><span>{tileStats.valid}/256 terrain chunks read{tileStats.warnings ? ` · ${tileStats.warnings} with warnings` : ' · no chunk warnings'}</span></div><div><strong>Areas</strong><span>{tileStats.areas || 'None'} area records found</span></div><div><strong>Height</strong><span>{tileStats.minHeight == null ? 'Not available' : `${fmt(tileStats.minHeight)} tot ${fmt(tileStats.maxHeight)}`}</span></div><div><strong>Assets</strong><span>{tileStats.textures} textures · {tileStats.m2} M2 · {tileStats.wmo} WMO</span></div><div><strong>Water</strong><span>{tileStats.water ? `${tileStats.water} liquid layers found` : 'No water layer found'}</span></div></div><p>Click a tile below. Green means the MCNK is valid; yellow means it needs review; red means the chunk is missing or invalid.</p></Panel>
       <div className="adt-workspace"><div className="adt-main-column"><Panel title="MCNK 16 × 16 grid" meta={`${inspection.chunks.filter(chunk => chunk.valid).length}/256 available · ${nameView === 'source' ? 'Source names' : 'Compare names'} · ${filterAreaId == null ? 'click a tile' : `${matchingChunkCount} matching AreaID ${filterAreaId}`}`} className="adt-grid-panel"><div className="adt-grid-tools"><label>Filter source AreaID<select value={areaFilter} onChange={event => setAreaFilter(event.target.value)}><option value="">All source areas</option>{sourceAreaChoices.map(area => <option key={`filter-${area.id}`} value={area.id}>{area.id} · {area.name || 'Source name unavailable'}</option>)}</select></label><span className="adt-grid-match">{filterAreaId == null ? 'All chunks visible' : `${matchingChunkCount} matching chunks`}</span><label>Set matching IDs to target<select value={areaTarget} onChange={event => setAreaTarget(event.target.value)} disabled={!targetAreaChoices.length}><option value="">Select target area…</option>{targetAreaChoices.map(area => <option key={`target-${area.id}`} value={area.id}>{area.id} · {area.name || 'Target name unavailable'}</option>)}</select></label><button className="adt-btn primary" onClick={stageAreaIdChanges} disabled={stageLoading || filterAreaId == null || !Number.isInteger(Number(areaTarget)) || filterAreaId === Number(areaTarget)}>{stageLoading ? 'Staging…' : 'Stage AreaID changes'}</button></div><div className="adt-grid">{inspection.chunks.map(chunk => <GridCell key={chunk.index} chunk={chunk} selected={selectedIndex === chunk.index} nameView={nameView} matches={filterAreaId == null || chunk.areaId === filterAreaId} onSelect={setSelectedIndex} />)}</div><div className="adt-legend"><span><i className="ok" /> valid</span><span><i className="warn" /> warning</span><span><i className="missing" /> missing</span><span><i className="filtered-out" /> filtered out</span></div>{stageStatus && <div className="adt-stage-status">{stageStatus}</div>}</Panel><Panel title="Raw ADT structure tree" meta={`${inspection.overview.topChunks.length} top-level chunks`}><RawTree overview={inspection.overview} onSelect={setSelectedIndex} /></Panel><Panel title="Area summary" meta={`${inspection.areaSummary.length} source areas`}><div className="adt-table-wrap"><table className="adt-table"><thead><tr><th>Source ID</th><th>Source name</th><th>Target name for same ID</th><th>Chunks</th><th>Status</th></tr></thead><tbody>{inspection.areaSummary.map(area => <tr key={area.areaId}><td>{area.areaId}</td><td>{area.sourceAreaName || 'Unavailable'}</td><td>{area.targetAreaName || 'Not found in target'}</td><td>{area.chunkCount}</td><td><span className={`adt-status ${statusClass(area.status)}`}>{area.status}</span></td></tr>)}{!inspection.areaSummary.length && <tr><td colSpan="5" className="adt-empty-cell">No area records parsed</td></tr>}</tbody></table></div></Panel></div><Panel title="Selected MCNK detail" meta={`Index ${selectedIndex}`} className="adt-detail-panel"><ChunkDetail chunk={selectedChunk} textures={inspection.textures} water={inspection.water} /></Panel></div>

@@ -44,6 +44,11 @@ export function getTerrainHeight(wx, wy) {
   const gy = Math.max(0, Math.min(128, ((32 - tileX) * _TS - wx) / _US));
   const x0 = Math.floor(gx), y0 = Math.floor(gy);
   const x1 = Math.min(128, x0 + 1), y1 = Math.min(128, y0 + 1);
+  const cellX = Math.min(127, Math.max(0, x0));
+  const cellY = Math.min(127, Math.max(0, y0));
+  const holeMask = tile.holes?.[(cellY >> 3) * 16 + (cellX >> 3)] ?? 0;
+  const holeBit = (((cellY & 7) >> 1) * 4) + ((cellX & 7) >> 1);
+  if (holeMask & (1 << holeBit)) return null;
   const tx = gx - x0, ty = gy - y0;
   const h00 = tile.v9[y0 * 129 + x0], h10 = tile.v9[y0 * 129 + x1];
   const h01 = tile.v9[y1 * 129 + x0], h11 = tile.v9[y1 * 129 + x1];

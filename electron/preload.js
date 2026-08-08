@@ -153,6 +153,9 @@ contextBridge.exposeInMainWorld('azeroth', {
     save: (filePath, updates) => ipcRenderer.invoke('serverConfig:save', { filePath, updates }),
   },
   clipboard: { writeText: (value) => ipcRenderer.invoke('clipboard:writeText', value) },
+  system: {
+    getResourceProfile: () => ipcRenderer.invoke('system:getResourceProfile'),
+  },
   // Spawn loader (3D editor)
   spawns: {
     load: (opts) => ipcRenderer.invoke('spawns:load', opts),
@@ -172,6 +175,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     runMmapExtractor:       (opts) => ipcRenderer.invoke('adt:runMmapExtractor', opts),
     onProgress:             (cb) => { const h = (_, data) => cb(data); ipcRenderer.on('adt:progress', h); return () => ipcRenderer.removeListener('adt:progress', h); },
     getTerrain:             (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
+    getWater:               (opts) => ipcRenderer.invoke('adt:getWater', opts),
     getPlacements:          (opts) => ipcRenderer.invoke('adt:getPlacements', opts),
     getTileTextures:        (opts) => ipcRenderer.invoke('adt:getTileTextures', opts),
     getTextureLayers:         (opts) => ipcRenderer.invoke('adt:getTextureLayers', opts),
@@ -193,6 +197,10 @@ contextBridge.exposeInMainWorld('azeroth', {
     pickModelPath: () => ipcRenderer.invoke('m2:pickModelPath'),
     searchAssets: (opts) => ipcRenderer.invoke('m2:searchAssets', opts),
     findDisplaysByModelPath: (opts) => ipcRenderer.invoke('m2:findDisplaysByModelPath', opts),
+  },
+  // WMO model loader (3D editor)
+  wmo: {
+    loadAsset: (opts) => ipcRenderer.invoke('wmo:loadAsset', opts),
   },
   // Server process control
   server: {
