@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
 import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
@@ -19,7 +19,6 @@ import {
 } from './wowRenderConfig';
 import WmoPlacementLayer from './WmoPlacementLayer';
 import AdtM2PlacementLayer from './AdtM2PlacementLayer';
-import Editor3DSpawn from './Editor3DSpawn';
 
 const UNIT_SIZE = 33.33333 / 8;
 const TILE_SIZE = UNIT_SIZE * 128;
@@ -718,24 +717,45 @@ function WorldTransformGizmo({ object, transform, mode = 'translate', onChange, 
   useEffect(() => {
     const controls = controlsRef.current;
     const gizmo = controls?.gizmo;
-    if (!gizmo?.translate || gizmo.__azerothTranslateArrowPatch) return undefined;
+    if (!gizmo?.gizmo?.translate || !gizmo?.picker?.translate || gizmo.__azerothUnityTranslatePatchV3) return undefined;
+
+    const normalizeAxisDirection = (handle) => {
+      if (!['X', 'Y', 'Z'].includes(handle.name)) return;
+      const component = handle.name.toLowerCase();
+      handle.scale[component] = Math.abs(handle.scale[component]);
+      if (handle.tag === 'fwd') handle.visible = true;
+      if (handle.tag === 'bwd') handle.visible = false;
+    };
+
+    const axisHandles = [
+      ...gizmo.gizmo.translate.children,
+      ...gizmo.picker.translate.children,
+    ].filter((handle) => ['X', 'Y', 'Z'].includes(handle.name));
+    const originalTags = new Map(axisHandles.map((handle) => [handle, handle.tag]));
+    axisHandles.forEach((handle) => {
+      if (!handle.tag) handle.tag = 'fwd';
+    });
+
     const originalUpdateMatrixWorld = gizmo.updateMatrixWorld;
     gizmo.updateMatrixWorld = function updateMatrixWorld(force) {
       originalUpdateMatrixWorld.call(this, force);
       if (this.mode !== 'translate') return;
-      this.translate.children.forEach((handle) => {
-        if (handle.tag === 'fwd') handle.visible = true;
-        if (handle.tag === 'bwd') handle.visible = false;
-      });
+      this.gizmo.translate.children.forEach(normalizeAxisDirection);
+      this.picker.translate.children.forEach(normalizeAxisDirection);
+      this.helper.translate.children.forEach((handle) => { handle.visible = false; });
     };
-    gizmo.__azerothTranslateArrowPatch = true;
+    gizmo.__azerothUnityTranslatePatchV3 = true;
+    gizmo.updateMatrixWorld(true);
+    invalidate();
+
     return () => {
-      if (gizmo.__azerothTranslateArrowPatch) {
+      if (gizmo.__azerothUnityTranslatePatchV3) {
         gizmo.updateMatrixWorld = originalUpdateMatrixWorld;
-        delete gizmo.__azerothTranslateArrowPatch;
+        originalTags.forEach((tag, handle) => { handle.tag = tag; });
+        delete gizmo.__azerothUnityTranslatePatchV3;
       }
     };
-  }, [groupReady]);
+  }, [groupReady, invalidate]);
 
   const handleChange = useCallback(() => {
     const group = groupRef.current;
@@ -775,16 +795,16 @@ function WorldTransformGizmo({ object, transform, mode = 'translate', onChange, 
 
 
 export default function Editor3DScene({
-  spawns, selectedId, onSelect, activeTool, onTransform, terrain, water = [], tileTextures, wdl, initialTarget,
-  resetKeys = {}, focusTarget, focusTick, transforms = {}, camPosRef, invalidateRef, wmoPlacements = [],
-  adtM2Placements = [], staticWorldMode = false, onCameraMove, onWmoPendingChange, onM2PendingChange,
+  activeTool, terrain, water = [], tileTextures, wdl, initialTarget,
+  focusTarget, focusTick, camPosRef, invalidateRef, wmoPlacements = [],
+  adtM2Placements = [], onCameraMove, onWmoPendingChange, onM2PendingChange,
   onWmoBatchCount, onM2BatchCount, onRendererStats,
   resourceProfile = null,
   viewDistance = 2048,
   onSelectWorldObject, selectedWorldObject = null, onWorldTransform, onWorldTransformStart, onWorldTransformEnd,
   worldTransforms = {},
 }) {
-  const [wmoPriorityReady, setWmoPriorityReady] = useState(!staticWorldMode);
+  const [wmoPriorityReady, setWmoPriorityReady] = useState(false);
   const cameraMotionRef = useRef({ speed: 0, level: 0 });
   const wmoCollisionRef = useRef([]);
   const dprMax = resourceProfile?.dprMax ?? 1.5;
@@ -796,7 +816,7 @@ export default function Editor3DScene({
       onCreated={({ gl }) => configureWowRenderer(gl)}
       camera={{ position: startCameraPosition(), fov: 60, near: 0.5, far: viewDistance }}
       style={{ background: '#1a1a2e' }}
-      onPointerMissed={() => onSelect(null)}
+      onPointerMissed={() => onSelectWorldObject?.(null)}
     >
       <InvalidateExporter invalidateRef={invalidateRef} />
       <RendererStats onStats={onRendererStats} />
@@ -820,8 +840,7 @@ export default function Editor3DScene({
         onSelect={onSelectWorldObject}
         worldTransforms={worldTransforms}
       />
-      {staticWorldMode && (
-        <AdtM2PlacementLayer
+      <AdtM2PlacementLayer
           placements={adtM2Placements}
           resourceProfile={resourceProfile}
           onPendingChange={onM2PendingChange}
@@ -831,9 +850,8 @@ export default function Editor3DScene({
           onSelect={onSelectWorldObject}
           worldTransforms={worldTransforms}
         />
-      )}
 
-      {staticWorldMode && selectedWorldObject && (
+      {selectedWorldObject && (
         <WorldTransformGizmo
           key={selectedWorldObject.key}
           object={selectedWorldObject}
@@ -843,21 +861,6 @@ export default function Editor3DScene({
           onDragStart={onWorldTransformStart}
           onDragEnd={onWorldTransformEnd}
         />
-      )}
-
-      {!staticWorldMode && (
-        <Suspense fallback={null}>
-          {spawns.filter(s => s.guid === selectedId).map(spawn => (
-            <Editor3DSpawn
-              key={`${spawn.guid}_${resetKeys[spawn.guid] ?? 0}`}
-              spawn={spawn}
-              selected
-              onSelect={onSelect}
-              activeTool={activeTool}
-              onTransform={onTransform}
-            />
-          ))}
-        </Suspense>
       )}
 
       <CameraTracker posRef={camPosRef} onCameraMove={onCameraMove} />

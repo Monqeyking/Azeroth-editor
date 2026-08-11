@@ -2,7 +2,7 @@ import { useEffect, useRef, useMemo, useState } from 'react';
 import { useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
 import { cameraInput } from './cameraInputState';
-import { getTerrainHeight } from './spawnLod';
+import { getTerrainHeight } from './terrainHeight';
 
 const FLY_KEYS = new Set(['w', 'a', 's', 'd', 'q', 'e']);
 const NOGGIT_CAMERA_SPEEDS = { '1': 15, '2': 50, '3': 200, '4': 800 };

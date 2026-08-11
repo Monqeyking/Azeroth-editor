@@ -1,9 +1,6 @@
 const { parentPort, workerData } = require('worker_threads');
+const { decodeBLP } = require('./blp-codec');
 const mpqReader = require('./mpq-reader');
-
-// Decoder comes from main.js so worker and main always use identical BLP rules.
-eval(workerData.decoderSource);
-
 
 function chunkMap(buf) {
   const chunks = new Map();

@@ -157,12 +157,6 @@ contextBridge.exposeInMainWorld('azeroth', {
     getResourceProfile: () => ipcRenderer.invoke('system:getResourceProfile'),
     getMemoryDiagnostics: () => ipcRenderer.invoke('system:getMemoryDiagnostics'),
   },
-  // Spawn loader (3D editor)
-  spawns: {
-    load: (opts) => ipcRenderer.invoke('spawns:load', opts),
-    update: (opts) => ipcRenderer.invoke('spawns:update', opts),
-    search: (opts) => ipcRenderer.invoke('spawns:search', opts),
-  },
   // ADT terrain (3D editor)
   adt: {
     listMaps:              (opts) => ipcRenderer.invoke('adt:listMaps', opts),

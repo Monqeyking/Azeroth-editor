@@ -188,12 +188,6 @@ export function getM2Material(asset) {
   return m2MaterialCache.get(key);
 }
 
-export {
-  MODEL_LOAD_DIST,
-  BILLBOARD_LOD_DIST,
-  MODEL_PREFETCH_DIST,
-} from './spawnLod';
-
 function toFloat32Array(buf) {
   if (buf instanceof Float32Array) return buf;
   return new Float32Array(buf.buffer, buf.byteOffset, buf.byteLength / 4);

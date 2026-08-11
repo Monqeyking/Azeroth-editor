@@ -3,13 +3,11 @@ import { useConnection } from '../lib/ConnectionContext';
 import Editor3DErrorBoundary from '../components/editor3d/Editor3DErrorBoundary';
 import Editor3DScene from '../components/editor3d/Editor3DScene';
 import Editor3DToolbar from '../components/editor3d/Editor3DToolbar';
-import Editor3DHierarchy from '../components/editor3d/Editor3DHierarchy';
 import Editor3DInspector from '../components/editor3d/Editor3DInspector';
 import MinimapOverlay from '../components/editor3d/MinimapOverlay';
 import './Editor3DPage.css';
 import { cameraInput } from '../components/editor3d/cameraInputState';
-import { wowToThree, threeToWow } from '../components/editor3d/wowCoords';
-import { setTerrainData } from '../components/editor3d/spawnLod';
+import { setTerrainData } from '../components/editor3d/terrainHeight';
 import { getM2CacheStats } from '../components/editor3d/m2Loader';
 import { getWmoCacheStats } from '../components/editor3d/wmoLoader';
 import { getBlpBatchCacheStats } from '../lib/blpBatchLoader';
@@ -19,7 +17,6 @@ import { adtPlacementRotationFromEuler, wmoDoodadQuaternionFromThree } from '../
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
 const INITIAL_WORLD_READY_TILES = 9;
-const STATIC_WORLD_MODE = true;
 const VIEW_DISTANCE = 1536;
 const TERRAIN_RADIUS = 2;
 const TEXTURE_RADIUS = 2;
@@ -79,14 +76,6 @@ function worldToTile(x, y) {
   };
 }
 
-// Three.js → WoW coördinaten (inverse van wowToThree in Editor3DSpawn)
-// wowToThree: [y, z, -x]  →  Three(x,y,z) = WoW(y, z, -x)
-// inverse:    WoW(x,y,z)  = Three(y, z, -x) → wow_x=-t.z, wow_y=t.x, wow_z=t.y
-function spawnThreePosition(spawn, transform) {
-  if (transform?.pos) return [transform.pos.x, transform.pos.y, transform.pos.z];
-  return wowToThree(spawn.x, spawn.y, spawn.z);
-}
-
 function sceneTransformMatrix(object, draft) {
   const position = draft?.position ?? object.scenePosition ?? [0, 0, 0];
   const rotation = draft?.rotation ?? object.sceneRotation ?? [0, 0, 0];
@@ -134,22 +123,14 @@ function worldDoodadToPlacement(object, draft, worldTransforms) {
 }
 
 export default function Editor3DPage() {
-  const { query, soapCommand, soapConfig, mapsPath } = useConnection();
+  const { mapsPath } = useConnection();
   const [activeTool, setActiveTool] = useState('select');
-  const [selectedId, setSelectedId] = useState(null);
   const [selectedWorldObject, setSelectedWorldObject] = useState(null);
   const [worldTransforms, setWorldTransforms] = useState({});
   const [worldObjects, setWorldObjects] = useState({});
   const [worldSavedTransforms, setWorldSavedTransforms] = useState({});
   const [worldSaveState, setWorldSaveState] = useState({ saving: false, message: null, error: null });
-  const [spawns,     setSpawns]     = useState([]);
-  const [transforms, setTransforms] = useState({});
-  const [dirtyGuids, setDirtyGuids] = useState(new Set());
-  const [resetKeys,  setResetKeys]  = useState({});
-  const [saving,     setSaving]     = useState(false);
-  const [saveError,  setSaveError]  = useState(null);
   const [mapId,         setMapId]         = useState(1);
-  const [spawnsVisible, setSpawnsVisible] = useState(false);
   const [loading,    setLoading]    = useState(false);
   const [terrain,    setTerrain]    = useState(null);
   const [water,      setWater]      = useState([]);
@@ -307,7 +288,6 @@ export default function Editor3DPage() {
     async function load() {
       setLoading(true);
       setError(null);
-      setSpawns([]);
       setTerrain(null);
       setWater([]);
       setTileTextures({});
@@ -321,8 +301,6 @@ export default function Editor3DPage() {
       perfSamplesRef.current = { terrain: [], textures: [], wmo: [] };
       setPerfMetrics({ terrain: null, textures: null, wmo: null });
       textureUploadQueueRef.current = [];
-      setSelectedId(null);
-      setTransforms({});
 
       if (!cancelled) setLoading(false);
     }
@@ -730,24 +708,22 @@ export default function Editor3DPage() {
       if (key === 'q') setActiveTool('select');
       if (key === 'w') setActiveTool('move');
       if (key === 'e') setActiveTool('rotate');
-      if (key === 'f' && selectedId) {
+      if (key === 'f' && selectedWorldObject) {
         e.preventDefault();
         setFocusTick(t => t + 1);
       }
       if (e.key === 'Escape') {
-        setSelectedId(null);
         setSelectedWorldObject(null);
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [selectedId]);
-
-  const handleSelect = useCallback((guid) => {
-    setSelectedId(guid);
-    setSelectedWorldObject(null);
-  }, []);
+  }, [selectedWorldObject]);
   const handleWorldSelect = useCallback((object) => {
+    if (!object) {
+      setSelectedWorldObject(null);
+      return;
+    }
     console.info('[World gizmo diagnostic]', {
       type: object.type,
       key: object.key,
@@ -758,7 +734,6 @@ export default function Editor3DPage() {
       renderedScenePosition: object.scenePosition,
     });
     setSelectedWorldObject(object);
-    setSelectedId(null);
     setWorldObjects(previous => ({ ...previous, [object.key]: object }));
   }, []);
   const handleWorldTransformStart = useCallback((key) => {
@@ -833,134 +808,11 @@ export default function Editor3DPage() {
       setWorldSaveState({ saving: false, message: null, error: error.message });
     }
   }, [mapId, worldObjects]);
-  const handleAddSpawn  = useCallback((spawn) => {
-    setSpawns(prev => prev.some(s => s.guid === spawn.guid) ? prev : [...prev, spawn]);
-  }, []);
-  const handleTransform = useCallback((guid, pos, rot) => {
-    setTransforms(prev => ({ ...prev, [guid]: { pos, rot } }));
-    setDirtyGuids(prev => { const s = new Set(prev); s.add(guid); return s; });
-    setSaveError(null);
-  }, []);
-
-  const handleSave = useCallback(async () => {
-    if (!dirtyGuids.size) return;
-    setSaving(true);
-    setSaveError(null);
-    const toSave = spawns.filter(s => dirtyGuids.has(s.guid));
-    for (const spawn of toSave) {
-      const t = transforms[spawn.guid];
-      if (!t?.pos) continue;
-      const wow = threeToWow(t.pos.x, t.pos.y, t.pos.z);
-      // orientatie: Three.js Y-as rotatie = WoW orientation (rotatie om verticale as)
-      const orientation = t.rot?.y ?? spawn.orientation ?? 0;
-      const res = await window.azeroth.spawns.update({
-        guid: spawn.guid,
-        type: spawn.type ?? 'creature',
-        x: wow.x, y: wow.y, z: wow.z,
-        orientation,
-      });
-      if (!res.success) {
-        setSaveError(`Error for ${spawn.guid}: ${res.error}`);
-        setSaving(false);
-        return;
-      }
-      // Originele DB-waarden bijwerken zodat undo correct werkt na save
-      setSpawns(prev => prev.map(s =>
-        s.guid === spawn.guid
-          ? { ...s, x: wow.x, y: wow.y, z: wow.z, orientation }
-          : s
-      ));
-    }
-    setDirtyGuids(new Set());
-    setSaving(false);
-  }, [dirtyGuids, spawns, transforms]);
-
-  const handleUndo = useCallback(() => {
-    // Verwijder dirty transforms en force remount van de betrokken spawns
-    setTransforms(prev => {
-      const next = { ...prev };
-      dirtyGuids.forEach(guid => delete next[guid]);
-      return next;
-    });
-    setResetKeys(prev => {
-      const next = { ...prev };
-      dirtyGuids.forEach(guid => { next[guid] = (prev[guid] ?? 0) + 1; });
-      return next;
-    });
-    setDirtyGuids(new Set());
-    setSaveError(null);
-  }, [dirtyGuids]);
-
-  const handleTeleport = useCallback(async (command) => {
-    const direct = await soapCommand(command);
-    const isGoFault = !direct.success && String(direct.error ?? '').includes('.gobject');
-    if (!isGoFault) return direct;
-
-    const playerName = soapConfig.characterName?.trim();
-    if (!playerName) {
-      return {
-        success: false,
-        error: `${direct.error}\n\nSOAP .go werkt zonder speler-context niet. Vul Settings -> GM Character Name in voor teleport fallback.`,
-      };
-    }
-
-    const match = String(command).match(/^\.?go\s+xyz\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(-?\d+(?:\.\d+)?)\s+(\d+)/i);
-    if (!match) return direct;
-
-    const [, x, y, z, map] = match;
-    const teleName = `azeroth_editor_${Date.now()}`;
-    const orientation = 0;
-
-    const idResult = await query('SELECT COALESCE(MAX(id), 0) + 1 AS id FROM game_tele');
-    if (!idResult.success) return { success: false, error: `Kon tijdelijke teleport ID niet bepalen: ${idResult.error}` };
-    const teleId = idResult.data?.[0]?.id;
-    if (!teleId) return { success: false, error: 'Could not determine a temporary teleport ID' };
-
-    const del = await query('DELETE FROM game_tele WHERE name = ?', [teleName]);
-    if (!del.success) return { success: false, error: `Kon tijdelijke teleport niet voorbereiden: ${del.error}` };
-
-    const ins = await query(
-      'INSERT INTO game_tele (id, position_x, position_y, position_z, orientation, map, name) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [teleId, Number(x), Number(y), Number(z), orientation, Number(map), teleName]
-    );
-    if (!ins.success) return { success: false, error: `Could not save temporary teleport: ${ins.error}` };
-
-    await soapCommand('.reload game_tele');
-    const escapedPlayer = playerName.replace(/"/g, '');
-    let fallback = await soapCommand(`.tele name ${escapedPlayer} ${teleName}`);
-    if (!fallback.success) {
-      fallback = await soapCommand(`tele name ${escapedPlayer} ${teleName}`);
-    }
-    if (!fallback.success) {
-      fallback = await soapCommand(`.teleport name ${escapedPlayer} ${teleName}`);
-    }
-    if (!fallback.success) {
-      fallback = await soapCommand(`teleport name ${escapedPlayer} ${teleName}`);
-    }
-
-    await query('DELETE FROM game_tele WHERE id = ?', [teleId]);
-    await soapCommand('.reload game_tele');
-
-    return fallback.success ? { ...fallback, result: fallback.result || `Teleported ${escapedPlayer}` } : fallback;
-  }, [query, soapCommand, soapConfig.characterName]);
-
-  const selectedSpawn = useMemo(
-    () => spawns.find(s => s.guid === selectedId) ?? null,
-    [spawns, selectedId]
-  );
-
   const focusTarget = useMemo(() => {
-    if (!selectedSpawn) return null;
-    return spawnThreePosition(selectedSpawn, transforms[selectedId]);
-  }, [selectedSpawn, selectedId, transforms]);
+    if (!selectedWorldObject) return null;
+    return worldTransforms[selectedWorldObject.key]?.position ?? selectedWorldObject.scenePosition ?? null;
+  }, [selectedWorldObject, worldTransforms]);
 
-  // Centroïd in Three.js ruimte (WoW → Three.js: [y, z, -x])
-  const spawnCenter = useMemo(() => {
-    if (!spawns.length) return null;
-    let sx = 0, sy = 0, sz = 0;
-    for (const s of spawns) { sx += -s.y; sy += s.z; sz += -s.x; }
-    return [sx / spawns.length, sy / spawns.length, sz / spawns.length];
-  }, [spawns]);
   const worldDirty = JSON.stringify(worldTransforms) !== JSON.stringify(worldSavedTransforms);
 
   return (
@@ -971,22 +823,11 @@ export default function Editor3DPage() {
         mapId={mapId}
         onMapChange={setMapId}
         loading={loading}
-        spawnCount={loading ? null : spawns.length}
-        spawnsVisible={spawnsVisible}
-        onToggleSpawns={() => setSpawnsVisible(v => !v)}
-        staticWorldMode={STATIC_WORLD_MODE}
       />
 
       {error && <div className="ed3-error-bar">Error: {error}</div>}
 
       <div className="ed3-workspace">
-        <Editor3DHierarchy
-          spawns={spawns}
-          selectedId={selectedId}
-          onSelect={handleSelect}
-          onAddSpawn={handleAddSpawn}
-          mapId={mapId}
-        />
 
         <div className="ed3-viewport">
           {worldLoading && (
@@ -996,23 +837,16 @@ export default function Editor3DPage() {
           )}
           <Editor3DErrorBoundary>
             <Editor3DScene
-              spawns={spawnsVisible ? spawns : []}
-              selectedId={selectedId}
-              onSelect={handleSelect}
               activeTool={activeTool}
-              onTransform={handleTransform}
               terrain={terrain}
               water={water}
               tileTextures={tileTextures}
               wdl={null}
-              initialTarget={spawnCenter}
-              resetKeys={resetKeys}
+              initialTarget={null}
               focusTarget={focusTarget}
               focusTick={focusTick}
-              transforms={transforms}
               camPosRef={camPosRef}
               invalidateRef={invalidateRef}
-              staticWorldMode={STATIC_WORLD_MODE}
               viewDistance={VIEW_DISTANCE}
               resourceProfile={activeResourceProfile}
               wmoPlacements={wmoPlacements}
@@ -1052,13 +886,6 @@ export default function Editor3DPage() {
         </div>
 
         <Editor3DInspector
-          spawn={selectedSpawn}
-          transform={selectedId ? transforms[selectedId] ?? null : null}
-          dirty={selectedId ? dirtyGuids.has(selectedId) : false}
-          onSave={handleSave}
-          saving={saving}
-          mapId={mapId}
-          onTeleport={handleTeleport}
           worldObject={selectedWorldObject}
           worldTransform={selectedWorldObject ? worldTransforms[selectedWorldObject.key] ?? null : null}
           onWorldTransform={handleWorldTransform}
@@ -1074,20 +901,6 @@ export default function Editor3DPage() {
         />
       </div>
 
-      {dirtyGuids.size > 0 && (
-        <div className="ed3-save-bar">
-          <span className="ed3-save-bar-msg">
-            {dirtyGuids.size} spawn{dirtyGuids.size > 1 ? 's' : ''} unsaved
-          </span>
-          {saveError && <span className="ed3-save-bar-error">{saveError}</span>}
-          <button className="ed3-save-bar-btn undo" onClick={handleUndo} disabled={saving}>
-            Undo changes
-          </button>
-          <button className="ed3-save-bar-btn save" onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-         </div>
-      )}
     </div>
   );
 }

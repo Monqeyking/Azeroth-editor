@@ -1,4 +1,4 @@
-import { MousePointer2, Move, RotateCcw, Map, Loader, Eye, EyeOff } from 'lucide-react';
+import { MousePointer2, Move, RotateCcw, Map, Loader } from 'lucide-react';
 
 const TOOLS = [
   { id: 'select', icon: MousePointer2, label: 'Select (Q)' },
@@ -13,7 +13,7 @@ const MAPS = [
   { id: 571, name: 'Northrend'        },
 ];
 
-export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMapChange, loading, spawnCount, spawnsVisible, onToggleSpawns, staticWorldMode = false }) {
+export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMapChange, loading }) {
   return (
     <div className="ed3-toolbar">
       {TOOLS.map(({ id, icon: Icon, label }) => (
@@ -42,21 +42,8 @@ export default function Editor3DToolbar({ activeTool, onToolChange, mapId, onMap
         ))}
       </select>
 
-      {staticWorldMode ? <span className="ed3-world-mode">Static world</span> : (
-        <button
-          className={`ed3-tool-btn ${spawnsVisible ? 'active' : ''}`}
-          onClick={onToggleSpawns}
-          title="Spawns tonen/verbergen"
-        >
-          {spawnsVisible ? <Eye size={15} /> : <EyeOff size={15} />}
-          <span>Spawns</span>
-        </button>
-      )}
-
-      {loading
-        ? <Loader size={13} className="ed3-loading-spin" />
-        : !staticWorldMode && spawnCount != null && <span className="ed3-spawn-count">{spawnCount} spawns</span>
-      }
+      <span className="ed3-world-mode">Static world</span>
+      {loading && <Loader size={13} className="ed3-loading-spin" />}
 
       <span
         className="ed3-camera-hint"
