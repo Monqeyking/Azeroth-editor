@@ -2,7 +2,9 @@ const fs = require('fs');
 const mysql = require('mysql2/promise');
 
 async function main() {
-  const config = fs.readFileSync('D:/CaioCore/CaioServer/configs/worldserver.conf', 'utf8');
+  const configPath = process.argv[2];
+  if (!configPath) throw new Error('Usage: node tmp-rfc-trigger.js <path-to-worldserver.conf>');
+  const config = fs.readFileSync(configPath, 'utf8');
   const match = config.match(/^WorldDatabaseInfo\s*=\s*"([^"]+)"/m);
   const [host, port, user, password, database] = match[1].split(';');
   const connection = await mysql.createConnection({ host, port: Number(port), user, password, database });

@@ -78,13 +78,19 @@ On launch, enter your MySQL credentials:
 
 ### 4. Configure paths in Settings
 
-| Setting | Example | Used by |
+Choose paths that match your own client and server installation. The editor does not assume a particular drive or folder layout.
+
+| Setting | Select | Used by |
 |---|---|---|
-| DBC path | `D:\Server\data\DBFilesClient` | All DBC editors, DBC SQL Editor |
-| Data path | `D:\Server\data` | 3D Editor (ADT/BLP/MPQ), Spawn Map |
-| Auth server exe | `D:\Server\authserver.exe` | Dashboard terminal |
-| World server exe | `D:\Server\worldserver.exe` | Dashboard terminal |
-| Expansions folder | `D:\Server\data\Expansions` | Expansion Lock DBC snapshots |
+| DBC path | The folder containing the editable server/client DBC files | All DBC editors and the DBC SQL Editor |
+| Client Data path | The WoW client's `Data` folder containing the MPQ archives | 3D terrain, minimaps, model textures, editor icons and talent backgrounds |
+| Server maps path | The AzerothCore server's `data/maps` folder | Server-map validation and world tools |
+| Auth server executable | Your built `authserver` executable | Dashboard terminal and process controls |
+| World server executable | Your built `worldserver` executable | Dashboard terminal and process controls |
+| Expansions folder | A folder containing your `Classic`, `TBC` and `WotLK` DBC snapshots | Expansion Lock |
+| Backup folder | Any writable folder you want to use for database backups | Dashboard backups |
+
+Editor artwork sourced from the game client is read directly from its MPQ archives. Icon and talent-background PNG collections are therefore not bundled with the repository.
 
 ### 5. SOAP credentials (optional but recommended)
 

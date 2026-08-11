@@ -3,7 +3,7 @@ import { AlertTriangle, CheckCircle2, FileArchive, FolderOpen, ImageOff, LoaderC
 import { useConnection } from '../lib/ConnectionContext';
 import './WorldCheckPage.css';
 
-const DEFAULT_COMPARE_PATH = 'D:\\TurtleWow-3.3.5';
+const DEFAULT_COMPARE_PATH = '';
 const TILE_X = Array.from({ length: 8 }, (_, i) => i + 28);
 const TILE_Y = Array.from({ length: 11 }, (_, i) => i + 35);
 const AREA_NAMES = { 0: 'Kalimdor', 14: 'Durotar', 17: 'Barrens', 36: 'Alterac', 11: 'Wetlands', 148: 'Darkshore', 331: 'Ashenvale', 357: 'Feralas', 400: 'Thousand Needles', 405: 'Desolace', 215: 'Mulgore', 1377: 'Silithus' };

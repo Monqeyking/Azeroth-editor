@@ -111,7 +111,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // Talents
   talents: {
-    getBackground: (backgroundFile) => ipcRenderer.invoke('talents:getBackground', backgroundFile),
+    getBackground: (dataPath, backgroundFile) => ipcRenderer.invoke('talents:getBackground', dataPath, backgroundFile),
   },
   // Minimap tiles
   minimap: {

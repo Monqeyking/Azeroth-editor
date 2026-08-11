@@ -1,7 +1,9 @@
 param(
-  [string]$BasePath = 'D:\CaioCore\Client\Data\Patch-B.MPQ\DBfilesclient\CharSections.dbc',
-  [string]$TargetPath = 'D:\CaioCore\Client\Data\Patch-C.MPQ\DBfilesclient\CharSections.dbc',
-  [string]$BackupPath = 'D:\CaioCore Tools\azeroth-editor\output\diagnostics\CharSections.before-color2-reference-isolation.dbc'
+  [Parameter(Mandatory = $true)]
+  [string]$BasePath,
+  [Parameter(Mandatory = $true)]
+  [string]$TargetPath,
+  [string]$BackupPath = (Join-Path $PSScriptRoot '..\output\diagnostics\CharSections.before-color2-reference-isolation.dbc')
 )
 
 function Read-Dbc($path) {

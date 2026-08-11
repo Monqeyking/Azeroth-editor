@@ -17,8 +17,11 @@ try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('bet
 
 const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
+const { getConfigPath: getEditorConfigPath, registerConfigIpc } = require('./config-ipc');
+const { registerDialogIpc } = require('./dialog-ipc');
 const { registerIconIpc } = require('./icon-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
+const { registerTalentAssetIpc } = require('./talent-assets-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
 const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, resolveServerTools, inspectVmapDependencies, runTargetVmap, runTargetMmap } = require('./adt-server-extractors');
@@ -379,22 +382,7 @@ ipcMain.handle('server:stop', async (_, { type, exePath }) => {
   }
 });
 
-ipcMain.handle('dialog:openFile', async (_, { title, filters }) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: title || 'Select file',
-    properties: ['openFile'],
-    filters: filters || [{ name: 'Executables', extensions: ['exe'] }, { name: 'All Files', extensions: ['*'] }],
-  });
-  return result.canceled ? null : result.filePaths[0];
-});
-
-ipcMain.handle('dialog:openFolder', async (_, { title }) => {
-  const result = await dialog.showOpenDialog(mainWindow, {
-    title: title || 'Select folder',
-    properties: ['openDirectory'],
-  });
-  return result.canceled ? null : result.filePaths[0];
-});
+registerDialogIpc(ipcMain, dialog, () => mainWindow);
 
 // DBC SQL
 ipcMain.handle('dbcSql:listFiles', async (_, { folder }) => {
@@ -584,7 +572,7 @@ const SPELL_ALL_STRING_OFFSETS = [
 
 // Config persistence
 function getConfigPath() {
-  return path.join(app.getPath('userData'), 'azeroth-editor-config.json');
+  return getEditorConfigPath(app);
 }
 
 function warmupM2Dbc(cfg) {
@@ -599,35 +587,7 @@ function warmupM2Dbc(cfg) {
   });
 }
 
-ipcMain.handle('config:load', () => {
-  try {
-    const configPath = getConfigPath();
-    if (fs.existsSync(configPath)) {
-      const data = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      warmupM2Dbc(data);
-      return { success: true, data };
-    }
-    return { success: true, data: null };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('config:save', (_, config) => {
-  try {
-    const configPath = getConfigPath();
-    let current = {};
-    if (fs.existsSync(configPath)) {
-      current = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    }
-    const merged = { ...current, ...config };
-    fs.writeFileSync(configPath, JSON.stringify(merged, null, 2), 'utf8');
-    warmupM2Dbc(merged);
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
+registerConfigIpc(ipcMain, app, warmupM2Dbc);
 
 // Window
 function createWindow() {
@@ -869,6 +829,10 @@ registerIconIpc(ipcMain, async (dataPath, iconPath) => {
   const result = await readBlpTextureFromSource(dataPath, iconPath);
   return result?.success ? `data:image/png;base64,${result.png}` : null;
 });
+registerTalentAssetIpc(ipcMain, async (dataPath, texturePath) => {
+  const result = await readBlpTextureFromSource(dataPath, texturePath);
+  return result?.success ? `data:image/png;base64,${result.png}` : null;
+});
 
 // Worldmap Tiles Loader
 ipcMain.handle('worldmap:listZones', async (_, dataPath) => {
@@ -905,81 +869,6 @@ ipcMain.handle('worldmap:validatePath', async (_, dataPath) => {
     return { success: false, error: 'Geen MPQ bestanden of zone-mappen gevonden' };
   } catch (e) {
     return { success: false, error: e.message };
-  }
-});
-
-// Talent Background Loader
-ipcMain.handle('talents:getBackground', async (_, backgroundFile) => {
-  try {
-    if (!backgroundFile) {
-      console.log('talents:getBackground - empty backgroundFile');
-      return null;
-    }
-
- // Try multiple potential paths for flexibility (dev vs production)
-    const possiblePaths = [
-      path.join(__dirname, '..', 'src', 'background', 'Talents'),
-      path.join(app.getAppPath(), 'src', 'background', 'Talents'),
-      path.join(process.cwd(), 'src', 'background', 'Talents'),
-    ];
-
-    let tilesDir = null;
-    for (const p of possiblePaths) {
-      if (fs.existsSync(p)) {
-        tilesDir = p;
-        break;
-      }
-    }
-
-    if (!tilesDir) {
-      console.log(`talents:getBackground - Tiles directory not found. Tried: ${possiblePaths.join(', ')}`);
-      return null;
-    }
-    console.log(`talents:getBackground - Using tiles directory: ${tilesDir}`);
-
-    const tiles = ['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'];
-    const result = {};
-
-    for (const t of tiles) {
-      let foundPath = null;
-      const variations = [t, t.toUpperCase(), t.toLowerCase()];
-      
-      for (const v of variations) {
-        const testPath = path.join(tilesDir, `${backgroundFile}-${v}.png`);
-        if (fs.existsSync(testPath)) {
-          foundPath = testPath;
-          break;
-        }
-      }
-
- // Fallback case-insensitive search in directory (e.g. for Linux)
-      if (!foundPath) {
-        try {
-          const files = fs.readdirSync(tilesDir);
-          const targetName = `${backgroundFile}-${t}`.toLowerCase();
-          const match = files.find(f => f.toLowerCase() === `${targetName}.png`);
-          if (match) {
-            foundPath = path.join(tilesDir, match);
-          }
-        } catch (err) {
- // ignore
-        }
-      }
-
-      if (!foundPath) {
-        console.log(`talents:getBackground - Missing tile ${t} for ${backgroundFile}`);
-        return null;
-      }
-
-      const data = fs.readFileSync(foundPath);
-      result[t] = `data:image/png;base64,${data.toString('base64')}`;
-    }
-
-    console.log(`talents:getBackground - ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ Loaded 4 background tiles for: ${backgroundFile}`);
-    return result;
-  } catch (e) {
-    console.error('talents:getBackground error:', e);
-    return null;
   }
 });
 
@@ -5818,7 +5707,7 @@ ipcMain.handle('worldcheck:exportServerData', async (_, { serverMapsPath, tiles 
       '# Azeroth Editor World Compare export',
       '',
       'This is a read-only staging package for selected Durotar server map tiles.',
-      'Nothing was written to CaioServer data.',
+      'Nothing was written to the live server data.',
       '',
       `Selected tiles: ${safeTiles.length}`,
       `Exported .map files: ${exported.length}`,

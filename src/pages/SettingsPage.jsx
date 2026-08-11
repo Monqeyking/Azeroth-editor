@@ -235,9 +235,9 @@ export default function SettingsPage() {
               Paths to server tools and executables. VMap generation uses the MPQ Editor only in the temporary staging job.
             </p>
             {[
-              { key: 'authExe',  label: 'Authserver executable',  placeholder: 'D:\\CaioCore\\CaioServer\\authserver.exe' },
-              { key: 'worldExe', label: 'Worldserver executable', placeholder: 'D:\\CaioCore\\CaioServer\\worldserver.exe' },
-              { key: 'mpqEditorExe', label: 'MPQ Editor executable', placeholder: 'D:\\Tools\\MPQEditor.exe' },
+              { key: 'authExe',  label: 'Authserver executable',  placeholder: 'Select authserver executable' },
+              { key: 'worldExe', label: 'Worldserver executable', placeholder: 'Select worldserver executable' },
+              { key: 'mpqEditorExe', label: 'MPQ Editor executable', placeholder: 'Select MPQ Editor executable' },
             ].map(({ key, label, placeholder }) => (
               <div key={key} className="field-group" style={{ marginBottom: 10 }}>
                 <label>{label}</label>
@@ -277,7 +277,7 @@ export default function SettingsPage() {
             <div className="field-group" style={{ marginBottom: 10 }}>
               <label>Backup Folder</label>
               <div style={{ display: 'flex', gap: 6 }}>
-                <input style={{ flex: 1 }} value={backupPathForm} onChange={e => setBackupPathForm(e.target.value)} placeholder="D:\\CaioCore Tools\\azeroth-editor\\backups" />
+                <input style={{ flex: 1 }} value={backupPathForm} onChange={e => setBackupPathForm(e.target.value)} placeholder="Select a backup folder" />
                 <button className="btn-ghost" style={{ flexShrink: 0 }} onClick={async () => {
                   const selected = await window.azeroth.dialog.openFolder({ title: 'Select backup folder' });
                   if (selected) setBackupPathForm(selected);
@@ -396,7 +396,6 @@ export default function SettingsPage() {
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Path to the <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>maps/</code> folder in AzerothCore server data.
               Used for seamless terrain in the 3D editor.
-              <br/>Example: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\CaioServer\data\maps</code>
             </p>
             <div className="field-group" style={{ marginBottom: 16 }}>
               <label>Maps Path (AzerothCore data/maps)</label>
@@ -404,7 +403,7 @@ export default function SettingsPage() {
                 type="text"
                 value={mapsForm}
                 onChange={e => setMapsForm(e.target.value)}
-                placeholder="D:\CaioCore\CaioServer\data\maps"
+                placeholder="Select the server data/maps folder"
               />
             </div>
             {mapsSaved && (
@@ -436,7 +435,7 @@ export default function SettingsPage() {
                   style={{ flex: 1 }}
                   value={expansionsFolderForm}
                   onChange={e => setExpansionsFolderForm(e.target.value)}
-                  placeholder="D:\CaioCore\CaioServer\data\Expansions"
+                  placeholder="Select the expansion snapshots folder"
                 />
                 <button
                   className="btn-ghost"

@@ -19,11 +19,11 @@ export function ConnectionProvider({ children }) {
     characterName: ''
   });
 
-  const [dbcPath, setDbcPath] = useState('D:\\CaioCore\\CaioServer\\data\\dbc');
+  const [dbcPath, setDbcPath] = useState('');
   const [worldmapMpqPath, setWorldmapMpqPath] = useState('');
   const [mapsPath, setMapsPath] = useState('');
   const [serverPaths, setServerPaths] = useState({ authExe: '', worldExe: '', mpqEditorExe: '' });
-  const [expansionsFolder, setExpansionsFolder] = useState('D:\\CaioCore\\CaioServer\\data\\Expansions');
+  const [expansionsFolder, setExpansionsFolder] = useState('');
   const [backupPath, setBackupPath] = useState('');
 
   const [idRanges, setIdRanges] = useState({

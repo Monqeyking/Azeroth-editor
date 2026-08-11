@@ -172,7 +172,7 @@ function TalentTreeGrid({
 
 export default function TalentEditorPage() {
 	const {
-		dbcPath, readTalentTabs, readTalents, readSpells, readSpellIcons, readSpellFull,
+		dbcPath, worldmapMpqPath, readTalentTabs, readTalents, readSpells, readSpellIcons, readSpellFull,
 		saveTalent, getIcon, deleteTalent, insertTalent,
 		findNextTalentId, copyTalentDbc, idRanges,
 	} = useConnection();
@@ -462,9 +462,9 @@ export default function TalentEditorPage() {
 	};
 
 	useEffect(() => {
-		if (!activeTab) { setBackgroundImage(null); return; }
+		if (!activeTab || !worldmapMpqPath) { setBackgroundImage(null); return; }
 		loadBackgroundImage(activeTab);
-	}, [activeTab]);
+	}, [activeTab, worldmapMpqPath]);
 
 	const loadBackgroundImage = async (tab) => {
 		try {
@@ -474,7 +474,7 @@ export default function TalentEditorPage() {
 				return;
 			}
 
-			const result = await window.azeroth.talents.getBackground(bgFile);
+			const result = await window.azeroth.talents.getBackground(worldmapMpqPath, bgFile);
 
 			if (result && result.TopLeft && result.TopRight && result.BottomLeft && result.BottomRight) {
 				// Composite the 4 tiles on a client-side canvas
