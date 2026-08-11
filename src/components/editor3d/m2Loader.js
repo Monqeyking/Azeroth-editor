@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import * as THREE from 'three';
+import { configureWowColorTexture } from './wowRenderConfig';
 
 const m2PromiseCache   = new Map();
 const m2ResultCache    = new Map();
@@ -115,6 +116,50 @@ export function pruneM2PathAssetCache(keepPaths = []) {
   }
 }
 
+function getAssetBytes(assets) {
+  const seenGeometries = new Set();
+  const seenArrays = new Set();
+  const seenTextures = new Set();
+  let geometryBytes = 0;
+  let textureBytes = 0;
+  let assetCount = 0;
+  for (const asset of assets) {
+    if (!asset) continue;
+    assetCount += 1;
+    const geo = asset.geo;
+    if (geo && !seenGeometries.has(geo)) {
+      seenGeometries.add(geo);
+      for (const attribute of Object.values(geo.attributes || {})) {
+        if (attribute?.array && !seenArrays.has(attribute.array)) {
+          seenArrays.add(attribute.array);
+          geometryBytes += attribute.array.byteLength || 0;
+        }
+      }
+      if (geo.index?.array && !seenArrays.has(geo.index.array)) {
+        seenArrays.add(geo.index.array);
+        geometryBytes += geo.index.array.byteLength || 0;
+      }
+    }
+    for (const texture of asset.textureRefs || []) {
+      if (texture && !seenTextures.has(texture)) {
+        seenTextures.add(texture);
+        textureBytes += texture.image?.data?.byteLength || 0;
+      }
+    }
+  }
+  return { assetCount, geometryBytes, textureBytes, estimatedBytes: geometryBytes + textureBytes };
+}
+
+export function getM2CacheStats() {
+  return {
+    displayEntries: m2ResultCache.size,
+    pathEntries: m2PathResultCache.size,
+    pendingDisplays: m2PromiseCache.size,
+    pendingPaths: m2PathPromiseCache.size,
+    ...getAssetBytes([...m2ResultCache.values(), ...m2PathResultCache.values()]),
+  };
+}
+
 // 'idle' | 'loading' | 'loaded' | 'failed'
 export function getM2AssetState(displayId) {
   if (!displayId) return 'none';
@@ -203,7 +248,7 @@ function createM2Texture(source, textureRefs = null) {
   const texture = new THREE.DataTexture(bytes, width, height, THREE.RGBAFormat);
   texture.userData.debugAlpha = { min: alphaMin, max: alphaMax, hasTransparency: alphaMin < 255 };
   texture.flipY = false;
-  texture.colorSpace = THREE.NoColorSpace;
+  configureWowColorTexture(texture);
   texture.needsUpdate = true;
   const canMipMap = THREE.MathUtils.isPowerOfTwo(width) && THREE.MathUtils.isPowerOfTwo(height);
   texture.generateMipmaps = canMipMap;
@@ -221,12 +266,13 @@ function createM2PassMaterial(pass, texture) {
   const blend = Number(pass?.blend) || 0;
   const cutout = blend === 1;
   const transparent = blend >= 2;
+  const twoSided = (Number(pass?.renderFlags) & 4) !== 0;
   const material = new THREE.MeshLambertMaterial({
     map: texture,
     color: texture ? '#ffffff' : '#ccaa88',
-    side: THREE.DoubleSide,
+    side: twoSided ? THREE.DoubleSide : THREE.FrontSide,
     transparent,
-    alphaTest: cutout ? 0.7 : 0.1,
+    alphaTest: cutout ? 224 / 255 : blend > 0 ? 1 / 255 : 0,
     depthWrite: !pass?.noDepthWrite,
   });
   material.blending = blend === 3 || blend === 4
@@ -244,6 +290,7 @@ export function buildM2Asset(data) {
   geo.setAttribute('position', new THREE.BufferAttribute(toFloat32Array(data.positions), 3));
   geo.setAttribute('normal',   new THREE.BufferAttribute(toFloat32Array(data.normals), 3));
   geo.setAttribute('uv',       new THREE.BufferAttribute(toFloat32Array(data.uvs), 2));
+  if (data.uvs2) geo.setAttribute('uv1', new THREE.BufferAttribute(toFloat32Array(data.uvs2), 2));
   geo.setIndex(new THREE.BufferAttribute(toUint32Array(data.indices), 1));
 
   const textureRefs = [];
@@ -266,9 +313,16 @@ export function buildM2Asset(data) {
   for (const pass of renderPasses) {
     const source = passTextures.get(pass.index);
     const pathKey = source?.path?.toLowerCase();
+    const textureKey = pathKey ? `${pathKey}|uv${pass.uvSet === 1 ? 1 : 0}` : '';
     const texturePath = source?.path || pass.texturePath || '';
-    let texture = pathKey ? textureByPath.get(pathKey) : null;
+    let texture = textureKey ? textureByPath.get(textureKey) : null;
     if (!texture) texture = createM2Texture(source, textureRefs);
+    if (texture && pass.uvSet === 1) {
+      texture = texture.clone();
+      texture.channel = 1;
+      texture.needsUpdate = true;
+      textureRefs.push(texture);
+    }
     const blend = Number(pass?.blend) || 0;
     const particleDrivenGlow = data.particleEmitters?.length
       && /genericglow_alpha_128\.blp$/i.test(texturePath);
@@ -307,7 +361,7 @@ export function buildM2Asset(data) {
     }
     const passTexture = texture;
     if (!texture) texture = getFallbackTexture();
-    if (texture && pathKey) textureByPath.set(pathKey, texture);
+    if (texture && textureKey) textureByPath.set(textureKey, texture);
     materials.push(createM2PassMaterial(pass, texture));
     debugPasses.push({
       ...pass,

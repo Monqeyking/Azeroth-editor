@@ -31,3 +31,31 @@ export function adtPlacementQuaternion([rx = 0, ry = 0, rz = 0], yawOffset = 0) 
     basis.clone().multiply(internal).multiply(basis.clone().transpose()),
   );
 }
+
+export function adtPlacementRotationFromEuler(euler, yawOffset = 0) {
+  const deg = 180 / Math.PI;
+  const basis = new THREE.Matrix4().set(
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    1, 0, 0, 0,
+    0, 0, 0, 1,
+  );
+  const internal = basis.clone()
+    .multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(...euler)))
+    .multiply(basis.clone().transpose());
+  const angles = new THREE.Euler().setFromRotationMatrix(internal, 'ZYX');
+  return [angles.y * deg, angles.z * deg - yawOffset, angles.x * deg];
+}
+
+export function wmoDoodadQuaternionFromThree(quaternion) {
+  const basis = new THREE.Matrix4().set(
+    0, 1, 0, 0,
+    0, 0, 1, 0,
+    1, 0, 0, 0,
+    0, 0, 0, 1,
+  );
+  const raw = basis.clone().transpose()
+    .multiply(new THREE.Matrix4().makeRotationFromQuaternion(quaternion))
+    .multiply(basis);
+  return new THREE.Quaternion().setFromRotationMatrix(raw).toArray();
+}

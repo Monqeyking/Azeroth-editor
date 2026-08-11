@@ -451,6 +451,82 @@
 .ed3-inspector-save-btn:hover:not(:disabled) { background: #226622; }
 .ed3-inspector-save-btn:disabled              { opacity: 0.5; cursor: not-allowed; }
 
+.ed3-world-transform-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-top: 5px;
+  color: #8888aa;
+  font-size: 11px;
+}
+
+.ed3-world-transform-fields {
+  display: flex;
+  gap: 3px;
+}
+
+.ed3-world-transform-fields label {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.ed3-world-transform-fields input,
+.ed3-world-scale-input {
+  width: 47px;
+  min-width: 0;
+  padding: 3px 2px;
+  color: #aaaacc;
+  background: #0f0f20;
+  border: 1px solid #2a2a46;
+  border-radius: 3px;
+  font: 10px monospace;
+  text-align: right;
+}
+
+.ed3-world-scale-input { width: 66px; }
+
+.ed3-world-transform-fields input:focus,
+.ed3-world-scale-input:focus {
+  outline: none;
+  border-color: #6868bd;
+}
+
+.ed3-axis {
+  font-size: 9px;
+  font-weight: 600;
+}
+
+.ed3-inspector-hint {
+  margin-top: 7px;
+  color: #555577;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.ed3-world-actions {
+  display: flex;
+  gap: 5px;
+  margin-top: 8px;
+}
+
+.ed3-world-actions button {
+  flex: 1;
+  padding: 4px 0;
+  color: #aaaacc;
+  background: #1b1b34;
+  border: 1px solid #303050;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ed3-world-actions button:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
 /* ── Error boundary ─────────────────────────── */
 .editor3d-error {
   display: flex;

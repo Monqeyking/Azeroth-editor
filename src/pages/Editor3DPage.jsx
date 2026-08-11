@@ -10,6 +10,11 @@ import './Editor3DPage.css';
 import { cameraInput } from '../components/editor3d/cameraInputState';
 import { wowToThree, threeToWow } from '../components/editor3d/wowCoords';
 import { setTerrainData } from '../components/editor3d/spawnLod';
+import { getM2CacheStats } from '../components/editor3d/m2Loader';
+import { getWmoCacheStats } from '../components/editor3d/wmoLoader';
+import { getBlpBatchCacheStats } from '../lib/blpBatchLoader';
+import * as THREE from 'three';
+import { adtPlacementRotationFromEuler, wmoDoodadQuaternionFromThree } from '../components/editor3d/wowCoords';
 
 const TILE_SIZE = 533.33333;
 const MAP_HALF  = 32 * TILE_SIZE;
@@ -62,6 +67,11 @@ const MAP_ADT_NAME = {
   571: 'Northrend',
 };
 
+function formatMemory(bytes) {
+  if (!Number.isFinite(bytes)) return '—';
+  return `${(bytes / 1024 / 1024).toFixed(bytes >= 1024 * 1024 * 1024 ? 1 : 0)} MB`;
+}
+
 function worldToTile(x, y) {
   return {
     tileX: Math.floor((MAP_HALF - x) / TILE_SIZE),
@@ -77,10 +87,61 @@ function spawnThreePosition(spawn, transform) {
   return wowToThree(spawn.x, spawn.y, spawn.z);
 }
 
+function sceneTransformMatrix(object, draft) {
+  const position = draft?.position ?? object.scenePosition ?? [0, 0, 0];
+  const rotation = draft?.rotation ?? object.sceneRotation ?? [0, 0, 0];
+  const scale = draft?.scale ?? object.sceneScale ?? object.scale ?? 1;
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation)),
+    new THREE.Vector3(scale, scale, scale),
+  );
+}
+
+function worldDraftToPlacement(object, draft) {
+  const position = draft?.position ?? object.scenePosition ?? [0, 0, 0];
+  const rotation = draft?.rotation ?? object.sceneRotation ?? [0, 0, 0];
+  return {
+    type: object.type,
+    tileKey: object.tileKey,
+    uniqueId: object.uniqueId,
+    position: [position[0] + MAP_HALF, position[1], position[2] + MAP_HALF],
+    rotation: adtPlacementRotationFromEuler(rotation, object.type === 'adt-m2' ? 180 : 0),
+    scale: draft?.scale ?? object.scale ?? 1,
+  };
+}
+
+function worldDoodadToPlacement(object, draft, worldTransforms) {
+  const parentObject = {
+    scenePosition: object.parentScenePosition,
+    sceneRotation: object.parentSceneRotation,
+    sceneScale: object.parentSceneScale,
+  };
+  const parent = sceneTransformMatrix(parentObject, worldTransforms[object.parentKey]);
+  const local = parent.clone().invert().multiply(sceneTransformMatrix(object, draft));
+  const position = new THREE.Vector3();
+  const rotation = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  local.decompose(position, rotation, scale);
+  return {
+    type: object.type,
+    parentWmoPath: object.parentWmoPath,
+    uniqueId: object.uniqueId,
+    position: [position.z, position.x, position.y],
+    rotation: wmoDoodadQuaternionFromThree(rotation),
+    scale: scale.x,
+  };
+}
+
 export default function Editor3DPage() {
   const { query, soapCommand, soapConfig, mapsPath } = useConnection();
   const [activeTool, setActiveTool] = useState('select');
   const [selectedId, setSelectedId] = useState(null);
+  const [selectedWorldObject, setSelectedWorldObject] = useState(null);
+  const [worldTransforms, setWorldTransforms] = useState({});
+  const [worldObjects, setWorldObjects] = useState({});
+  const [worldSavedTransforms, setWorldSavedTransforms] = useState({});
+  const [worldSaveState, setWorldSaveState] = useState({ saving: false, message: null, error: null });
   const [spawns,     setSpawns]     = useState([]);
   const [transforms, setTransforms] = useState({});
   const [dirtyGuids, setDirtyGuids] = useState(new Set());
@@ -118,6 +179,7 @@ export default function Editor3DPage() {
   const [wmoBatchCount, setWmoBatchCount] = useState(0);
   const [m2BatchCount, setM2BatchCount] = useState(0);
   const [rendererStats, setRendererStats] = useState(null);
+  const [memoryDiagnostics, setMemoryDiagnostics] = useState(null);
   const worldLoadTimeoutRef = useRef(null);
   const camPosRef = useRef({ wx: 0, wy: 0 });
   const invalidateRef = useRef(null);
@@ -126,6 +188,10 @@ export default function Editor3DPage() {
   const textureUploadFrameRef = useRef(null);
   const streamWindowRef = useRef({ texture: new Set() });
   const cameraMoveRef = useRef(null);
+  const worldTransformsRef = useRef({});
+  const worldUndoRef = useRef([]);
+  const worldRedoRef = useRef([]);
+  const worldGestureRef = useRef(null);
   const activeResourceProfile = resourceProfile || DEFAULT_RESOURCE_PROFILE;
   const resourceProfileRef = useRef(activeResourceProfile);
   resourceProfileRef.current = activeResourceProfile;
@@ -156,6 +222,33 @@ export default function Editor3DPage() {
     };
     void refreshProfile();
     const id = setInterval(refreshProfile, 5000);
+    return () => { disposed = true; clearInterval(id); };
+  }, []);
+
+  useEffect(() => {
+    let disposed = false;
+    const refreshMemoryDiagnostics = async () => {
+      try {
+        const processStats = await window.azeroth?.system?.getMemoryDiagnostics?.();
+        if (disposed || !processStats) return;
+        const jsMemory = performance.memory ? {
+          usedBytes: performance.memory.usedJSHeapSize,
+          totalBytes: performance.memory.totalJSHeapSize,
+          limitBytes: performance.memory.jsHeapSizeLimit,
+        } : null;
+        setMemoryDiagnostics({
+          ...processStats,
+          rendererJs: jsMemory,
+          rendererCaches: {
+            blp: getBlpBatchCacheStats(),
+            m2: getM2CacheStats(),
+            wmo: getWmoCacheStats(),
+          },
+        });
+      } catch (_) {}
+    };
+    void refreshMemoryDiagnostics();
+    const id = setInterval(refreshMemoryDiagnostics, 3000);
     return () => { disposed = true; clearInterval(id); };
   }, []);
   const handleRendererStats = useCallback((next) => {
@@ -278,6 +371,7 @@ export default function Editor3DPage() {
     const textureQueue = new Map();
     const textureInFlight = new Set();
     const textureDone = new Set();
+    const textureRetry = new Map();
     const wmoByTile = new Map();
     const m2ByTile = new Map();
     const waterByTile = new Map();
@@ -375,6 +469,7 @@ export default function Editor3DPage() {
 
       for (const key of textureDone) if (!active.texture.has(key)) textureDone.delete(key);
       for (const key of textureQueue.keys()) if (!active.texture.has(key)) textureQueue.delete(key);
+      for (const key of textureRetry.keys()) if (!active.texture.has(key)) textureRetry.delete(key);
       if (terrainChanged) setTerrain([...terrainByTile.values()]);
       if (wmoChanged) setWmoPlacements([...wmoByTile.values()].flat());
       if (m2Changed) setAdtM2Placements([...m2ByTile.values()].flat());
@@ -403,7 +498,9 @@ export default function Editor3DPage() {
           && !terrainQueue.has(tile.key) && !terrainInFlight.has(tile.key)) terrainQueue.set(tile.key, tile);
       }
       for (const tile of wantedTextureTiles()) {
-        if (!textureDone.has(tile.key)
+        const retryAt = textureRetry.get(tile.key)?.nextAt || 0;
+        if (retryAt <= performance.now()
+          && !textureDone.has(tile.key)
           && !textureQueue.has(tile.key) && !textureInFlight.has(tile.key)) textureQueue.set(tile.key, tile);
       }
       for (const tile of wantedTiles(WMO_RADIUS)) {
@@ -488,9 +585,20 @@ export default function Editor3DPage() {
         const result = await window.azeroth.adt.getTextureLayers({ mapName, tiles: batch.map(({ tileX, tileY }) => ({ tileX, tileY })) });
         recordPerf('textures', performance.now() - started, result?.data?.length ?? 0);
         if (!result?.success) throw new Error(result?.error || 'Texture request failed');
+        const returned = new Set((result.data ?? []).map(tile => keyFor(tile.tileX, tile.tileY)));
         for (const tile of batch) {
           textureInFlight.delete(tile.key);
-          if (active.texture.has(tile.key)) textureDone.add(tile.key);
+          if (!active.texture.has(tile.key)) continue;
+          if (returned.has(tile.key)) {
+            textureDone.add(tile.key);
+            textureRetry.delete(tile.key);
+          } else {
+            const attempt = (textureRetry.get(tile.key)?.attempts || 0) + 1;
+            textureRetry.set(tile.key, {
+              attempts: attempt,
+              nextAt: performance.now() + Math.min(4000, 250 * (2 ** Math.min(attempt - 1, 4))),
+            });
+          }
         }
         maybeExpandTextureWindow();
         if (!disposed && result.data?.length) queueTextureUploads(result.data);
@@ -603,6 +711,18 @@ export default function Editor3DPage() {
   }, [mapsPath]);
 
   useEffect(() => {
+    setSelectedWorldObject(null);
+    setWorldObjects({});
+    setWorldTransforms({});
+    setWorldSavedTransforms({});
+    worldTransformsRef.current = {};
+    worldUndoRef.current = [];
+    worldRedoRef.current = [];
+    worldGestureRef.current = null;
+    setWorldSaveState({ saving: false, message: null, error: null });
+  }, [mapId]);
+
+  useEffect(() => {
     const onKey = (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       const key = e.key.toLowerCase();
@@ -614,13 +734,105 @@ export default function Editor3DPage() {
         e.preventDefault();
         setFocusTick(t => t + 1);
       }
-      if (e.key === 'Escape') setSelectedId(null);
+      if (e.key === 'Escape') {
+        setSelectedId(null);
+        setSelectedWorldObject(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [selectedId]);
 
-  const handleSelect    = useCallback((guid) => setSelectedId(guid), []);
+  const handleSelect = useCallback((guid) => {
+    setSelectedId(guid);
+    setSelectedWorldObject(null);
+  }, []);
+  const handleWorldSelect = useCallback((object) => {
+    console.info('[World gizmo diagnostic]', {
+      type: object.type,
+      key: object.key,
+      modelPath: object.modelPath,
+      tileKey: object.tileKey,
+      hitPoint: object.hitPoint,
+      sourceScenePosition: object.sourceScenePosition,
+      renderedScenePosition: object.scenePosition,
+    });
+    setSelectedWorldObject(object);
+    setSelectedId(null);
+    setWorldObjects(previous => ({ ...previous, [object.key]: object }));
+  }, []);
+  const handleWorldTransformStart = useCallback((key) => {
+    worldGestureRef.current = { key, snapshot: worldTransformsRef.current };
+  }, []);
+  const handleWorldTransform = useCallback((key, transform) => {
+    const previous = worldTransformsRef.current;
+    const next = { ...previous, [key]: transform };
+    if (JSON.stringify(previous[key]) === JSON.stringify(transform)) return;
+    if (!worldGestureRef.current || worldGestureRef.current.key !== key) {
+      worldUndoRef.current.push(previous);
+      worldRedoRef.current = [];
+    }
+    worldTransformsRef.current = next;
+    setWorldTransforms(next);
+    setWorldSaveState({ saving: false, message: null, error: null });
+  }, []);
+  const handleWorldTransformEnd = useCallback((key) => {
+    const gesture = worldGestureRef.current;
+    if (!gesture || gesture.key !== key) return;
+    const current = worldTransformsRef.current;
+    if (JSON.stringify(gesture.snapshot) !== JSON.stringify(current)) {
+      worldUndoRef.current.push(gesture.snapshot);
+      worldRedoRef.current = [];
+    }
+    worldGestureRef.current = null;
+  }, []);
+  const handleWorldUndo = useCallback(() => {
+    const previous = worldUndoRef.current.pop();
+    if (!previous) return;
+    worldRedoRef.current.push(worldTransformsRef.current);
+    worldTransformsRef.current = previous;
+    setWorldTransforms(previous);
+    setWorldSaveState({ saving: false, message: null, error: null });
+  }, []);
+  const handleWorldRedo = useCallback(() => {
+    const next = worldRedoRef.current.pop();
+    if (!next) return;
+    worldUndoRef.current.push(worldTransformsRef.current);
+    worldTransformsRef.current = next;
+    setWorldTransforms(next);
+    setWorldSaveState({ saving: false, message: null, error: null });
+  }, []);
+  const handleWorldSave = useCallback(async () => {
+    const drafts = worldTransformsRef.current;
+    const changedKeys = Object.keys(drafts);
+    if (!changedKeys.length) return;
+    setWorldSaveState({ saving: true, message: null, error: null });
+    try {
+      const adtPlacements = [];
+      const wmoDoodads = [];
+      changedKeys.forEach(key => {
+        const object = worldObjects[key];
+        if (!object) return;
+        if (object.type === 'wmo-doodad-m2') wmoDoodads.push(worldDoodadToPlacement(object, drafts[key], drafts));
+        else adtPlacements.push(worldDraftToPlacement(object, drafts[key]));
+      });
+      const outputs = [];
+      if (adtPlacements.length) {
+        const result = await window.azeroth.adt.savePlacements({ mapName: MAP_ADT_NAME[mapId], placements: adtPlacements });
+        if (!result?.success) throw new Error(result?.error || 'ADT staging failed');
+        outputs.push(result.message);
+      }
+      if (wmoDoodads.length) {
+        const result = await window.azeroth.adt.saveWmoDoodads({ placements: wmoDoodads });
+        if (!result?.success) throw new Error(result?.error || 'WMO staging failed');
+        outputs.push(result.message);
+      }
+      setWorldSavedTransforms({ ...drafts });
+      setWorldSaveState({ saving: false, message: `${outputs.join(' ')} Output/World staging.`, error: null });
+    } catch (error) {
+      setWorldSaveState({ saving: false, message: null, error: error.message });
+    }
+  }, [mapId, worldObjects]);
   const handleAddSpawn  = useCallback((spawn) => {
     setSpawns(prev => prev.some(s => s.guid === spawn.guid) ? prev : [...prev, spawn]);
   }, []);
@@ -749,6 +961,7 @@ export default function Editor3DPage() {
     for (const s of spawns) { sx += -s.y; sy += s.z; sz += -s.x; }
     return [sx / spawns.length, sy / spawns.length, sz / spawns.length];
   }, [spawns]);
+  const worldDirty = JSON.stringify(worldTransforms) !== JSON.stringify(worldSavedTransforms);
 
   return (
     <div className="ed3-root">
@@ -810,10 +1023,16 @@ export default function Editor3DPage() {
               onM2BatchCount={handleM2BatchCount}
               onRendererStats={handleRendererStats}
               onCameraMove={requestMinimapDraw}
+              onSelectWorldObject={handleWorldSelect}
+              selectedWorldObject={selectedWorldObject}
+              onWorldTransform={handleWorldTransform}
+              onWorldTransformStart={handleWorldTransformStart}
+              onWorldTransformEnd={handleWorldTransformEnd}
+              worldTransforms={worldTransforms}
             />
           </Editor3DErrorBoundary>
           <MinimapOverlay mapId={mapId} camPosRef={camPosRef} cameraMoveRef={cameraMoveRef} />
-          {(perfMetrics.terrain || perfMetrics.textures || perfMetrics.wmo || streamDiagnostics.terrainTiles || streamDiagnostics.waterTiles || streamDiagnostics.wmoPlacements || streamDiagnostics.m2Placements || wmoAssetPending || m2AssetPending || wmoBatchCount || m2BatchCount || rendererStats) && (
+          {(perfMetrics.terrain || perfMetrics.textures || perfMetrics.wmo || streamDiagnostics.terrainTiles || streamDiagnostics.waterTiles || streamDiagnostics.wmoPlacements || streamDiagnostics.m2Placements || wmoAssetPending || m2AssetPending || wmoBatchCount || m2BatchCount || rendererStats || memoryDiagnostics) && (
             <div className="ed3-perf-panel">
               <strong>Streaming</strong>
               <span>View: {VIEW_DISTANCE} yd · Terrain: 5×5 · Textures: near 3×3 → 5×5 · Objects/water: 3×3</span>
@@ -821,6 +1040,9 @@ export default function Editor3DPage() {
               <span>Active: {streamDiagnostics.terrainTiles} terrain · {streamDiagnostics.waterTiles} water tiles · {streamDiagnostics.wmoPlacements} WMO · {streamDiagnostics.m2Placements} static M2</span>
               <span>GPU batches: {wmoBatchCount} WMO/M2 doodad · {m2BatchCount} static M2</span>
               {rendererStats && <span>Renderer: {rendererStats.calls} draw calls · {rendererStats.triangles.toLocaleString()} triangles · {rendererStats.geometries} geometries · {rendererStats.textures} textures</span>}
+              {memoryDiagnostics && <span>RAM: main {formatMemory(memoryDiagnostics.main?.rssBytes)} · renderer {formatMemory(memoryDiagnostics.renderer?.workingSetBytes)} · JS {formatMemory(memoryDiagnostics.rendererJs?.usedBytes)}</span>}
+              {memoryDiagnostics && <span>Cache estimate: BLP main {formatMemory(memoryDiagnostics.blp?.estimatedBytes)} · BLP UI {formatMemory(memoryDiagnostics.rendererCaches?.blp?.estimatedBytes)} · WMO {formatMemory(memoryDiagnostics.rendererCaches?.wmo?.estimatedBytes)} · M2 {formatMemory(memoryDiagnostics.rendererCaches?.m2?.estimatedBytes)}</span>}
+              {memoryDiagnostics && <span>MPQ buffers: tiles {formatMemory(memoryDiagnostics.mpq?.tileBytes)} · ADT {formatMemory(memoryDiagnostics.mpq?.adtBytes)} · WDL/WDT {formatMemory((memoryDiagnostics.mpq?.wdlBytes || 0) + (memoryDiagnostics.mpq?.wdtBytes || 0))} · open archives {memoryDiagnostics.mpq?.openArchives ?? 0}</span>}
               <span>Pending: {streamDiagnostics.pendingTerrain} terrain · {streamDiagnostics.pendingTextures} textures · {streamDiagnostics.pendingWater} water · {streamDiagnostics.pendingWmo} WMO scans · {wmoAssetPending} WMO assets · {m2AssetPending} static M2 assets</span>
               {perfMetrics.terrain && <span>Terrain: {Math.round(perfMetrics.terrain.elapsedMs)} ms / {Math.round(perfMetrics.terrain.tiles)} tiles</span>}
               {perfMetrics.textures && <span>Textures: {Math.round(perfMetrics.textures.elapsedMs)} ms / {Math.round(perfMetrics.textures.tiles)} tiles</span>}
@@ -837,6 +1059,18 @@ export default function Editor3DPage() {
           saving={saving}
           mapId={mapId}
           onTeleport={handleTeleport}
+          worldObject={selectedWorldObject}
+          worldTransform={selectedWorldObject ? worldTransforms[selectedWorldObject.key] ?? null : null}
+          onWorldTransform={handleWorldTransform}
+          onWorldUndo={handleWorldUndo}
+          onWorldRedo={handleWorldRedo}
+          canWorldUndo={worldUndoRef.current.length > 0}
+          canWorldRedo={worldRedoRef.current.length > 0}
+          onWorldSave={handleWorldSave}
+          worldSaving={worldSaveState.saving}
+          worldSaveMessage={worldSaveState.message}
+          worldSaveError={worldSaveState.error}
+          worldDirty={worldDirty}
         />
       </div>
 

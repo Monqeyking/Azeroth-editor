@@ -116,6 +116,32 @@ ipcMain.handle('system:getResourceProfile', async (event) => {
   return profile;
 });
 
+ipcMain.handle('system:getMemoryDiagnostics', async (event) => {
+  const usage = process.memoryUsage();
+  let renderer = {};
+  try {
+    const memory = await event.sender.getProcessMemoryInfo();
+    renderer = {
+      workingSetBytes: (memory?.workingSetSize || 0) * 1024,
+      privateBytes: (memory?.privateBytes || 0) * 1024,
+    };
+  } catch (_) {}
+  let mpq = {};
+  try { mpq = getMpqReader().getMemoryCacheStats?.() || {}; } catch (_) {}
+  return {
+    capturedAt: new Date().toISOString(),
+    main: {
+      rssBytes: usage.rss || 0,
+      heapUsedBytes: usage.heapUsed || 0,
+      externalBytes: usage.external || 0,
+      arrayBuffersBytes: usage.arrayBuffers || 0,
+    },
+    renderer,
+    blp: getBlpTextureCacheStats(),
+    mpq,
+  };
+});
+
 // Server process management
 let authProc = null;
 let worldProc = null;
@@ -4444,9 +4470,171 @@ ipcMain.handle('adt:inspect', async (_, { sourceType = 'current', standalonePath
   } catch (e) { console.error('adt:inspect error:', e); return { success: false, error: e.message }; }
 });
 
+ipcMain.handle('adt:savePlacements', async (_, { mapName, placements = [] } = {}) => {
+  try {
+    const safeMapName = String(mapName || '').trim();
+    if (!safeMapName || !/^[a-z0-9_ -]+$/i.test(safeMapName)) return { success: false, error: 'Invalid map name.' };
+    if (!Array.isArray(placements) || !placements.length) return { success: false, error: 'No world placement changes to save.' };
+    const dataPath = await currentClientDataPath();
+    if (!dataPath) return { success: false, error: 'Current client Data path is not configured.' };
+    const byTile = new Map();
+    for (const placement of placements) {
+      const tileKey = String(placement?.tileKey || '');
+      const match = tileKey.match(/^(\d+)_(\d+)/);
+      const tileX = Number(placement?.tileX ?? match?.[1]);
+      const tileY = Number(placement?.tileY ?? match?.[2]);
+      const uniqueId = Number(placement?.uniqueId);
+      if (!Number.isInteger(tileX) || !Number.isInteger(tileY) || !Number.isInteger(uniqueId) || uniqueId < 0) continue;
+      const key = `${tileX}_${tileY}`;
+      if (!byTile.has(key)) byTile.set(key, { tileX, tileY, placements: [] });
+      byTile.get(key).placements.push({ ...placement, tileX, tileY, uniqueId });
+    }
+    if (!byTile.size) return { success: false, error: 'No valid ADT placement identities were supplied.' };
+
+    const files = [];
+    for (const { tileX, tileY, placements: tilePlacements } of byTile.values()) {
+      const source = await getMpqReader().readAdtBuffer(dataPath, safeMapName, tileY, tileX);
+      if (!source) return { success: false, error: `Could not read ${safeMapName}_${tileX}_${tileY}.adt from the client.` };
+      const next = Buffer.from(source);
+      let changed = 0;
+      for (const placement of tilePlacements) {
+        const chunk = placement.type === 'wmo'
+          ? adtFirstChunk(adtParseTopChunks(next).chunks, 'MODF')
+          : adtFirstChunk(adtParseTopChunks(next).chunks, 'MDDF');
+        if (!chunk) continue;
+        const data = adtChunkData(next, chunk);
+        const stride = placement.type === 'wmo' ? 64 : 36;
+        const recordOffset = placement.type === 'wmo' ? 4 : 4;
+        let record = -1;
+        for (let offset = 0; offset + stride <= data.length; offset += stride) {
+          if (data.readUInt32LE(offset + recordOffset) === placement.uniqueId) { record = offset; break; }
+        }
+        if (record < 0) continue;
+        const base = chunk.offset + 8 + record;
+        const rawPosition = placement.position;
+        const rawRotation = placement.rotation;
+        if (!writePlacementVector(next, base + 8, rawPosition) || !writePlacementVector(next, base + 20, rawRotation)) continue;
+        const scale = Number(placement.scale);
+        if (Number.isFinite(scale) && scale > 0) {
+          const scaleOffset = placement.type === 'wmo' ? base + 62 : base + 32;
+          next.writeUInt16LE(Math.max(1, Math.min(65535, Math.round(scale * 1024))), scaleOffset);
+        }
+        changed += 1;
+      }
+      if (!changed) continue;
+      const outputPath = adtTileOutputPath(safeMapName, tileX, tileY);
+      stageWorldBinary(outputPath, next);
+      files.push({ tileX, tileY, changed, outputPath, backupPath: `${outputPath}.bak` });
+    }
+    if (!files.length) return { success: false, error: 'No matching MDDF/MODF records were found.' };
+    return { success: true, files, outputRoot: getUiOutputRoot(), message: `Staged ${files.reduce((sum, file) => sum + file.changed, 0)} placement change(s).` };
+  } catch (e) {
+    console.error('adt:savePlacements error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
+ipcMain.handle('wmo:saveDoodads', async (_, { placements = [] } = {}) => {
+  try {
+    if (!Array.isArray(placements) || !placements.length) return { success: false, error: 'No WMO doodad changes to save.' };
+    const dataPath = await currentClientDataPath();
+    if (!dataPath) return { success: false, error: 'Current client Data path is not configured.' };
+    const byWmo = new Map();
+    for (const placement of placements) {
+      const modelPath = String(placement?.parentWmoPath || '').trim();
+      const uniqueId = Number(placement?.uniqueId);
+      if (!modelPath || !Number.isInteger(uniqueId) || uniqueId < 0) continue;
+      if (!byWmo.has(modelPath.toLowerCase())) byWmo.set(modelPath.toLowerCase(), { modelPath, placements: [] });
+      byWmo.get(modelPath.toLowerCase()).placements.push({ ...placement, uniqueId });
+    }
+    const files = [];
+    for (const { modelPath, placements: rows } of byWmo.values()) {
+      const source = await getMpqReader().readFileFromMpqs(dataPath, modelPath);
+      if (!source) return { success: false, error: `Could not read WMO ${modelPath} from the client.` };
+      const next = Buffer.from(source);
+      const chunk = findBinaryChunk(next, ['MODD', 'DDOM']);
+      if (!chunk) continue;
+      let changed = 0;
+      for (const placement of rows) {
+        const base = chunk.dataOffset + placement.uniqueId * 40;
+        if (base + 36 > chunk.dataOffset + chunk.size) continue;
+        if (!writePlacementVector(next, base + 4, placement.position)) continue;
+        const rotation = placement.rotation;
+        if (!Array.isArray(rotation) || rotation.length !== 4 || !rotation.every(Number.isFinite)) continue;
+        rotation.forEach((value, index) => next.writeFloatLE(Number(value), base + 16 + index * 4));
+        const scale = Number(placement.scale);
+        if (Number.isFinite(scale) && scale > 0) next.writeFloatLE(scale, base + 32);
+        changed += 1;
+      }
+      if (!changed) continue;
+      const outputPath = wmoOutputPath(modelPath);
+      stageWorldBinary(outputPath, next);
+      files.push({ modelPath, changed, outputPath, backupPath: `${outputPath}.bak` });
+    }
+    if (!files.length) return { success: false, error: 'No matching MODD records were found.' };
+    return { success: true, files, outputRoot: getUiOutputRoot(), message: `Staged ${files.reduce((sum, file) => sum + file.changed, 0)} WMO doodad change(s).` };
+  } catch (e) {
+    console.error('wmo:saveDoodads error:', e);
+    return { success: false, error: e.message };
+  }
+});
+
 function adtSafeOutputSegment(value, fallback = 'unknown') {
   const normalized = String(value || '').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').replace(/\.\./g, '_').trim();
   return normalized || fallback;
+}
+
+function binaryTopChunks(buf) {
+  const chunks = [];
+  for (let offset = 0; offset + 8 <= buf.length;) {
+    const rawType = buf.toString('ascii', offset, offset + 4);
+    const size = buf.readUInt32LE(offset + 4);
+    const dataOffset = offset + 8;
+    if (dataOffset + size > buf.length) break;
+    chunks.push({ rawType, offset, dataOffset, size });
+    offset = dataOffset + size;
+  }
+  return chunks;
+}
+
+function findBinaryChunk(buf, ids) {
+  const wanted = new Set(ids.map(id => String(id)));
+  return binaryTopChunks(buf).find(chunk => wanted.has(chunk.rawType)) || null;
+}
+
+function writePlacementVector(buf, offset, values) {
+  if (!Array.isArray(values) || values.length !== 3 || !values.every(Number.isFinite)) return false;
+  values.forEach((value, index) => buf.writeFloatLE(Number(value), offset + index * 4));
+  return true;
+}
+
+function stageWorldBinary(outputPath, buffer) {
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  if (fs.existsSync(outputPath)) fs.copyFileSync(outputPath, `${outputPath}.bak`);
+  const tempPath = `${outputPath}.tmp-${process.pid}-${Date.now()}`;
+  fs.writeFileSync(tempPath, buffer);
+  fs.renameSync(tempPath, outputPath);
+}
+
+async function currentClientDataPath() {
+  const cfgPath = getConfigPath();
+  if (!fs.existsSync(cfgPath)) return null;
+  const config = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
+  const configured = String(config?.worldmapMpqPath || '').trim();
+  const reader = getMpqReader();
+  const resolved = configured && reader.resolveDataPath ? reader.resolveDataPath(configured) : null;
+  return resolved && reader.isDataPath(resolved) ? resolved : null;
+}
+
+function adtTileOutputPath(mapName, tileX, tileY) {
+  const safeMap = adtSafeOutputSegment(mapName);
+  return path.join(getUiOutputRoot(), 'World', 'Maps', safeMap, `${safeMap}_${tileX}_${tileY}.adt`);
+}
+
+function wmoOutputPath(modelPath) {
+  const normalized = String(modelPath || '').replace(/\//g, '\\').replace(/^\\+/, '');
+  const parts = normalized.split('\\').filter(Boolean).map(part => adtSafeOutputSegment(part));
+  return path.join(getUiOutputRoot(), ...parts);
 }
 
 function adtIpcSafe(value, seen = new WeakSet()) {
@@ -6189,7 +6377,8 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
         if (idx >= tile.parsed.texturePaths.length) continue;
         const rawPath = tile.parsed.texturePaths[idx];
         const cacheKey = rawPath.replace(/\//g, '\\').toLowerCase();
-        if (terrainBlpCache.has(cacheKey) || pendingByPath.has(cacheKey)) continue;
+        const cached = getTerrainBlpCache(cacheKey);
+        if (cached?.data || pendingByPath.has(cacheKey)) continue;
         const entry = { textureIdx: pendingDecode.length, path: rawPath, cacheKey };
         pendingDecode.push(entry);
         pendingByPath.set(cacheKey, entry);
@@ -6219,6 +6408,7 @@ ipcMain.handle('adt:getTextureLayers', async (_, { mapName, tiles }) => {
         const entry = getTerrainBlpCache(cacheKey);
         if (entry) blpRgba[idx] = entry;
       }
+      for (const idx of usedIdx) if (!blpRgba[idx]?.data) return null;
       if (!Object.keys(blpRgba).length) return null;
       const chunks = parsed.chunks.map(chunk => {
         if (!chunk) return null;
@@ -6455,6 +6645,21 @@ const blpTextureCache  = new Map(); // blpPath (lower) ÃƒÆ’Ã†â€™Ã�
 const m2VariantInflight  = new Map(); // variantKey ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Promise<result|null>
 const m2DisplayInflight  = new Map(); // displayId ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¾ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ Promise<result|null>
 
+function getBlpTextureCacheStats() {
+  let rgbaBytes = 0;
+  let pngBase64Chars = 0;
+  for (const entry of blpTextureCache.values()) {
+    rgbaBytes += entry?.textureRgba?.byteLength || 0;
+    pngBase64Chars += entry?.pngBase64?.length || 0;
+  }
+  return {
+    entries: blpTextureCache.size,
+    rgbaBytes,
+    pngBase64Chars,
+    estimatedBytes: rgbaBytes + pngBase64Chars,
+  };
+}
+
 function getM2DbcData(dataPath) {
   if (m2DbcCachePath === dataPath && m2DbcCachePromise) return m2DbcCachePromise;
 
@@ -6540,8 +6745,10 @@ function parseM2(buf) {
   const ofsRenderFlags = buf.readUInt32LE(0x74);
   const nTexLookup  = buf.readUInt32LE(0x80);
   const ofsTexLookup = buf.readUInt32LE(0x84);
+  const nTexUnitLookup = buf.length >= 0x90 ? buf.readUInt32LE(0x88) : 0;
+  const ofsTexUnitLookup = buf.length >= 0x90 ? buf.readUInt32LE(0x8C) : 0;
 
-  const positions = [], normals = [], uvs = [];
+  const positions = [], normals = [], uvs = [], uvs2 = [];
   const positionsM2 = [], normalsM2 = [], boneIndices = [], boneWeights = [];
 
   for (let i = 0; i < nVertices; i++) {
@@ -6549,6 +6756,7 @@ function parseM2(buf) {
     const px = buf.readFloatLE(v),      py = buf.readFloatLE(v + 4),  pz = buf.readFloatLE(v + 8);
     const nx = buf.readFloatLE(v + 20), ny = buf.readFloatLE(v + 24), nz = buf.readFloatLE(v + 28);
     const u  = buf.readFloatLE(v + 32), vv = buf.readFloatLE(v + 36);
+    const u2 = buf.readFloatLE(v + 40), vv2 = buf.readFloatLE(v + 44);
     positionsM2.push(px, py, pz);
     normalsM2.push(nx, ny, nz);
     for (let j = 0; j < 4; j++) {
@@ -6559,6 +6767,7 @@ function parseM2(buf) {
     positions.push(-py, pz, px);
     normals.push(-ny, nz, nx);
     uvs.push(u, vv);
+    uvs2.push(u2, vv2);
   }
 
   const textures = [];
@@ -6663,6 +6872,8 @@ function parseM2(buf) {
 
   const textureLookup = [];
   for (let i = 0; i < nTexLookup && ofsTexLookup + i * 2 + 2 <= buf.length; i++) textureLookup.push(buf.readUInt16LE(ofsTexLookup + i * 2));
+  const textureUnitLookup = [];
+  for (let i = 0; i < nTexUnitLookup && ofsTexUnitLookup + i * 2 + 2 <= buf.length; i++) textureUnitLookup.push(buf.readInt16LE(ofsTexUnitLookup + i * 2));
   const readArray = offset => {
     if (offset < 0 || offset + 8 > buf.length) return null;
     return { count: buf.readUInt32LE(offset), offset: buf.readUInt32LE(offset + 4) };
@@ -6762,8 +6973,10 @@ function parseM2(buf) {
     positions,
     normals,
     uvs,
+    uvs2,
     textures,
     textureLookup,
+    textureUnitLookup,
     renderFlags,
     attachments,
     particleEmitters,
@@ -6920,8 +7133,10 @@ async function getOrLoadM2Geometry(reader, dataPath, modelPath, log) {
     positions: new Float32Array(m2.positions),
     normals:   new Float32Array(m2.normals),
     uvs:       new Float32Array(m2.uvs),
+    uvs2:      new Float32Array(m2.uvs2 || m2.uvs),
     textures:  m2.textures,
     textureLookup: m2.textureLookup || [],
+    textureUnitLookup: m2.textureUnitLookup || [],
     renderFlags: m2.renderFlags || [],
     attachments: m2.attachments || [],
     particleEmitters: m2.particleEmitters || [],
@@ -7062,7 +7277,7 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
     const texture = Number.isInteger(textureIndex) ? geo.textures?.[textureIndex] : null;
     const flag = geo.renderFlags?.[unit.flagsIndex] || { flags: 0, blend: 0 };
     const range = indexRanges.get(unit.submeshIndex);
-    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : tex?.blpPath, blend: flag.blend, renderFlags: flag.flags, order: unit.order, noDepthWrite: !!(flag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
+    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : tex?.blpPath, blend: flag.blend, renderFlags: flag.flags, uvSet: geo.textureUnitLookup?.[unit.texUnit] ?? 0, order: unit.order, noDepthWrite: !!(flag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
   }).filter(pass => geo.skin.submeshes[pass.submeshIndex] && indexRanges.has(pass.submeshIndex));
   const passPaths = [...new Set(rawPasses.map(pass => pass.texturePath).filter(Boolean))];
   const decodedPassTextures = passPaths.length ? await runM2AssetWorker('decodeBlps', { dataPath, entries: passPaths.map((path, textureIdx) => ({ textureIdx, path })) }) : [];
@@ -7086,6 +7301,7 @@ async function loadM2ModelForDisplay(displayId, dataPath, log) {
     positions: geo.positions,
     normals:   geo.normals,
     uvs:       geo.uvs,
+    uvs2:      geo.uvs2,
     indices:   new Uint32Array(indexList),
     textureRgba: tex?.textureRgba ?? null,
     textureW:    tex?.textureW ?? 0,
@@ -7253,7 +7469,7 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
     const texture = Number.isInteger(textureIndex) ? geo.textures?.[textureIndex] : null;
     const renderFlag = geo.renderFlags?.[unit.flagsIndex] || { flags: 0, blend: 0 };
     const range = indexRanges.get(unit.submeshIndex);
-    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : null, blend: renderFlag.blend, renderFlags: renderFlag.flags, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
+    return { index, submeshIndex: unit.submeshIndex, textureIndex, texturePath: texture?.type === 0 ? texture.filename : null, blend: renderFlag.blend, renderFlags: renderFlag.flags, uvSet: geo.textureUnitLookup?.[unit.texUnit] ?? 0, order: unit.order, noDepthWrite: !!(renderFlag.flags & 16), indexStart: range?.start ?? 0, indexCount: range?.count ?? 0 };
   }).filter(pass => geo.skin.submeshes[pass.submeshIndex] && indexRanges.has(pass.submeshIndex));
   const modelDir = modelPath.includes('\\') ? modelPath.slice(0, modelPath.lastIndexOf('\\') + 1) : '';
   const discovered = reader.discoverCreatureBlps ? await reader.discoverCreatureBlps(dataPath, modelDir, m2ModelStem(modelPath)) : [];
@@ -7285,6 +7501,7 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
       positions: geo.positions,
       normals: geo.normals,
       uvs: geo.uvs,
+      uvs2: geo.uvs2,
       indices: new Uint32Array(indexList),
       submeshes: geo.skin.submeshes,
       renderPasses,

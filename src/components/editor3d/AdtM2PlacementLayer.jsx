@@ -19,20 +19,91 @@ const LOAD_DISTANCE = 720;
 const RENDER_DISTANCE = 420;
 const VIEW_PRIORITY_DISTANCE = 360;
 const REQUEST_CONCURRENCY = 4;
-
 function horizontalDistance(a, b) {
   return Math.hypot(a.x - b.x, a.z - b.z);
 }
 
-function M2InstanceBatch({ asset, instances }) {
+function isM2AssetRenderReady(asset) {
+  if (!asset?.geo) return false;
+  const passes = asset.debug?.renderPasses;
+  if (!Array.isArray(passes)) return true;
+  return passes.every(pass => pass.skipped || !pass.texturePath || pass.textureLoaded);
+}
+
+function markerTransform(marker, worldTransforms) {
+  const draft = worldTransforms[marker.key];
+  const position = draft?.position ?? marker.position;
+  const quaternion = draft?.rotation
+    ? new THREE.Quaternion().setFromEuler(new THREE.Euler(...draft.rotation))
+    : marker.quaternion;
+  const scale = draft?.scale ?? marker.scale;
+  return new THREE.Matrix4().compose(
+    new THREE.Vector3(...position),
+    quaternion,
+    new THREE.Vector3(scale, scale, scale),
+  );
+}
+
+function instanceSceneTransform(mesh, instanceIndex, fallback) {
+  const matrix = new THREE.Matrix4();
+  if (!mesh?.getMatrixAt || instanceIndex == null) return fallback;
+  mesh.getMatrixAt(instanceIndex, matrix);
+  const position = new THREE.Vector3();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  matrix.decompose(position, quaternion, scale);
+  if (!mesh.geometry?.boundingBox) mesh.geometry?.computeBoundingBox?.();
+  const localCenter = mesh.geometry?.boundingBox
+    ? mesh.geometry.boundingBox.getCenter(new THREE.Vector3()).toArray()
+    : [0, 0, 0];
+  return {
+    position: position.toArray(),
+    rotation: new THREE.Euler().setFromQuaternion(quaternion).toArray().slice(0, 3),
+    scale: scale.x,
+    localCenter,
+  };
+}
+
+function M2InstanceBatch({ asset, instances, markers, onSelect }) {
   const ref = useRef(null);
   const material = useMemo(() => getM2Material(asset), [asset]);
+  const handlePointerDown = useCallback((event) => {
+    if (event.button != null && event.button !== 0) return;
+    const instanceIndex = event.instanceId;
+    const marker = instanceIndex == null ? null : markers[instanceIndex];
+    if (!marker) return;
+    event.stopPropagation();
+    const scene = instanceSceneTransform(event.object, instanceIndex, {
+      position: marker.position,
+      rotation: new THREE.Euler().setFromQuaternion(marker.quaternion).toArray().slice(0, 3),
+      scale: marker.scale,
+    });
+    onSelect?.({
+      type: 'adt-m2',
+      key: marker.key,
+      modelPath: marker.path,
+      tileKey: marker.tileKey,
+      uniqueId: marker.uniqueId,
+      placementPosition: marker.placementPosition,
+      placementRotation: marker.placementRotation,
+      hitPoint: event.point?.toArray?.() ?? null,
+      sourceScenePosition: marker.position,
+      gizmoLocalCenter: scene.localCenter,
+      scale: scene.scale,
+      scenePosition: scene.position,
+      sceneRotation: scene.rotation,
+      sceneScale: scene.scale,
+    });
+  }, [markers, onSelect]);
 
   useEffect(() => {
     if (!ref.current) return;
     instances.forEach((matrix, index) => ref.current.setMatrixAt(index, matrix));
     ref.current.instanceMatrix.needsUpdate = true;
     ref.current.computeBoundingSphere();
+    if (ref.current.boundingSphere) {
+      ref.current.boundingSphere.radius = ref.current.boundingSphere.radius * 1.15 + 2;
+    }
   }, [instances]);
 
   return (
@@ -41,11 +112,12 @@ function M2InstanceBatch({ asset, instances }) {
       args={[asset.geo, material, instances.length]}
       frustumCulled
       dispose={null}
+      onPointerDown={handlePointerDown}
     />
   );
 }
 
-export default function AdtM2PlacementLayer({ placements = [], resourceProfile = null, onPendingChange, onBatchCount, wmoPriorityReady = true }) {
+export default function AdtM2PlacementLayer({ placements = [], resourceProfile = null, onPendingChange, onBatchCount, wmoPriorityReady = true, cameraMotionRef = null, onSelect, worldTransforms = {} }) {
   const requestConcurrency = resourceProfile?.m2RequestConcurrency ?? REQUEST_CONCURRENCY;
   const { camera, invalidate } = useThree();
   const queueRef = useRef(new Map());
@@ -90,6 +162,8 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
       position,
       positionVector: new THREE.Vector3(...position),
       quaternion: adtPlacementQuaternion([rx, ry, rz], 180),
+      placementPosition: [x, y, z],
+      placementRotation: [rx, ry, rz],
       scale: Math.max(0.05, Math.min(20, scale)),
       tileKey: placement.tileKey,
       uniqueId: placement.uniqueId,
@@ -125,6 +199,8 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
     }
 
     camera.updateMatrixWorld();
+    const motionLevel = cameraMotionRef?.current?.level ?? 0;
+    const loadDistance = motionLevel >= 2 ? 420 : motionLevel === 1 ? 560 : LOAD_DISTANCE;
     const cameraPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
     const cameraDirection = camera.getWorldDirection(new THREE.Vector3());
     const signature = [
@@ -144,7 +220,7 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
     for (const marker of markers) {
       if (getM2PathAssetState(marker.path) !== 'idle') continue;
       const distance = horizontalDistance(cameraPosition, marker.positionVector);
-      if (distance > LOAD_DISTANCE) continue;
+      if (distance > loadDistance) continue;
       const inView = frustum.containsPoint(marker.positionVector);
       const priority = distance + (inView ? 0 : VIEW_PRIORITY_DISTANCE);
       const key = marker.path.toLowerCase();
@@ -157,7 +233,7 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
       .forEach(candidate => queueRef.current.set(candidate.path.toLowerCase(), candidate.path));
     publishPending();
     if (queueRef.current.size) void pump();
-  }, [camera, markers, pump, publishPending, wmoPriorityReady]);
+  }, [camera, cameraMotionRef, markers, pump, publishPending, wmoPriorityReady]);
 
   useEffect(() => {
     lastCameraSignatureRef.current = null;
@@ -167,24 +243,23 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
   }, [updateQueues]);
 
   const renderCameraPosition = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld);
+  const renderDistance = RENDER_DISTANCE;
   const rendered = markers
-    .filter(marker => horizontalDistance(renderCameraPosition, marker.positionVector) <= RENDER_DISTANCE)
-    .map(marker => ({ marker, asset: getCachedM2AssetByPath(marker.path) }));
+    .filter(marker => horizontalDistance(renderCameraPosition, marker.positionVector) <= renderDistance)
+    .map(marker => ({ marker, asset: getCachedM2AssetByPath(marker.path) }))
+    .filter(({ asset }) => isM2AssetRenderReady(asset));
   const batches = useMemo(() => {
     const grouped = new Map();
     for (const { marker, asset } of rendered) {
       if (!asset?.geo) continue;
       const key = `${marker.path.toLowerCase()}:${marker.tileKey || 'global'}`;
-      if (!grouped.has(key)) grouped.set(key, { key, asset, instances: [] });
-      const matrix = new THREE.Matrix4().compose(
-        new THREE.Vector3(...marker.position),
-        marker.quaternion,
-        new THREE.Vector3(marker.scale, marker.scale, marker.scale),
-      );
+      if (!grouped.has(key)) grouped.set(key, { key, asset, instances: [], markers: [] });
+      const matrix = markerTransform(marker, worldTransforms);
       grouped.get(key).instances.push(matrix);
+      grouped.get(key).markers.push(marker);
     }
     return [...grouped.values()];
-  }, [rendered]);
+  }, [rendered, worldTransforms]);
 
   useEffect(() => {
     onBatchCount?.(batches.length);
@@ -192,11 +267,13 @@ export default function AdtM2PlacementLayer({ placements = [], resourceProfile =
 
   return (
     <group name="adt-m2-placement-assets">
-      {batches.map(({ key, asset, instances }) => (
+      {batches.map(({ key, asset, instances, markers: batchMarkers }) => (
         <M2InstanceBatch
           key={key}
           asset={asset}
           instances={instances}
+          markers={batchMarkers}
+          onSelect={onSelect}
         />
       ))}
     </group>

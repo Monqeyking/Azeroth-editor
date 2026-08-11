@@ -141,6 +141,26 @@ function getArchiveCacheStats() {
   return { ...archiveCacheStats, size: cachedArchives.size };
 }
 
+function getMemoryCacheStats() {
+  const bytesOf = value => value?.byteLength || value?.length || 0;
+  const sumBuffers = cache => [...cache.values()].reduce((sum, value) => sum + bytesOf(value), 0);
+  return {
+    tileEntries: tileCache.size,
+    tileBytes: sumBuffers(tileCache),
+    adtEntries: adtCache.size,
+    adtBytes: sumBuffers(adtCache),
+    wdlEntries: wdlCache.size,
+    wdlBytes: sumBuffers(wdlCache),
+    wdtEntries: wdtCache.size,
+    wdtBytes: sumBuffers(wdtCache),
+    listfileEntries: listfileCache.size,
+    blpDirectoryEntries: blpDirCache.size,
+    fileLocationEntries: fileFoundIn.size,
+    archiveDiscoveryEntries: archiveDiscoveryCache.size,
+    openArchives: cachedArchives.size,
+  };
+}
+
 // ── Zones ophalen via listfile ─────────────────────────────────────────────────
 async function listWorldmapZones(dataPath) {
   if (zoneCache.has(dataPath)) return zoneCache.get(dataPath);
@@ -926,5 +946,6 @@ module.exports = {
   validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
   getArchiveCacheStats,
+  getMemoryCacheStats,
   buildM2Index, readM2FromMpqs, readM2Companion,
 };

@@ -155,6 +155,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   clipboard: { writeText: (value) => ipcRenderer.invoke('clipboard:writeText', value) },
   system: {
     getResourceProfile: () => ipcRenderer.invoke('system:getResourceProfile'),
+    getMemoryDiagnostics: () => ipcRenderer.invoke('system:getMemoryDiagnostics'),
   },
   // Spawn loader (3D editor)
   spawns: {
@@ -177,6 +178,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     getTerrain:             (opts) => ipcRenderer.invoke('adt:getTerrain', opts),
     getWater:               (opts) => ipcRenderer.invoke('adt:getWater', opts),
     getPlacements:          (opts) => ipcRenderer.invoke('adt:getPlacements', opts),
+    savePlacements:         (opts) => ipcRenderer.invoke('adt:savePlacements', opts),
+    saveWmoDoodads:         (opts) => ipcRenderer.invoke('wmo:saveDoodads', opts),
     getTileTextures:        (opts) => ipcRenderer.invoke('adt:getTileTextures', opts),
     getTextureLayers:         (opts) => ipcRenderer.invoke('adt:getTextureLayers', opts),
     diagBLP:                  (opts) => ipcRenderer.invoke('adt:diagBLP', opts),

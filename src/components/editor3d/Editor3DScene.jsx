@@ -1,9 +1,22 @@
-import { Suspense, useMemo, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useMemo, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Canvas, useThree, useFrame } from '@react-three/fiber';
-import { OrbitControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
+import { OrbitControls, TransformControls, GizmoHelper, GizmoViewport } from '@react-three/drei';
 import * as THREE from 'three';
 import { CameraFlyControls, CameraFrameFocus, useAltHeld } from './Editor3DCameraControls';
 import { threeToWow } from './wowCoords';
+import { cameraInput } from './cameraInputState';
+import { LIQUID_STYLES, WATER_FALLBACK_TEXTURE, WATER_FRAGMENT, WATER_LIGHT_DIRECTION, WATER_VERTEX } from './waterShader';
+import {
+  WOW_AMBIENT_COLOR,
+  WOW_FOG_COLOR,
+  WOW_FOG_FAR,
+  WOW_FOG_NEAR,
+  WOW_LIGHT_COLOR,
+  WOW_SUN_COLOR,
+  WOW_SUN_POSITION,
+  WOW_SUN_DIRECTION,
+  configureWowRenderer,
+} from './wowRenderConfig';
 import WmoPlacementLayer from './WmoPlacementLayer';
 import AdtM2PlacementLayer from './AdtM2PlacementLayer';
 import Editor3DSpawn from './Editor3DSpawn';
@@ -29,8 +42,8 @@ function AxesHelper() { return <axesHelper args={[10]} />; }
 function Lights() {
   return (
     <>
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[50, 80, 30]} intensity={1.2} />
+      <ambientLight color={WOW_SUN_COLOR} intensity={0.46} />
+      <directionalLight position={WOW_SUN_POSITION} color={WOW_SUN_COLOR} intensity={0.92} />
     </>
   );
 }
@@ -161,10 +174,12 @@ function InvalidateExporter({ invalidateRef }) {
 const TERRAIN_VERT = /* glsl */ `
 out vec2 vUv2;
 out vec3 vWorldNormal;
+out vec3 vWorldPosition;
 
 void main() {
   vUv2 = uv * 128.0;
   vWorldNormal = normalize(mat3(modelMatrix) * normal);
+  vWorldPosition = (modelMatrix * vec4(position, 1.0)).xyz;
   gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
 }
 `;
@@ -179,15 +194,28 @@ uniform sampler2DArray alphaArray;
 uniform vec3 ambientColor;
 uniform vec3 lightDir;
 uniform vec3 lightColor;
+uniform vec3 fogColor;
+uniform float fogNear;
+uniform float fogFar;
 
 in vec2 vUv2;
 in vec3 vWorldNormal;
+in vec3 vWorldPosition;
 out vec4 outColor;
+
+vec3 srgbToLinear(vec3 value) {
+  return mix(
+    value / 12.92,
+    pow((value + 0.055) / 1.055, vec3(2.4)),
+    step(vec3(0.04045), value)
+  );
+}
 
 vec4 sampleLayer(float idxF, vec2 uv) {
   int idx = int(idxF + 0.5);
   if (idx < 0) return vec4(0.0);
-  return texture(paletteArray, vec3(uv, float(idx)));
+  vec4 sampled = texture(paletteArray, vec3(uv, float(idx)));
+  return vec4(srgbToLinear(sampled.rgb), sampled.a);
 }
 
 void main() {
@@ -208,13 +236,21 @@ void main() {
   vec4 t2 = sampleLayer(idx4.z, vUv2);
   vec4 t3 = sampleLayer(idx4.w, vUv2);
 
-  vec4 blended = t0 * (1.0 - (a0 + a1 + a2)) + t1 * a0 + t2 * a1 + t3 * a2;
+  // Legacy ADTs can contain overlapping alpha channels whose sum exceeds 1.
+  // Keep the WoW base-weight formula for normal data, but never allow a
+  // negative base contribution to create dark/NaN terrain patches.
+  vec4 weights = vec4(max(0.0, 1.0 - (a0 + a1 + a2)), a0, a1, a2);
+  float weightSum = max(dot(weights, vec4(1.0)), 0.0001);
+  weights /= weightSum;
+  vec4 blended = t0 * weights.x + t1 * weights.y + t2 * weights.z + t3 * weights.w;
 
   vec3 n = normalize(vWorldNormal);
   float nDotL = max(dot(n, normalize(-lightDir)), 0.0);
   vec3 lit = blended.rgb * (ambientColor + lightColor * nDotL);
+  float fogAmount = smoothstep(fogNear, fogFar, distance(cameraPosition, vWorldPosition));
+  vec3 finalColor = mix(lit, fogColor, fogAmount);
 
-  outColor = vec4(lit, 1.0);
+  outColor = linearToOutputTexel(vec4(finalColor, 1.0));
 }
 `;
 
@@ -302,9 +338,12 @@ function TerrainTile({ tile, textureUrl }) {
               chunkTexIndexMap: { value: shaderTextures.chunkTexIndexMap },
               paletteArray: { value: shaderTextures.palette },
               alphaArray: { value: shaderTextures.alpha },
-              ambientColor: { value: new THREE.Vector3(0.6, 0.6, 0.6) },
-              lightColor: { value: new THREE.Vector3(1.2, 1.2, 1.2) },
-              lightDir: { value: new THREE.Vector3(-50, -80, -30).normalize() },
+              ambientColor: { value: WOW_AMBIENT_COLOR.clone() },
+              lightColor: { value: WOW_LIGHT_COLOR.clone() },
+              lightDir: { value: WOW_SUN_DIRECTION.clone() },
+              fogColor: { value: new THREE.Color(WOW_FOG_COLOR) },
+              fogNear: { value: WOW_FOG_NEAR },
+              fogFar: { value: WOW_FOG_FAR },
             }}
           />
         )
@@ -387,44 +426,83 @@ function TerrainMesh({ terrainTiles, tileTextures }) {
   ));
 }
 
-const LIQUID_STYLES = {
-  1: { color: '#3b9ed0', opacity: 0.48, flowSpeed: 0.34, waveAmplitude: 0.025 },
-  2: { color: '#2d78ad', opacity: 0.5, flowSpeed: 0.58, waveAmplitude: 0.04 },
-  3: { color: '#d15d2b', opacity: 0.78, flowSpeed: 0.16, waveAmplitude: 0.012 },
-  4: { color: '#78a936', opacity: 0.62, flowSpeed: 0.22, waveAmplitude: 0.02 },
-  5: { color: '#3b9ed0', opacity: 0.48, flowSpeed: 0.3, waveAmplitude: 0.025 },
-};
-
-const WATER_VERTEX = /* glsl */ `
-uniform float time;
-uniform float flowSpeed;
-uniform float waveAmplitude;
-varying vec2 vWaterUv;
-
-void main() {
-  vWaterUv = uv;
-  vec3 transformed = position;
-  float waveA = sin((position.x * 0.08 + position.z * 0.06) + time * flowSpeed);
-  float waveB = cos((position.x * 0.04 - position.z * 0.1) + time * flowSpeed * 0.7);
-  transformed.y += (waveA + waveB * 0.45) * waveAmplitude;
-  gl_Position = projectionMatrix * modelViewMatrix * vec4(transformed, 1.0);
+function WorldFog({ viewDistance }) {
+  const fogFar = Math.min(viewDistance, WOW_FOG_FAR);
+  const fogNear = Math.min(WOW_FOG_NEAR, fogFar - 1);
+  return <fog attach="fog" args={[WOW_FOG_COLOR, fogNear, fogFar]} />;
 }
-`;
 
-const WATER_FRAGMENT = /* glsl */ `
-uniform vec3 waterColor;
-uniform float opacity;
-uniform float time;
-uniform float flowSpeed;
-varying vec2 vWaterUv;
+function AdaptiveRenderQuality({ maxDpr = 1.5 }) {
+  const { gl, invalidate } = useThree();
+  const qualityRef = useRef({ dpr: maxDpr, emaMs: 16.7, lastAdjustment: 0 });
 
-void main() {
-  float rippleA = sin((vWaterUv.x + time * flowSpeed) * 10.0) * 0.5 + 0.5;
-  float rippleB = cos((vWaterUv.y - time * flowSpeed * 0.7) * 14.0 + rippleA) * 0.5 + 0.5;
-  float shimmer = mix(0.78, 1.12, rippleA * 0.45 + rippleB * 0.55);
-  gl_FragColor = vec4(waterColor * shimmer, opacity);
+  useEffect(() => {
+    const minDpr = Math.min(1, maxDpr);
+    const dpr = THREE.MathUtils.clamp(maxDpr, minDpr, Math.max(minDpr, maxDpr));
+    qualityRef.current.dpr = dpr;
+    gl.setPixelRatio(dpr);
+  }, [gl, maxDpr]);
+
+  useFrame((state, delta) => {
+    const quality = qualityRef.current;
+    const minDpr = Math.min(1, maxDpr);
+    const frameMs = Math.min(40, Math.max(0.5, delta * 1000));
+    quality.emaMs = quality.emaMs * 0.88 + frameMs * 0.12;
+    const now = performance.now();
+    if (now - quality.lastAdjustment < 600 || maxDpr <= minDpr) return;
+
+    let nextDpr = quality.dpr;
+    if (quality.emaMs > 22) nextDpr -= 0.1;
+    else if (quality.emaMs < 14) nextDpr += 0.1;
+    nextDpr = THREE.MathUtils.clamp(nextDpr, minDpr, maxDpr);
+    if (Math.abs(nextDpr - quality.dpr) < 0.05) return;
+
+    quality.dpr = nextDpr;
+    quality.lastAdjustment = now;
+    gl.setPixelRatio(nextDpr);
+    state.invalidate();
+  });
+
+  return null;
 }
-`;
+
+function CameraMotionTracker({ motionRef }) {
+  const { camera } = useThree();
+  const previousRef = useRef({ position: new THREE.Vector3(), at: 0 });
+
+  useFrame((state) => {
+    const now = performance.now();
+    const previous = previousRef.current;
+    if (!previous.at) {
+      previous.position.copy(camera.position);
+      previous.at = now;
+      return;
+    }
+    const elapsed = now - previous.at;
+    const translating = Object.values(cameraInput.keys).some(Boolean);
+    const lookingOnly = cameraInput.flyActive && !translating;
+    const speed = lookingOnly || elapsed > 250
+      ? 0
+      : camera.position.distanceTo(previous.position) / Math.max(1, elapsed) * 1000;
+    previous.position.copy(camera.position);
+    previous.at = now;
+    const currentLevel = motionRef.current.level;
+    const nextLevel = speed > 400
+      ? 2
+      : speed > 130
+        ? Math.max(1, currentLevel)
+        : speed < 30
+          ? 0
+          : currentLevel;
+    motionRef.current.speed = speed;
+    if (motionRef.current.level !== nextLevel) {
+      motionRef.current.level = nextLevel;
+      state.invalidate();
+    }
+  });
+
+  return null;
+}
 
 function WaterAnimation() {
   const invalidate = useThree(state => state.invalidate);
@@ -469,6 +547,12 @@ function WaterLayer({ layer }) {
     opacity: { value: style.opacity },
     flowSpeed: { value: style.flowSpeed },
     waveAmplitude: { value: style.waveAmplitude },
+    waterTexture: { value: WATER_FALLBACK_TEXTURE },
+    hasWaterTexture: { value: 0 },
+    lightDirection: { value: WATER_LIGHT_DIRECTION },
+    fogColor: { value: new THREE.Color(WOW_FOG_COLOR) },
+    fogNear: { value: WOW_FOG_NEAR },
+    fogFar: { value: WOW_FOG_FAR },
   }), [style]);
 
   useFrame(state => {
@@ -575,13 +659,13 @@ function RendererStats({ onStats }) {
   return null;
 }
 
-function SceneControls({ activeTool, focusTarget, focusTick, viewDistance, terrainClamp }) {
+function SceneControls({ activeTool, focusTarget, focusTick, viewDistance, terrainClamp, wmoCollisionRef }) {
   const altHeld = useAltHeld();
   const toolBlocksOrbit = activeTool === 'select' || activeTool === 'move' || activeTool === 'rotate';
 
   return (
     <>
-      <CameraFlyControls terrainClamp={terrainClamp} />
+      <CameraFlyControls terrainClamp={terrainClamp} wmoCollisionRef={wmoCollisionRef} />
       <CameraFrameFocus target={focusTarget} focusTick={focusTick} />
       <OrbitControls
         makeDefault
@@ -590,7 +674,7 @@ function SceneControls({ activeTool, focusTarget, focusTick, viewDistance, terra
             ? (altHeld ? THREE.MOUSE.PAN : undefined)
             : THREE.MOUSE.ROTATE,
           MIDDLE: THREE.MOUSE.PAN,
-          RIGHT:  THREE.MOUSE.ROTATE,
+          RIGHT:  null,
         }}
         enableDamping
         dampingFactor={0.06}
@@ -605,6 +689,90 @@ function SceneControls({ activeTool, focusTarget, focusTick, viewDistance, terra
   );
 }
 
+function WorldTransformGizmo({ object, transform, mode = 'translate', onChange, onDragStart, onDragEnd }) {
+  const groupRef = useRef(null);
+  const controlsRef = useRef(null);
+  const [groupReady, setGroupReady] = useState(false);
+  const invalidate = useThree(state => state.invalidate);
+  const bindGroup = useCallback((node) => {
+    groupRef.current = node;
+    setGroupReady(Boolean(node));
+  }, []);
+
+  useLayoutEffect(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const position = transform?.position ?? object.scenePosition ?? [0, 0, 0];
+    const rotation = transform?.rotation ?? object.sceneRotation ?? [0, 0, 0];
+    const scale = transform?.scale ?? object.sceneScale ?? object.scale ?? 1;
+    const quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(...rotation));
+    const centerOffset = new THREE.Vector3(...(object.gizmoLocalCenter ?? [0, 0, 0]))
+      .multiplyScalar(scale)
+      .applyQuaternion(quaternion);
+    group.position.fromArray(position).add(centerOffset);
+    group.quaternion.copy(quaternion);
+    group.scale.setScalar(scale);
+    invalidate();
+  }, [object, transform, invalidate]);
+
+  useEffect(() => {
+    const controls = controlsRef.current;
+    const gizmo = controls?.gizmo;
+    if (!gizmo?.translate || gizmo.__azerothTranslateArrowPatch) return undefined;
+    const originalUpdateMatrixWorld = gizmo.updateMatrixWorld;
+    gizmo.updateMatrixWorld = function updateMatrixWorld(force) {
+      originalUpdateMatrixWorld.call(this, force);
+      if (this.mode !== 'translate') return;
+      this.translate.children.forEach((handle) => {
+        if (handle.tag === 'fwd') handle.visible = true;
+        if (handle.tag === 'bwd') handle.visible = false;
+      });
+    };
+    gizmo.__azerothTranslateArrowPatch = true;
+    return () => {
+      if (gizmo.__azerothTranslateArrowPatch) {
+        gizmo.updateMatrixWorld = originalUpdateMatrixWorld;
+        delete gizmo.__azerothTranslateArrowPatch;
+      }
+    };
+  }, [groupReady]);
+
+  const handleChange = useCallback(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const scale = group.scale.x;
+    const centerOffset = new THREE.Vector3(...(object.gizmoLocalCenter ?? [0, 0, 0]))
+      .multiplyScalar(scale)
+      .applyQuaternion(group.quaternion);
+    onChange?.({
+      position: group.position.clone().sub(centerOffset).toArray(),
+      rotation: group.rotation.toArray().slice(0, 3),
+      scale,
+    });
+  }, [onChange]);
+
+  return (
+    <>
+      <group
+        ref={bindGroup}
+        name="selected-world-transform-gizmo"
+      />
+      {groupReady && (
+        <TransformControls
+          ref={controlsRef}
+          object={groupRef}
+          mode={mode}
+          space="world"
+          size={0.9}
+          onChange={handleChange}
+          onMouseDown={() => onDragStart?.(object.key)}
+          onMouseUp={() => onDragEnd?.(object.key)}
+        />
+      )}
+    </>
+  );
+}
+
 
 export default function Editor3DScene({
   spawns, selectedId, onSelect, activeTool, onTransform, terrain, water = [], tileTextures, wdl, initialTarget,
@@ -613,22 +781,30 @@ export default function Editor3DScene({
   onWmoBatchCount, onM2BatchCount, onRendererStats,
   resourceProfile = null,
   viewDistance = 2048,
+  onSelectWorldObject, selectedWorldObject = null, onWorldTransform, onWorldTransformStart, onWorldTransformEnd,
+  worldTransforms = {},
 }) {
   const [wmoPriorityReady, setWmoPriorityReady] = useState(!staticWorldMode);
+  const cameraMotionRef = useRef({ speed: 0, level: 0 });
+  const wmoCollisionRef = useRef([]);
+  const dprMax = resourceProfile?.dprMax ?? 1.5;
   return (
     <Canvas
       frameloop="demand"
-      dpr={[1, resourceProfile?.dprMax ?? 1.5]}
+      dpr={dprMax}
       gl={{ powerPreference: 'high-performance' }}
+      onCreated={({ gl }) => configureWowRenderer(gl)}
       camera={{ position: startCameraPosition(), fov: 60, near: 0.5, far: viewDistance }}
       style={{ background: '#1a1a2e' }}
       onPointerMissed={() => onSelect(null)}
     >
       <InvalidateExporter invalidateRef={invalidateRef} />
       <RendererStats onStats={onRendererStats} />
+      <AdaptiveRenderQuality maxDpr={dprMax} />
       <Lights />
       <GridFloor />
       <AxesHelper />
+      <WorldFog viewDistance={viewDistance} />
       <CameraSetup target={initialTarget} />
       {wdl && <WdlMesh tiles={wdl} />}
       {terrain && <TerrainMesh terrainTiles={terrain} tileTextures={tileTextures} />}
@@ -639,6 +815,10 @@ export default function Editor3DScene({
         onPendingChange={onWmoPendingChange}
         onPriorityReady={setWmoPriorityReady}
         onBatchCount={onWmoBatchCount}
+        cameraMotionRef={cameraMotionRef}
+        wmoCollisionRef={wmoCollisionRef}
+        onSelect={onSelectWorldObject}
+        worldTransforms={worldTransforms}
       />
       {staticWorldMode && (
         <AdtM2PlacementLayer
@@ -647,6 +827,21 @@ export default function Editor3DScene({
           onPendingChange={onM2PendingChange}
           onBatchCount={onM2BatchCount}
           wmoPriorityReady={wmoPriorityReady}
+          cameraMotionRef={cameraMotionRef}
+          onSelect={onSelectWorldObject}
+          worldTransforms={worldTransforms}
+        />
+      )}
+
+      {staticWorldMode && selectedWorldObject && (
+        <WorldTransformGizmo
+          key={selectedWorldObject.key}
+          object={selectedWorldObject}
+          transform={worldTransforms[selectedWorldObject.key]}
+          mode={activeTool === 'rotate' ? 'rotate' : 'translate'}
+          onChange={next => onWorldTransform?.(selectedWorldObject.key, next)}
+          onDragStart={onWorldTransformStart}
+          onDragEnd={onWorldTransformEnd}
         />
       )}
 
@@ -672,7 +867,9 @@ export default function Editor3DScene({
         focusTick={focusTick}
         viewDistance={viewDistance}
         terrainClamp
+        wmoCollisionRef={wmoCollisionRef}
       />
+      <CameraMotionTracker motionRef={cameraMotionRef} />
 
       <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
         <GizmoViewport axisColors={['#e74c3c', '#2ecc71', '#3498db']} labelColor="white" />

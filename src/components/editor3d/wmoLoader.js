@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import * as THREE from 'three';
+import { configureWowColorTexture } from './wowRenderConfig';
 
 const wmoPromiseCache = new Map();
 const wmoResultCache = new Map();
@@ -85,6 +86,7 @@ function createTexture(material, suffix = '') {
   );
   texture.userData.debugAlpha = { min: alphaMin, max: alphaMax, hasTransparency: alphaMin < 255 };
   texture.flipY = false;
+  configureWowColorTexture(texture);
   const useClamp = !!(Number(material.flags) & 0x40) && !(Number(material.flags) & 0x80);
   texture.wrapS = useClamp ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
   texture.wrapT = useClamp ? THREE.ClampToEdgeWrapping : THREE.RepeatWrapping;
@@ -184,10 +186,10 @@ function buildWmoAsset(data) {
           .replace('#include <common>', '#include <common>\nattribute vec2 wmoUv2;\nattribute vec4 wmoColor;\nvarying vec2 vWmoUv2;\nvarying vec4 vWmoColor;')
           .replace('#include <begin_vertex>', '#include <begin_vertex>\n\tvWmoUv2 = wmoUv2;\n\tvWmoColor = wmoColor;');
         const texture3Uniform = materialData.texture3 ? 'uniform sampler2D wmoTexture3;\n' : '';
-        const texture3Sample = materialData.texture3 ? 'vec4 wmoTexture3Color = texture2D(wmoTexture3, vWmoUv2);\n\tdiffuseColor.rgb += wmoTexture3Color.rgb * wmoLayerWeight;\n' : '';
+        const texture3Sample = materialData.texture3 ? 'vec4 wmoTexture3Color = sRGBTransferEOTF(texture2D(wmoTexture3, vWmoUv2));\n\tdiffuseColor.rgb += wmoTexture3Color.rgb * wmoLayerWeight;\n' : '';
         shaderProgram.fragmentShader = shaderProgram.fragmentShader
           .replace('#include <common>', `#include <common>\nuniform sampler2D wmoTexture2;\n${texture3Uniform}uniform float wmoLayerEnabled;\nuniform float wmoLayerMode;\nvarying vec2 vWmoUv2;\nvarying vec4 vWmoColor;`)
-          .replace('#include <map_fragment>', `#include <map_fragment>\n\tvec4 wmoLayerColor = texture2D(wmoTexture2, vWmoUv2);\n\tfloat wmoLayerWeight = wmoLayerEnabled * clamp(vWmoColor.a, 0.0, 1.0);\n\tif (wmoLayerMode > 0.5) diffuseColor.rgb += wmoLayerColor.rgb * wmoLayerWeight;\n\telse diffuseColor.rgb = mix(diffuseColor.rgb, wmoLayerColor.rgb, wmoLayerWeight);\n\t${texture3Sample}`);
+          .replace('#include <map_fragment>', `#include <map_fragment>\n\tvec4 wmoLayerColor = sRGBTransferEOTF(texture2D(wmoTexture2, vWmoUv2));\n\tfloat wmoLayerWeight = wmoLayerEnabled * clamp(vWmoColor.a, 0.0, 1.0);\n\tif (wmoLayerMode > 0.5) diffuseColor.rgb += wmoLayerColor.rgb * wmoLayerWeight;\n\telse diffuseColor.rgb = mix(diffuseColor.rgb, wmoLayerColor.rgb, wmoLayerWeight);\n\t${texture3Sample}`);
       };
       material.customProgramCacheKey = () => `wmo-layer-${shaderId}-${materialData.texture3 ? '3' : '2'}-${isEmissive ? 'emissive' : 'mix'}`;
     }
@@ -285,6 +287,49 @@ export function pruneWmoAssetCache(keepPaths = []) {
     disposeWmoAsset(wmoResultCache.get(candidate));
     wmoResultCache.delete(candidate);
   }
+}
+
+export function getWmoCacheStats() {
+  const seenGeometries = new Set();
+  const seenArrays = new Set();
+  const seenTextures = new Set();
+  let geometryBytes = 0;
+  let textureBytes = 0;
+  let assetCount = 0;
+  for (const asset of wmoResultCache.values()) {
+    if (!asset) continue;
+    assetCount += 1;
+    for (const mesh of asset.meshes || []) {
+      const geo = mesh.geometry;
+      if (geo && !seenGeometries.has(geo)) {
+        seenGeometries.add(geo);
+        for (const attribute of Object.values(geo.attributes || {})) {
+          if (attribute?.array && !seenArrays.has(attribute.array)) {
+            seenArrays.add(attribute.array);
+            geometryBytes += attribute.array.byteLength || 0;
+          }
+        }
+        if (geo.index?.array && !seenArrays.has(geo.index.array)) {
+          seenArrays.add(geo.index.array);
+          geometryBytes += geo.index.array.byteLength || 0;
+        }
+      }
+    }
+    for (const texture of asset.textureRefs || []) {
+      if (texture && !seenTextures.has(texture)) {
+        seenTextures.add(texture);
+        textureBytes += texture.image?.data?.byteLength || 0;
+      }
+    }
+  }
+  return {
+    entries: wmoResultCache.size,
+    pending: wmoPromiseCache.size,
+    assetCount,
+    geometryBytes,
+    textureBytes,
+    estimatedBytes: geometryBytes + textureBytes,
+  };
 }
 
 function queueWmoBuild(data) {

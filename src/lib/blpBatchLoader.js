@@ -72,3 +72,13 @@ export function requestBlpTexture(dataPath, blpPath) {
 export function clearBatchBlpCache() {
   requestCache.clear();
 }
+
+export function getBlpBatchCacheStats() {
+  let dataUrlChars = 0;
+  for (const entry of requestCache.values()) dataUrlChars += entry?.dataUrl?.length || 0;
+  return {
+    entries: requestCache.size,
+    dataUrlChars,
+    estimatedBytes: dataUrlChars,
+  };
+}
