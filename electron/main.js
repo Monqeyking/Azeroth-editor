@@ -4,7 +4,6 @@ app.commandLine.appendSwitch('disable-gpu-sandbox');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
-const os = require('os');
 const { Worker } = require('worker_threads');
 const { performance } = require('perf_hooks');
 const { parseDbc, getString } = require('./dbc-sql');
@@ -16,6 +15,7 @@ const { registerFileIpc } = require('./file-ipc');
 const { registerIconIpc } = require('./icon-ipc');
 const { registerServerIpc } = require('./server-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
+const { getRuntimeResourceProfile, registerSystemIpc } = require('./system-ipc');
 const { registerTalentAssetIpc } = require('./talent-assets-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
@@ -73,72 +73,9 @@ registerDbcSqlIpc(ipcMain);
 registerFileIpc(ipcMain);
 registerServerIpc(ipcMain, () => mainWindow);
 
-function getRuntimeResourceProfile() {
-  const cores = Math.max(1, os.cpus()?.length || 4);
-  const totalMemoryMb = Math.round(os.totalmem() / 1024 / 1024);
-  const freeMemoryMb = Math.round(os.freemem() / 1024 / 1024);
-  const memoryPressure = freeMemoryMb < 2048 || freeMemoryMb / Math.max(1, totalMemoryMb) < 0.12;
-  const conservative = memoryPressure || cores <= 4 || totalMemoryMb <= 8192;
-  const performance = !conservative && cores >= 8 && totalMemoryMb >= 16384;
-  return {
-    tier: conservative ? 'conservative' : performance ? 'performance' : 'balanced',
-    cores,
-    totalMemoryMb,
-    freeMemoryMb,
-    memoryPressure,
-    textureWorkers: conservative ? 1 : 2,
-    wmoWorkers: conservative ? 1 : performance ? 2 : 1,
-    assetIoConcurrency: conservative ? 3 : 6,
-    terrainBatchMax: conservative ? 10 : performance ? 16 : 12,
-    textureBatchMax: conservative ? 2 : performance ? 4 : 3,
-    wmoBatchMax: conservative ? 6 : performance ? 10 : 8,
-    waterBatchMax: conservative ? 3 : performance ? 6 : 4,
-    terrainRequestConcurrency: conservative ? 1 : 2,
-    textureRequestConcurrency: conservative ? 1 : 2,
-    wmoRequestConcurrency: conservative ? 1 : 2,
-    waterRequestConcurrency: conservative ? 1 : 2,
-    textureUploadsPerFrame: conservative ? 2 : performance ? 6 : 4,
-    wmoAssetConcurrency: conservative ? 2 : 3,
-    doodadConcurrency: conservative ? 2 : 4,
-    m2RequestConcurrency: conservative ? 2 : 4,
-    dprMax: conservative ? 1 : performance ? 1.5 : 1.25,
-  };
-}
-
-ipcMain.handle('system:getResourceProfile', async (event) => {
-  const profile = getRuntimeResourceProfile();
-  try {
-    const memory = await event.sender.getProcessMemoryInfo();
-    profile.rendererWorkingSetMb = Math.round((memory?.workingSetSize || 0) / 1024);
-    profile.rendererPrivateMb = Math.round((memory?.privateBytes || 0) / 1024);
-  } catch (_) {}
-  return profile;
-});
-
-ipcMain.handle('system:getMemoryDiagnostics', async (event) => {
-  const usage = process.memoryUsage();
-  let renderer = {};
-  try {
-    const memory = await event.sender.getProcessMemoryInfo();
-    renderer = {
-      workingSetBytes: (memory?.workingSetSize || 0) * 1024,
-      privateBytes: (memory?.privateBytes || 0) * 1024,
-    };
-  } catch (_) {}
-  let mpq = {};
-  try { mpq = getMpqReader().getMemoryCacheStats?.() || {}; } catch (_) {}
-  return {
-    capturedAt: new Date().toISOString(),
-    main: {
-      rssBytes: usage.rss || 0,
-      heapUsedBytes: usage.heapUsed || 0,
-      externalBytes: usage.external || 0,
-      arrayBuffersBytes: usage.arrayBuffers || 0,
-    },
-    renderer,
-    blp: getBlpTextureCacheStats(),
-    mpq,
-  };
+registerSystemIpc(ipcMain, {
+  getBlpTextureCacheStats,
+  getMpqMemoryCacheStats: () => getMpqReader().getMemoryCacheStats?.() || {},
 });
 
 registerDialogIpc(ipcMain, dialog, () => mainWindow);
