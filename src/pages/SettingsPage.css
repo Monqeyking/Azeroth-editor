@@ -147,6 +147,10 @@
   border-color: rgba(107, 160, 83, 0.42);
 }
 
+.settings-page .editor-msg {
+  white-space: pre-wrap;
+}
+
 .settings-page .editor-msg.error {
   color: #e89b84;
   background: rgba(130, 49, 35, 0.18);

@@ -17,8 +17,8 @@ try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('bet
 
 const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
-const http = require('http');
 const AdmZip = require('adm-zip');
+const { registerSoapIpc } = require('./soap-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
 const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, resolveServerTools, inspectVmapDependencies, runTargetVmap, runTargetMmap } = require('./adt-server-extractors');
@@ -72,7 +72,6 @@ let nextAtomicWriteId = 1;
 let iconsZip = null;
 let iconCache = {};
 let spellDbcCache = null;
-let soapRequestId = 0;
 
 function getRuntimeResourceProfile() {
   const cores = Math.max(1, os.cpus()?.length || 4);
@@ -866,92 +865,7 @@ ipcMain.handle('db:disconnect', async () => {
   return { success: true };
 });
 
-// SOAP
-ipcMain.handle('soap:command', async (_, { host, port, user, password, command }) => {
-  return new Promise((resolve) => {
-    const requestId = ++soapRequestId;
-    const soapCommand = String(command ?? '').trim();
-    const auth = Buffer.from(`${user}:${password}`).toString('base64');
-
-    function escapeXml(value) {
-      return value
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&apos;');
-    }
-
-    function sendSoapCommand(attemptCommand, attempt) {
-      const escapedCommand = escapeXml(attemptCommand);
-      const body = `<?xml version="1.0" encoding="UTF-8"?>
-<SOAP-ENV:Envelope xmlns:SOAP-ENV="http://schemas.xmlsoap.org/soap/envelope/" xmlns:ns1="urn:AC">
-  <SOAP-ENV:Body>
-    <ns1:executeCommand><command>${escapedCommand}</command></ns1:executeCommand>
-  </SOAP-ENV:Body>
-</SOAP-ENV:Envelope>`;
-
-      console.log(`[SOAP ${requestId}.${attempt}] target:`, `${host}:${port}`, 'user:', user || '(empty)');
-      console.log(`[SOAP ${requestId}.${attempt}] raw command:`, JSON.stringify(command));
-      console.log(`[SOAP ${requestId}.${attempt}] command:`, attemptCommand);
-      console.log(`[SOAP ${requestId}.${attempt}] command length:`, attemptCommand.length);
-      console.log(`[SOAP ${requestId}.${attempt}] command chars:`, [...attemptCommand].map(ch => `${ch}:${ch.charCodeAt(0)}`).join(' '));
-      console.log(`[SOAP ${requestId}.${attempt}] request body:`, body);
-
-      const req = http.request({
-        hostname: host,
-        port: Number(port),
-        path: '/RPC2',
-        method: 'POST',
-        headers: {
-          'Content-Type': 'text/xml;charset=UTF-8',
-          'SOAPAction': 'urn:AC#executeCommand',
-          'Authorization': `Basic ${auth}`,
-          'Content-Length': Buffer.byteLength(body),
-        }
-      }, (res) => {
-        let data = '';
-        res.on('data', chunk => data += chunk);
-        res.on('end', () => {
-          console.log(`[SOAP ${requestId}.${attempt}] status:`, res.statusCode);
-          console.log(`[SOAP ${requestId}.${attempt}] response:`, data);
-          const result = data.match(/<result>([\s\S]*?)<\/result>/);
-          const fault  = data.match(/<faultstring>([\s\S]*?)<\/faultstring>/);
-          const parsedFault = fault ? fault[1].replace(/&#xD;/g, '\r').trim() : null;
-          if (result) console.log(`[SOAP ${requestId}.${attempt}] parsed result:`, result[1].trim());
-          if (parsedFault) console.log(`[SOAP ${requestId}.${attempt}] parsed fault:`, parsedFault);
-
-          const shouldRetryWithoutDot =
-            attempt === 1 &&
-            attemptCommand.startsWith('.go ') &&
-            parsedFault?.includes('.gobject');
-          if (shouldRetryWithoutDot) {
-            const retryCommand = attemptCommand.slice(1);
-            console.log(`[SOAP ${requestId}.${attempt}] .go matched .gobject; retrying as:`, retryCommand);
-            sendSoapCommand(retryCommand, attempt + 1);
-            return;
-          }
-
-          if (res.statusCode === 200) {
-            resolve({ success: true, result: result ? result[1].trim() : 'OK' });
-          } else {
-            const msg = parsedFault ?? (result ? result[1].trim() : data);
-            resolve({ success: false, error: `HTTP ${res.statusCode}: ${msg}` });
-          }
-        });
-      });
-
-      req.on('error', (e) => {
-        console.log(`[SOAP ${requestId}.${attempt}] request error:`, e.message);
-        resolve({ success: false, error: e.message });
-      });
-      req.write(body);
-      req.end();
-    }
-
-    sendSoapCommand(soapCommand, 1);
-  });
-});
+registerSoapIpc(ipcMain);
 
 // Icons handling (from unzipped files)
 function getIconsDir() {

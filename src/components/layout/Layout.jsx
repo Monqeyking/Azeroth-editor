@@ -207,7 +207,8 @@ export default function Layout() {
     });
   };
 
-  const activeSection = location.pathname === '/dashboard'
+  const isDashboardRoute = location.pathname === '/dashboard' || location.pathname === '/settings';
+  const activeSection = isDashboardRoute
     ? null
     : NAV_SECTIONS.find(section =>
         section.groups.some(group => group.items.some(item => location.pathname.startsWith(item.to)))
@@ -250,7 +251,7 @@ export default function Layout() {
           </div>
         </div>
         <nav className="topbar-tabs" aria-label="Main navigation">
-          <NavLink to="/dashboard" className={({ isActive }) => `topbar-tab${isActive ? ' active' : ''}`}>
+          <NavLink to="/dashboard" className={`topbar-tab${isDashboardRoute ? ' active' : ''}`}>
             <LayoutDashboard size={14} />
             <span>Dashboard</span>
           </NavLink>
