@@ -1,6 +1,7 @@
 param(
     [string]$InputCsv = "$PSScriptRoot\..\output\DBFilesClient\CharSections.pending-insert.csv",
-    [string]$SourceDbc = "D:\CaioCore\Client\Data\Patch-B.MPQ\DBfilesclient\CharSections.dbc",
+    [Parameter(Mandatory = $true)]
+    [string]$SourceDbc,
     [string]$OutputCsv = "$PSScriptRoot\..\output\DBFilesClient\CharSections.color2-replace-test.csv"
 )
 

@@ -7,13 +7,12 @@ const crypto = require('crypto');
 const os = require('os');
 const { Worker } = require('worker_threads');
 const { performance } = require('perf_hooks');
-let BetterSqlite3 = null;
-try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('better-sqlite3 not available'); }
-
-const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
+const { parseDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
 const { getConfigPath: getEditorConfigPath, registerConfigIpc } = require('./config-ipc');
+const { registerDbcSqlIpc } = require('./dbc-sql-ipc');
 const { registerDialogIpc } = require('./dialog-ipc');
+const { registerFileIpc } = require('./file-ipc');
 const { registerIconIpc } = require('./icon-ipc');
 const { registerServerIpc } = require('./server-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
@@ -70,6 +69,8 @@ let activeAtomicWrite = null;
 let nextAtomicWriteId = 1;
 let spellDbcCache = null;
 
+registerDbcSqlIpc(ipcMain);
+registerFileIpc(ipcMain);
 registerServerIpc(ipcMain, () => mainWindow);
 
 function getRuntimeResourceProfile() {
@@ -141,108 +142,6 @@ ipcMain.handle('system:getMemoryDiagnostics', async (event) => {
 });
 
 registerDialogIpc(ipcMain, dialog, () => mainWindow);
-
-// DBC SQL
-ipcMain.handle('dbcSql:listFiles', async (_, { folder }) => {
-  try {
-    if (!fs.existsSync(folder)) return { success: true, files: [] };
-    const files = fs.readdirSync(folder)
-      .filter(f => f.toLowerCase().endsWith('.dbc'))
-      .sort()
-      .map(name => {
-        try {
-          const buf = fs.readFileSync(path.join(folder, name));
-          if (buf.length >= 20 && buf.toString('ascii', 0, 4) === 'WDBC') {
-            return { name, records: buf.readUInt32LE(4), fields: buf.readUInt32LE(8) };
-          }
-        } catch {}
-        return { name, records: null, fields: null };
-      });
-    return { success: true, files };
-  } catch (e) {
-    return { success: false, error: e.message, files: [] };
-  }
-});
-
-ipcMain.handle('dbcSql:query', async (_, { filePath, sql, writeBack, stringCols = [] }) => {
-  if (!BetterSqlite3) return { success: false, error: 'better-sqlite3 not installed.\nRun: npm install better-sqlite3 --legacy-peer-deps && npm run rebuild' };
-  try {
-    const buffer = fs.readFileSync(filePath);
-    const { records, fieldCount, recordCount, stringBlock } = parseDbc(buffer);
-
-    const strSet  = new Set(stringCols);
-    const db      = new BetterSqlite3(':memory:');
-    const colDefs = Array.from({ length: fieldCount }, (_, i) =>
-      `field_${i} ${strSet.has(i) ? 'TEXT' : 'INTEGER'}`
-    ).join(', ');
-    db.exec(`CREATE TABLE dbc (${colDefs})`);
-
-    if (records.length) {
-      const insert = db.prepare(`INSERT INTO dbc VALUES (${Array(fieldCount).fill('?').join(',')})`);
-      db.transaction(rs => {
-        for (const r of rs) {
-          const row = strSet.size
-            ? r.map((v, i) => strSet.has(i) ? getString(stringBlock, v) : v)
-            : r;
-          insert.run(...row);
-        }
-      })(records);
-    }
-
-    const trimmed = sql.trim().toUpperCase();
-    let result;
-
-    if (trimmed.startsWith('SELECT')) {
-      const stmt = db.prepare(sql);
-      const rows = stmt.all();
-      const columns = rows.length > 0 ? Object.keys(rows[0]) : stmt.columns().map(c => c.name);
-      result = { success: true, rows, columns, changes: 0 };
-    } else {
-      const info = db.prepare(sql).run();
-      result = { success: true, rows: [], columns: [], changes: info.changes };
-      if (writeBack && info.changes > 0) {
-        const newBuf = serializeDbc(buffer, db, fieldCount, recordCount);
-        fs.writeFileSync(filePath, newBuf);
-        result.written = true;
-      }
-    }
-
-    db.close();
-    return result;
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
-
-ipcMain.handle('fs:listFolder', async (_, { folder }) => {
-  try {
-    if (!fs.existsSync(folder)) return { success: true, files: [] };
-    const files = fs.readdirSync(folder).filter(f => fs.statSync(path.join(folder, f)).isFile());
-    return { success: true, files };
-  } catch (e) {
-    return { success: false, error: e.message, files: [] };
-  }
-});
-
-ipcMain.handle('fs:copyFiles', async (_, { files, srcDir, destDir }) => {
-  try {
-    if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
-    const copied = [];
-    const missing = [];
-    for (const file of files) {
-      const src = path.join(srcDir, file);
-      if (fs.existsSync(src)) {
-        fs.copyFileSync(src, path.join(destDir, file));
-        copied.push(file);
-      } else {
-        missing.push(file);
-      }
-    }
-    return { success: true, copied, missing };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-});
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
 // Offset = MySQL column index 4 (each DBC field is 4 bytes)

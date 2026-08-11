@@ -346,6 +346,38 @@ export default function SettingsPage() {
         </div>
         )}
 
+        <div className="panel" style={{ marginTop: 24 }}>
+          <div className="panel-header">
+            <FolderOpen size={13} />
+            <span>DBC Files - Editor Data</span>
+          </div>
+          <div style={{ padding: '16px' }}>
+            <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
+              Folder containing the editable DBC files used by the DBC-based editors and DBC SQL Editor.
+            </p>
+            <div className="field-group" style={{ marginBottom: 16 }}>
+              <label>DBC Folder</label>
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  style={{ flex: 1 }}
+                  value={dbcForm}
+                  onChange={handleDbcChange}
+                  placeholder="Select the folder containing your DBC files"
+                />
+                <button className="btn-ghost" style={{ flexShrink: 0 }} onClick={async () => {
+                  const selected = await window.azeroth.dialog.openFolder({ title: 'Select DBC folder' });
+                  if (selected) setDbcForm(selected);
+                }}>
+                  <FolderOpen size={13} />
+                </button>
+              </div>
+            </div>
+            <button className="btn-primary" onClick={handleDbcSave}>
+              <Save size={13} /> {dbcSaved ? 'Saved!' : 'Save DBC Folder'}
+            </button>
+          </div>
+        </div>
+
         <div className="panel wow-client-data-panel" style={{ marginTop: 24 }}>
           <div className="panel-header">
             <Zap size={13} />
@@ -355,15 +387,23 @@ export default function SettingsPage() {
             <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 16 }}>
               Path to your WoW client's <code style={{ color: 'var(--gold)', background: 'var(--bg-dark)', padding: '1px 5px', borderRadius: 3 }}>Data</code> folder.
               Used for world maps, 3D assets, textures, UI files, and minimap data directly from the client MPQs.
-              <br/>Example: <code style={{ color: 'var(--text-primary)', fontSize: 11 }}>D:\CaioCore\Client\Data</code>
             </p>
             <div className="field-group" style={{ marginBottom: 16 }}>
               <label>WoW Client Data Folder</label>
-              <input
-                value={worldmapForm}
-                onChange={e => setWorldmapForm(e.target.value)}
-                placeholder="D:\CaioCore\Client\Data"
-              />
+              <div style={{ display: 'flex', gap: 6 }}>
+                <input
+                  style={{ flex: 1 }}
+                  value={worldmapForm}
+                  onChange={e => setWorldmapForm(e.target.value)}
+                  placeholder="Select the WoW client Data folder"
+                />
+                <button className="btn-ghost" style={{ flexShrink: 0 }} onClick={async () => {
+                  const selected = await window.azeroth.dialog.openFolder({ title: 'Select WoW client Data folder' });
+                  if (selected) setWorldmapForm(selected);
+                }}>
+                  <FolderOpen size={13} />
+                </button>
+              </div>
             </div>
             {worldmapValidation && (
               <div className={`editor-msg ${worldmapValidation.success ? 'success' : 'error'}`} style={{ marginBottom: 12 }}>
