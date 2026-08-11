@@ -17,7 +17,7 @@ try { BetterSqlite3 = require('better-sqlite3'); } catch (e) { console.warn('bet
 
 const { parseDbc, serializeDbc, getString } = require('./dbc-sql');
 const mysql = require('mysql2/promise');
-const AdmZip = require('adm-zip');
+const { registerIconIpc } = require('./icon-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
@@ -69,8 +69,6 @@ const lookupWindows = new Map();
 let dbConnection = null;
 let activeAtomicWrite = null;
 let nextAtomicWriteId = 1;
-let iconsZip = null;
-let iconCache = {};
 let spellDbcCache = null;
 
 function getRuntimeResourceProfile() {
@@ -867,59 +865,9 @@ ipcMain.handle('db:disconnect', async () => {
 
 registerSoapIpc(ipcMain);
 
-// Icons handling (from unzipped files)
-function getIconsDir() {
-  const possiblePaths = [
-    path.join(__dirname, '../src/static'),
-    path.join(process.cwd(), 'src/static'),
-    'D:\\CaioCore Tools\\azeroth-editor\\src\\static'
-  ];
-
-  for (const testPath of possiblePaths) {
-    if (fs.existsSync(testPath)) {      return testPath;
-    }
-  }  return null;
-}
-
-ipcMain.handle('icons:get', async (_, dbcPath, iconPath) => {
-  try {
-    if (!iconPath) {      return null;
-    }
-
- // Clean the path: strip "Interface\Icons\" prefix and extract filename
-    let iconName = iconPath;
-    if (iconName.includes('\\')) {
-      iconName = iconName.split('\\').pop();
-    }
-    if (iconName.includes('/')) {
-      iconName = iconName.split('/').pop();
-    }
-    if (iconCache[iconName]) {      return iconCache[iconName];
-    }
-
-    const iconsDir = getIconsDir();
-    if (!iconsDir) {      return null;
-    }
-
- // Try multiple file extensions (filename already has no extension)
-    const extensions = ['.png', '.blp', '.tga'];
-    for (const ext of extensions) {
-      const fullIconPath = path.join(iconsDir, iconName + ext);
-      if (fs.existsSync(fullIconPath)) {
-        const data = fs.readFileSync(fullIconPath);
-        const base64 = data.toString('base64');
-        const mimeType = ext === '.png' ? 'image/png' : 'image/x-tga';
-        const dataUrl = `data:${mimeType};base64,${base64}`;
-        iconCache[iconName] = dataUrl;
-        console.log(`icons:get - ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â¦ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“ Loaded icon: ${iconName}${ext} (${data.length} bytes)`);
-        return dataUrl;
-      }
-    }
-
-    console.log(`icons:get - ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Â ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢ÃƒÆ’Ã†â€™ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€šÃ‚Â¦ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â Icon not found: ${iconName} (looked in ${iconsDir})`);
-    return null;
-  } catch (e) {    return null;
-  }
+registerIconIpc(ipcMain, async (dataPath, iconPath) => {
+  const result = await readBlpTextureFromSource(dataPath, iconPath);
+  return result?.success ? `data:image/png;base64,${result.png}` : null;
 });
 
 // Worldmap Tiles Loader
@@ -8401,7 +8349,7 @@ ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records, stageOnly = 
 // Decode een BLP-texture uit de WoW Data folder (MPQ) of losse file en geef terug als PNG buffer.
 // dataPath mag een WoW Data root zijn (met MPQs) of een gewone map met uitgepakte BLPs.
 // Cached zowel RGBA als PNG base64 herhaalde lookups hoeven niet opnieuw te encoden.
-ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
+async function readBlpTextureFromSource(dataPath, blpPath) {
   try {
     if (!dataPath || !blpPath) return { success: false, error: 'dataPath of blpPath ontbreekt' };
     const key = blpCacheKey(blpPath);
@@ -8438,6 +8386,10 @@ ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
   } catch (e) {
     return { success: false, error: e.message, path: blpPath };
   }
+}
+
+ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
+  return readBlpTextureFromSource(dataPath, blpPath);
 });
 
 // Explicit user-selected recovery files (for example an export that was

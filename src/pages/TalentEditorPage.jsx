@@ -411,14 +411,14 @@ export default function TalentEditorPage() {
 			if (spell?.spellIconId) {
 				const filename = iconFilenames[spell.spellIconId];
 				if (filename) {
-					const url = await window.azeroth.icons.get(dbcPath, filename);
+					const url = await getIcon(filename);
 					if (isStale()) return;
 					if (url) icons[spellId] = url;
 				}
 			}
 		}
 		if (!isStale()) setCompareSpellIcons(icons);
-	}, [dbcPath]);
+	}, [dbcPath, getIcon]);
 
 	useEffect(() => {
 		if (activeTab && compareDbcFolder) loadCompareTalents(activeTab.ID, compareDbcFolder, compareSpellFolder);
@@ -469,14 +469,11 @@ export default function TalentEditorPage() {
 	const loadBackgroundImage = async (tab) => {
 		try {
 			const bgFile = tab.BackgroundFile;
-			console.log('🎨 loadBackgroundImage called:', { bgFile, hasTab: !!tab });
 			if (!bgFile) {
-				console.log('🎨 No BackgroundFile in tab');
 				setBackgroundImage(null);
 				return;
 			}
 
-			console.log('🎨 Calling window.azeroth.talents.getBackground...');
 			const result = await window.azeroth.talents.getBackground(bgFile);
 
 			if (result && result.TopLeft && result.TopRight && result.BottomLeft && result.BottomRight) {
@@ -507,13 +504,11 @@ export default function TalentEditorPage() {
 				}
 
 				setBackgroundImage(canvas.toDataURL());
-				console.log(`🎨 ✓ Background loaded and composited: ${bgFile}`);
 			} else {
 				setBackgroundImage(null);
-				console.log(`🎨 Background not found or incomplete: ${bgFile}`);
 			}
 		} catch (e) {
-			console.error('🎨 Background load error:', e.message);
+			console.error('Talent background load error:', e.message);
 			setBackgroundImage(null);
 		}
 	};

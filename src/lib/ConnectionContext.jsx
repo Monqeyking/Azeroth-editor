@@ -150,8 +150,8 @@ export function ConnectionProvider({ children }) {
   }, [dbcPath]);
 
   const getIcon = useCallback(async (iconName) => {
-    return window.azeroth.icons.get(dbcPath, iconName);
-  }, [dbcPath]);
+    return window.azeroth.icons.get(worldmapMpqPath, iconName);
+  }, [worldmapMpqPath]);
 
   const writeTalent = useCallback(async (talent) => {
     return window.azeroth.dbc.writeTalent(dbcPath, talent);

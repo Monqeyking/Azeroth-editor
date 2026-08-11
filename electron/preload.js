@@ -107,7 +107,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   // Icons
   icons: {
-    get: (dbcPath, iconName) => ipcRenderer.invoke('icons:get', dbcPath, iconName),
+    get: (dataPath, iconName) => ipcRenderer.invoke('icons:get', dataPath, iconName),
   },
   // Talents
   talents: {
