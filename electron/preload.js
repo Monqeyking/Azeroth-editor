@@ -103,6 +103,7 @@ contextBridge.exposeInMainWorld('azeroth', {
   },
   glue: {
     readTextFile: (dataPath, internalPath) => ipcRenderer.invoke('glue:readTextFile', dataPath, internalPath),
+    readBundle: (dataPath, entryPaths) => ipcRenderer.invoke('glue:readBundle', dataPath, entryPaths),
     writeTextFile: (relPath, text) => ipcRenderer.invoke('glue:writeTextFile', relPath, text),
   },
   // Icons

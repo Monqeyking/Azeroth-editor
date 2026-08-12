@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas } from '@react-three/fiber';
+import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Loader2 } from 'lucide-react';
@@ -23,33 +23,28 @@ function disposeMaterial(mat) {
   mat.dispose();
 }
 
-function makeTextureMaterial(texture) {
+function makeTextureMaterial(texture, pass = {}) {
+  const blend = Number(pass.blend || 0);
   return new THREE.MeshBasicMaterial({
     map: texture || null,
-    color: texture ? '#ffffff' : '#ffffff',
+    color: '#ffffff',
     side: THREE.DoubleSide,
-    transparent: true,
+    transparent: blend !== 0,
     opacity: texture ? 1 : 0,
-    alphaTest: 0.01,
-    depthWrite: false,
+    alphaTest: blend === 1 ? 0.5 : 0.01,
+    blending: blend === 3 ? THREE.AdditiveBlending : THREE.NormalBlending,
+    depthWrite: blend === 0 && !pass.noDepthWrite,
     toneMapped: false,
   });
 }
 
-function loadPngTexture(dataUrl) {
-  return new Promise((resolve, reject) => {
-    const loader = new THREE.TextureLoader();
-    loader.load(
-      dataUrl,
-      tex => {
-        tex.flipY = false;
-        if ('colorSpace' in tex) tex.colorSpace = THREE.SRGBColorSpace;
-        resolve(tex);
-      },
-      undefined,
-      reject
-    );
-  });
+function makeDataTexture(payload) {
+  if (!payload?.rgba || !payload.w || !payload.h) return null;
+  const texture = new THREE.DataTexture(new Uint8Array(payload.rgba.buffer || payload.rgba), payload.w, payload.h, THREE.RGBAFormat);
+  texture.needsUpdate = true;
+  texture.flipY = false;
+  if ('colorSpace' in texture) texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
 }
 
 function formatVec3(vec) {
@@ -66,7 +61,7 @@ function makeDebugState(stage, lines = [], extra = null) {
   return { stage, lines: nextLines };
 }
 
-function Scene({ geoRef, textureRef, materialsRef, frameRef }) {
+function Scene({ geoRef, textureRef, materialsRef, frameRef, showHelpers }) {
   const fallbackMat = useRef(new THREE.MeshBasicMaterial({
     side: THREE.DoubleSide,
     transparent: true,
@@ -108,10 +103,10 @@ function Scene({ geoRef, textureRef, materialsRef, frameRef }) {
   return (
     <group>
       <mesh geometry={geo} material={layered ? materials : fallbackMat.current} />
-      {geometryReady && (
+      {showHelpers && geometryReady && (
         <mesh geometry={geo} material={wireMat.current} renderOrder={999} />
       )}
-      {frame && (
+      {showHelpers && frame && (
         <group position={[center.x, center.y, center.z]}>
           <axesHelper args={[helperSize]} />
           <mesh>
@@ -127,14 +122,28 @@ function Scene({ geoRef, textureRef, materialsRef, frameRef }) {
     </group>
   );
 }
+function CameraRig({ state }) {
+  const { camera } = useThree();
+  useEffect(() => {
+    camera.position.set(...state.position);
+    camera.fov = state.fov;
+    camera.near = state.near;
+    camera.far = state.far;
+    camera.lookAt(...state.target);
+    camera.updateProjectionMatrix();
+  }, [camera, state]);
+  return null;
+}
 
-export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue Model' }) {
+
+export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue Model', interactive = true, debug = false, showLabel = true, showHelpers = false }) {
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const { worldmapMpqPath, readBlpTextures } = useConnection();
+  const { worldmapMpqPath } = useConnection();
   const [textureMissing, setTextureMissing] = useState(false);
   const [frame, setFrame] = useState(null);
+  const [embeddedCamera, setEmbeddedCamera] = useState(null);
   const [debugState, setDebugState] = useState({ stage: "idle", lines: [] });
   const geoRef = useRef(null);
   const textureRef = useRef(null);
@@ -144,6 +153,16 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
   const textureKey = useRef(null);
 
   const cameraState = useMemo(() => {
+    if (embeddedCamera?.position?.length === 3 && embeddedCamera?.target?.length === 3) {
+      return {
+        ...embeddedCamera,
+        fov: embeddedCamera.fov || 38,
+        near: embeddedCamera.near || 0.1,
+        far: embeddedCamera.far || 50000,
+        minDistance: 0.01,
+        maxDistance: embeddedCamera.far || 50000,
+      };
+    }
     const radius = Math.max(1, frame?.radius ?? 1);
     const center = frame?.center ?? { x: 0, y: 0, z: 0 };
     const vfov = THREE.MathUtils.degToRad(38);
@@ -158,7 +177,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
       minDistance: Math.max(0.8, radius * 0.25),
       maxDistance: Math.max(dist * 4, radius * 8),
     };
-  }, [frame]);
+  }, [frame, embeddedCamera]);
 
   useEffect(() => {
     if (!active || !modelPath) return;
@@ -171,6 +190,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
     setTextureMissing(false);
     setFrame(null);
     setDebugState(makeDebugState("requesting model", [modelPath]));
+    setEmbeddedCamera(null);
 
     let cancelled = false;
     let progressTimer = null;
@@ -214,6 +234,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
         }
 
         const data = res.data;
+        setEmbeddedCamera(data.camera || null);
         setDebugState({
           stage: "model loaded",
           lines: [
@@ -231,14 +252,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
         geo.clearGroups();
 
         const texturePaths = Array.isArray(data.texturePaths) ? data.texturePaths.filter(Boolean) : [];
-        const submeshes = Array.isArray(data.submeshes) ? data.submeshes : [];
         const isLoginBackdrop = /UI_MainMenu_Northrend/i.test(modelPath);
-
-        if (isLoginBackdrop && texturePaths.length && submeshes.length) {
-          submeshes.forEach((sm, idx) => {
-            geo.addGroup(sm.indexStart, sm.indexCount, Math.min(idx, texturePaths.length - 1));
-          });
-        }
 
         geo.computeBoundingBox();
         geo.computeBoundingSphere();
@@ -280,26 +294,16 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           'texture candidates=' + (Array.isArray(data.debug?.textureCandidates) ? data.debug.textureCandidates.length : 0),
         ], data.debug));
 
-        if (isLoginBackdrop && worldmapMpqPath && readBlpTextures && texturePaths.length) {
-          setDebugState(makeDebugState("loading login textures", ['texturePaths=' + texturePaths.length], data.debug));
-          const key2 = textureKey.current;
-          const results = await readBlpTextures(worldmapMpqPath, texturePaths);
-          if (cancelled || textureKey.current !== key2) return;
-
-          const textures = await Promise.all(results.map(async (resItem) => {
-            if (!resItem?.success || !resItem.png) return null;
-            try {
-              return await loadPngTexture(`data:image/png;base64,${resItem.png}`);
-            } catch {
-              return null;
-            }
-          }));
-
-          if (cancelled || textureKey.current !== key2) return;
-          const mats = textures.map(tex => makeTextureMaterial(tex));
+        if (isLoginBackdrop && Array.isArray(data.renderPasses) && data.renderPasses.length) {
+          const passTextures = new Map((data.passTextures || []).map(texture => [texture.passIndex, texture]));
+          const mats = data.renderPasses.map((pass, materialIndex) => {
+            const texture = makeDataTexture(passTextures.get(pass.index));
+            if (pass.indexCount > 0) geo.addGroup(pass.indexStart, pass.indexCount, materialIndex);
+            return makeTextureMaterial(texture, pass);
+          });
           materialsRef.current = mats;
-          setTextureMissing(false);
-          setDebugState(makeDebugState("textures ready", ['materials=' + mats.filter(Boolean).length, 'loaded=' + textures.filter(Boolean).length], data.debug));
+          setTextureMissing(![...passTextures.values()].some(texture => texture.rgba));
+          setDebugState(makeDebugState("render passes ready", ['passes=' + mats.length, 'textures=' + [...passTextures.values()].filter(texture => texture.rgba).length], data.debug));
         } else {
           materialsRef.current = [];
           if (data.textureRgba && data.textureW > 0 && data.textureH > 0) {
@@ -335,7 +339,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
       cancelled = true;
       if (progressTimer) clearTimeout(progressTimer);
     };
-  }, [active, modelPath, worldmapMpqPath, readBlpTextures]);
+  }, [active, modelPath, worldmapMpqPath]);
 
   if (!active) return null;
 
@@ -355,7 +359,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           Texture niet gevonden
         </div>
       )}
-      {debugState.stage !== "idle" && (
+      {debug && debugState.stage !== "idle" && (
         <div className="glue-m2-debug">
           <div className="glue-m2-debug-title">{debugState.stage}</div>
           {(debugState.lines || []).map((line, idx) => (
@@ -366,23 +370,25 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
       {mounted && (
         <Canvas
           style={{ width: '100%', height: '100%' }}
-          camera={{ position: cameraState.position, fov: 38, near: 0.1, far: 50000 }}
+          key={embeddedCamera ? 'embedded-camera' : 'preview-camera'}
+          camera={{ position: cameraState.position, fov: cameraState.fov, near: cameraState.near, far: cameraState.far }}
           gl={{ antialias: true, alpha: true }}
         >
           <color attach="background" args={['#11131a']} />
+          <CameraRig state={cameraState} />
           <ambientLight intensity={0.7} />
           <directionalLight position={[4, 8, 5]} intensity={1.2} />
           <directionalLight position={[-3, 3, -4]} intensity={0.25} />
-          <OrbitControls
+          {interactive && <OrbitControls
             enablePan={false}
             minDistance={cameraState.minDistance}
             maxDistance={cameraState.maxDistance}
             target={cameraState.target}
-          />
-          <Scene geoRef={geoRef} textureRef={textureRef} materialsRef={materialsRef} frameRef={frameRef} />
+          />}
+          <Scene geoRef={geoRef} textureRef={textureRef} materialsRef={materialsRef} frameRef={frameRef} showHelpers={showHelpers} />
         </Canvas>
       )}
-      <div className="glue-m2-label">{title}</div>
+      {showLabel && title && <div className="glue-m2-label">{title}</div>}
     </div>
   );
 }

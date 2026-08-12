@@ -12,6 +12,7 @@ const { getConfigPath: getEditorConfigPath, registerConfigIpc } = require('./con
 const { registerDbcSqlIpc } = require('./dbc-sql-ipc');
 const { registerDialogIpc } = require('./dialog-ipc');
 const { registerFileIpc } = require('./file-ipc');
+const { registerGlueIpc } = require('./glue-ipc');
 const { registerIconIpc } = require('./icon-ipc');
 const { registerServerIpc } = require('./server-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
@@ -80,6 +81,7 @@ registerSystemIpc(ipcMain, {
 });
 
 registerDialogIpc(ipcMain, dialog, () => mainWindow);
+registerGlueIpc(ipcMain, { getMpqReader, getOutputRoot: getUiOutputRoot });
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
 // Offset = MySQL column index 4 (each DBC field is 4 bytes)
@@ -5562,6 +5564,25 @@ function parseM2(buf) {
  // The preview renders character vertices in their unskinned rest pose. Applying an animated bone only to an item would detach it from that pose.
     attachments.push({ id: buf.readUInt32LE(offset), bone, position: [-y, z, x] });
   }
+  const cameraCount = buf.length >= 0x118 ? buf.readUInt32LE(0x110) : 0;
+  const cameraOffset = buf.length >= 0x118 ? buf.readUInt32LE(0x114) : 0;
+  let camera = null;
+  if (cameraCount > 0 && cameraOffset > 0 && cameraOffset + 80 <= buf.length) {
+    const fovRadians = buf.readFloatLE(cameraOffset + 4);
+    const farClip = buf.readFloatLE(cameraOffset + 8);
+    const nearClip = buf.readFloatLE(cameraOffset + 12);
+    const position = [buf.readFloatLE(cameraOffset + 36), buf.readFloatLE(cameraOffset + 40), buf.readFloatLE(cameraOffset + 44)];
+    const target = [buf.readFloatLE(cameraOffset + 68), buf.readFloatLE(cameraOffset + 72), buf.readFloatLE(cameraOffset + 76)];
+    const toThree = ([x, y, z]) => [-y, z, x];
+    camera = {
+      fov: Number.isFinite(fovRadians) ? fovRadians * 180 / Math.PI : 38,
+      near: Number.isFinite(nearClip) && nearClip > 0 ? nearClip : 0.1,
+      far: Number.isFinite(farClip) && farClip > 0 ? farClip : 50000,
+      position: toThree(position),
+      target: toThree(target),
+    };
+  }
+
   return {
     positions,
     normals,
@@ -5572,6 +5593,7 @@ function parseM2(buf) {
     textureUnitLookup,
     renderFlags,
     attachments,
+    camera,
     particleEmitters,
     animationData: {
       animations,
@@ -5732,6 +5754,7 @@ async function getOrLoadM2Geometry(reader, dataPath, modelPath, log) {
     textureUnitLookup: m2.textureUnitLookup || [],
     renderFlags: m2.renderFlags || [],
     attachments: m2.attachments || [],
+    camera: m2.camera || null,
     particleEmitters: m2.particleEmitters || [],
     animationData: m2.animationData ? {
       ...m2.animationData,
@@ -6103,6 +6126,7 @@ async function loadM2ByPath(dataPath, modelPath, log, textureOverride = '') {
       particleTextures,
       skinData: { vertexLookup: geo.skin.vertexLookup, indexLookup: geo.skin.indexLookup, submeshes: geo.skin.submeshes },
       animationData: geo.animationData || null,
+      camera: geo.camera || null,
       texturePaths: geo.textures.map(t => t.filename).filter(Boolean),
       textureRgba: tex?.textureRgba ?? null,
       textureW: tex?.textureW ?? 0,
@@ -7324,37 +7348,6 @@ ipcMain.handle('textureWorkshop:stageDbc', async (_, dbcPath, payload = {}) => {
     fs.writeFileSync(path.join(outputDir, 'ItemSet.dbc'), stagedSet);
     return { success: true, outputDir, displayCount: appendedDisplays.length, setId: Number(payload.newSetId) };
   } catch (e) { return { success: false, error: e.message }; }
-});
-
-ipcMain.handle('glue:readTextFile', async (_, dataPath, internalPath) => {
-  try {
-    if (!dataPath || !internalPath) return { success: false, error: 'dataPath of internalPath ontbreekt' };
-    let buf = null;
-    const mpqReader = getMpqReader();
-    if (mpqReader.isDataPath(dataPath) && mpqReader.readFileFromMpqs) {
-      buf = await mpqReader.readFileFromMpqs(dataPath, internalPath);
-    }
-    if (!buf) {
-      const direct = path.join(dataPath, internalPath.replace(/\\/g, path.sep));
-      if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
-    }
-    if (!buf) return { success: false, error: 'Bestand niet gevonden', path: internalPath };
-    return { success: true, path: internalPath, text: decodeTextBuffer(buf) };
-  } catch (e) {
-    return { success: false, error: e.message, path: internalPath };
-  }
-});
-
-ipcMain.handle('glue:writeTextFile', async (_, relPath, text) => {
-  try {
-    if (!relPath) return { success: false, error: 'relPath ontbreekt' };
-    const outAbs = path.join(getUiOutputRoot(), relPath.replace(/\\/g, path.sep));
-    fs.mkdirSync(path.dirname(outAbs), { recursive: true });
-    fs.writeFileSync(outAbs, String(text ?? ''), 'utf8');
-    return { success: true, path: relPath, absPath: outAbs };
-  } catch (e) {
-    return { success: false, error: e.message, path: relPath };
-  }
 });
 
 ipcMain.handle('dbc:readBlpTextures', async (_, dataPath, blpPaths) => {
