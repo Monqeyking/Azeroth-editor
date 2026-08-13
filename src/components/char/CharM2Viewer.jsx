@@ -195,7 +195,7 @@ function AttachedM2({ model, anchor }) {
   const passes = data.renderPasses?.length ? data.renderPasses : data.skinData?.submeshes.map((_, submeshIndex) => ({ index: submeshIndex, submeshIndex, blend: 0, order: submeshIndex })) || [];
   return <group position={[anchor[0] + offset[0], anchor[1] + offset[1], anchor[2] + offset[2]]}>{passes.map(pass => <AttachedM2Pass key={`${pass.index}:${pass.submeshIndex}`} pass={pass} data={data} texture={passTextures.get(pass.index) || texture}/>)}</group>;
 }
-export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = null, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, skinExtraRgba = null, componentTransfer = null, componentPalette = null, preferOutput = false, textureRefreshKey = 0 }) {
+export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = null, textureLayers = [], appearance = {}, enabledSubmeshIndices = null, onSubmeshes, active, modelPath: creatureModelPath, creatureDisplayId = null, colorDebug = false, attachedModels = [], itemGeosets = {}, skinRgba = null, skinExtraRgba = null, componentTransfer = null, componentPalette = null, preferOutput = false, textureRefreshKey = 0, modelFacingOffset = 0 }) {
   const { worldmapMpqPath } = useConnection();
 
   const [mounted, setMounted]     = useState(false);
@@ -563,7 +563,9 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
           <directionalLight position={[3, 8, 5]} intensity={1.2} />
           <directionalLight position={[-2, 3, -4]} intensity={0.3} />
           <OrbitControls enablePan={true} enableZoom={true} minDistance={0.5} maxDistance={20} target={[0, 1.0, 0]} />
-          <>{renderPasses.length ? <CharacterPassScene passes={renderPasses} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} /> : <CharScene geoRef={geoRef} hairGeoRef={hairGeoRef} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} hairMaterialRef={hairMaterialRef} noTexRef={noTexRef} colorDebug={colorDebug} />}{attachedModels.map(model => <AttachedM2 key={`${model.slot}:${model.modelPath}`} model={model} anchor={attachmentPoints[model.attachmentId] || (model.attachmentId === 11 ? headAnchor : null)}/>)}</>
+          <group rotation={[0, modelFacingOffset, 0]}>
+            {renderPasses.length ? <CharacterPassScene passes={renderPasses} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} colorDebug={colorDebug} textureVersion={textureVersion} /> : <CharScene geoRef={geoRef} hairGeoRef={hairGeoRef} textureRef={textureRef} skinExtraTextureRef={skinExtraTextureRef} hairTextureRef={hairTextureRef} hairMaterialRef={hairMaterialRef} noTexRef={noTexRef} colorDebug={colorDebug} />}
+            {attachedModels.map(model => <AttachedM2 key={`${model.slot}:${model.modelPath}`} model={model} anchor={attachmentPoints[model.attachmentId] || (model.attachmentId === 11 ? headAnchor : null)}/>)}</group>
         </Canvas>
       )}
     </div>

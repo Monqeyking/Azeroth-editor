@@ -114,6 +114,17 @@ const fileFoundIn   = new Map();   // `${dataPath}|${lcPath}` → mpqAbsPath  (m
 const archiveDiscoveryCache = new Map(); // `${dataPath}|${lcPath}` → mpqAbsPath | null  (listfile-miss discovery)
 const cachedArchives = new Map(); // mpqAbsPath → open archive handle, per worker
 const archiveCacheStats = { opens: 0, hits: 0 };
+const archiveReadQueues = new Map(); // mpqAbsPath -> serialized StormLib operations
+
+function withArchiveReadLock(key, task) {
+  const previous = archiveReadQueues.get(key) || Promise.resolve();
+  const current = previous.catch(() => {}).then(task);
+  archiveReadQueues.set(key, current);
+  current.finally(() => {
+    if (archiveReadQueues.get(key) === current) archiveReadQueues.delete(key);
+  }).catch(() => {});
+  return current;
+}
 
 function closeCachedArchives() {
   for (const archive of cachedArchives.values()) {
@@ -222,6 +233,8 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
   }
 
   // Normaal MPQ-archief via StormLib. Reuse the handle for all reads in this worker.
+  const key = String(mpqAbsPath).toLowerCase();
+  return withArchiveReadLock(key, async () => {
   const archive = await getCachedArchive(dataPath, mpqAbsPath);
   if (!archive) return null;
 
@@ -241,6 +254,7 @@ async function readFileFromMpqEntry(dataPath, mpqAbsPath, internalPath) {
     try { archive.close(); } catch (_) {}
   }
   return buf;
+  });
 }
 
 // ── Tile-buffer lezen (BLP) ────────────────────────────────────────────────────

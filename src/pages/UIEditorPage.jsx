@@ -44,9 +44,30 @@ const SCREEN_PRESETS = [
 
 const visualTags = new Set(['Texture', 'FontString', 'Button', 'CheckButton', 'EditBox', 'Slider', 'StatusBar']);
 
+function textureStyle(textureUrl, coords) {
+  if (!textureUrl || !coords) return null;
+  const width = Math.max(0.001, coords.right - coords.left);
+  const height = Math.max(0.001, coords.bottom - coords.top);
+  const positionX = coords.left / Math.max(0.001, 1 - width);
+  const positionY = coords.top / Math.max(0.001, 1 - height);
+  return {
+    backgroundImage: `url(${textureUrl})`,
+    backgroundSize: `${100 / width}% ${100 / height}%`,
+    backgroundPosition: `${positionX * 100}% ${positionY * 100}%`,
+    backgroundRepeat: 'no-repeat',
+  };
+}
+
+function renderTexture(node, textureUrl, className = '') {
+  const style = textureStyle(textureUrl, node.textureCoords);
+  return style
+    ? <span className={className} style={style} />
+    : <img className={className} src={textureUrl} alt="" draggable={false} />;
+}
+
 function renderNodeContent(node, textureUrl) {
-  if (textureUrl && node.tag === 'Texture') return <img src={textureUrl} alt="" draggable={false} />;
-  if (textureUrl && (node.tag === 'Button' || node.tag === 'CheckButton')) return <><img className="glue-node-bg" src={textureUrl} alt="" draggable={false} /><span className="glue-node-text">{node.text || node.name}</span></>;
+  if (textureUrl && node.tag === 'Texture') return renderTexture(node, textureUrl, 'glue-node-texture');
+  if (textureUrl && (node.tag === 'Button' || node.tag === 'CheckButton')) return <>{renderTexture(node, textureUrl, 'glue-node-bg')}<span className="glue-node-text">{node.text || node.name}</span></>;
   if (node.tag === 'EditBox') return <span className="glue-node-placeholder">{node.text || node.name || 'EditBox'}</span>;
   if (node.tag === 'CheckButton') return <><span className="glue-check-box" /> <span>{node.text || node.name}</span></>;
   if (node.tag === 'FontString') return node.text ? <span>{node.text}</span> : null;
@@ -136,6 +157,14 @@ function GlueCanvas({ scene, modelPath, textures, selectedId, onSelect, onMove }
     });
   };
   const visibleNodes = scene.nodes.filter(node => !isHidden(node) && isRenderableNode(node));
+  const modelNodes = scene.nodes.filter(node => node.tag === 'ModelFFX' || node.tag === 'Model');
+  const normalizeModelPath = value => String(value || '').replace(/\//g, '\\').toLowerCase();
+  const requestedModelPath = normalizeModelPath(modelPath);
+  const modelNode = modelNodes.find(node => normalizeModelPath(node.modelConfig?.modelPath) === requestedModelPath)
+    || (modelNodes.length === 1 ? modelNodes[0] : null);
+  const modelBox = modelNode?.box && modelNode.box.width > 0 && modelNode.box.height > 0
+    ? modelNode.box
+    : { x: 0, y: 0, width: GLUE_WIDTH, height: GLUE_HEIGHT };
   return (
     <div className="glue-canvas-host" ref={hostRef}>
       <div className="glue-canvas-tools">
@@ -145,8 +174,8 @@ function GlueCanvas({ scene, modelPath, textures, selectedId, onSelect, onMove }
         <span>{Math.round(scale * 100)}%</span>
       </div>
       <div className="glue-canvas" style={{ width: GLUE_WIDTH, height: GLUE_HEIGHT, transform: `translate(-50%, -50%) scale(${scale})` }}>
-        <div className="glue-model-layer">
-          <GlueM2Viewer key={`${modelPath}:render-pass-v2`} modelPath={modelPath} title="" interactive={false} debug={false} showLabel={false} showHelpers={false} />
+        <div className="glue-model-layer" style={{ left: modelBox.x, top: modelBox.y, width: modelBox.width, height: modelBox.height }}>
+          <GlueM2Viewer key={`${modelPath}:render-pass-v2`} modelPath={modelPath} glueModel={modelNode} title="" interactive={false} showLabel={false} showHelpers={false} />
         </div>
         <div className="glue-ui-layer">
           {visibleNodes.map(node => {
@@ -180,7 +209,7 @@ function GlueCanvas({ scene, modelPath, textures, selectedId, onSelect, onMove }
                   event.currentTarget.setPointerCapture?.(event.pointerId);
                 }}
               >
-                {renderNodeContent(node, textureUrl)}
+              {renderNodeContent(node, textureUrl)}
               </button>
             );
           })}

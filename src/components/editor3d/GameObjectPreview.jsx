@@ -101,7 +101,7 @@ function sampleParticleKeys(keys, phase, fallback) {
   return a + ((b - a) * amount);
 }
 
-export function makeAnimator(animationData) {
+export function makeAnimator(animationData, animationIndex = 0) {
   if (!animationData?.animations?.length || !animationData.bones?.length) return null;
   const positions = toF32(animationData.positionsM2);
   const normals = toF32(animationData.normalsM2);
@@ -113,7 +113,8 @@ export function makeAnimator(animationData) {
 
   const bones = animationData.bones;
   const boneLookup = animationData.boneLookup || [];
-  const animation = animationData.animations[0];
+  const selectedAnimationIndex = Math.max(0, Math.min(animationData.animations.length - 1, Number(animationIndex) || 0));
+  const animation = animationData.animations[selectedAnimationIndex] || animationData.animations[0];
   const duration = Math.max(1, animation.length || 1);
   const defaultTranslation = [0, 0, 0];
   const defaultRotation = [0, 0, 0, 1];
@@ -136,9 +137,9 @@ export function makeAnimator(animationData) {
     const worlds = [];
     for (let i = 0; i < bones.length; i++) {
       const bone = bones[i];
-      const translation = sampleTrack(bone.translation, 0, timeMs, duration, animationData.globalSequences, defaultTranslation);
-      const rotation = sampleTrack(bone.rotation, 0, timeMs, duration, animationData.globalSequences, defaultRotation, true);
-      const boneScale = sampleTrack(bone.scale, 0, timeMs, duration, animationData.globalSequences, defaultScale);
+      const translation = sampleTrack(bone.translation, selectedAnimationIndex, timeMs, duration, animationData.globalSequences, defaultTranslation);
+      const rotation = sampleTrack(bone.rotation, selectedAnimationIndex, timeMs, duration, animationData.globalSequences, defaultRotation, true);
+      const boneScale = sampleTrack(bone.scale, selectedAnimationIndex, timeMs, duration, animationData.globalSequences, defaultScale);
       const pivot = bone.pivot || [0, 0, 0];
       const local = new THREE.Matrix4()
         .makeTranslation(pivot[0] + translation[0], pivot[1] + translation[1], pivot[2] + translation[2])
@@ -198,11 +199,11 @@ export function makeAnimator(animationData) {
         }
         positionArray[vertex * 3] = -position.y;
         positionArray[vertex * 3 + 1] = position.z;
-        positionArray[vertex * 3 + 2] = position.x;
+        positionArray[vertex * 3 + 2] = -position.x;
         normal.normalize();
         normalArray[vertex * 3] = -normal.y;
         normalArray[vertex * 3 + 1] = normal.z;
-        normalArray[vertex * 3 + 2] = normal.x;
+        normalArray[vertex * 3 + 2] = -normal.x;
       }
       geo.attributes.position.needsUpdate = true;
       geo.attributes.normal.needsUpdate = true;
@@ -264,11 +265,8 @@ function PassMesh({ baseGeometry, data, pass, texture }) {
 function ParticleSprite({ emitter, texture, size, animator, presentation, index, count }) {
   const material = useMemo(() => {
     if (!texture) return null;
-    const particleTexture = texture.clone();
-    particleTexture.flipY = true;
-    particleTexture.needsUpdate = true;
     return new THREE.SpriteMaterial({
-      map: particleTexture,
+      map: texture,
       transparent: true,
       depthTest: false,
       depthWrite: false,
@@ -281,7 +279,6 @@ function ParticleSprite({ emitter, texture, size, animator, presentation, index,
   const isCore = emitter?.texturePath?.toLowerCase()?.endsWith('skullportal2.blp');
 
   useEffect(() => () => {
-    material?.map?.dispose();
     material?.dispose();
   }, [material]);
 
@@ -300,7 +297,7 @@ function ParticleSprite({ emitter, texture, size, animator, presentation, index,
     point[2] += Math.sin(angle) * radius * 0.7;
     point[0] += Math.sin(angle * 0.65) * radius * 0.18;
     const position = animator?.getBonePosition?.(emitter.bone, point, elapsedMs) || point;
-    spriteRef.current.position.set(-position[1], position[2], position[0]);
+    spriteRef.current.position.set(-position[1], position[2], -position[0]);
 
     const color = sampleParticleKeys(emitter.colorKeys, phase, [1, 1, 1]);
     const opacity = sampleParticleKeys(emitter.opacityKeys, phase, 1);
@@ -316,7 +313,7 @@ function ParticleSprite({ emitter, texture, size, animator, presentation, index,
   return <sprite ref={spriteRef} material={material} renderOrder={100 + emitter.index + index} />;
 }
 
-function ParticlePreview({ emitter, texture, size, animator }) {
+export function ParticlePreview({ emitter, texture, size, animator }) {
   const presentation = useMemo(() => {
     const path = emitter?.texturePath?.toLowerCase() || '';
     if (path.endsWith('skullportal2.blp')) return { scale: 0.95, opacity: 1 };

@@ -105,7 +105,7 @@ function LocalCustomPreview({ displayId, displayScale, active }) {
 
   return <div className="creature-model-preview creature-model-preview-local">
     <div className="creature-model-preview-head"><span>Local custom preview · Display #{displayId}</span>{displayScale !== 1 && <span className="mono">×{displayScale}</span>}</div>
-    <div className="creature-model-preview-viewport">{preview ? <CharM2Viewer race={preview.race} gender={preview.gender} skinBlp={preview.skin?.texture || null} skinExtraBlp={preview.skin?.texture2 || null} appearance={{ face: preview.extra.face, hairStyle: preview.extra.hairStyle, hairColor: preview.extra.hairColor, facialHair: preview.extra.facialHair }} textureLayers={[...preview.layers, ...equipment.textureLayers]} attachedModels={equipment.attachedModels} itemGeosets={equipment.itemGeosets} active={active && !!worldmapMpqPath} /> : <span className="creature-model-preview-status">Loading local Display DBC data…</span>}</div>
+    <div className="creature-model-preview-viewport">{preview ? <CharM2Viewer race={preview.race} gender={preview.gender} skinBlp={preview.skin?.texture || null} skinExtraBlp={preview.skin?.texture2 || null} appearance={{ face: preview.extra.face, hairStyle: preview.extra.hairStyle, hairColor: preview.extra.hairColor, facialHair: preview.extra.facialHair }} textureLayers={[...preview.layers, ...equipment.textureLayers]} attachedModels={equipment.attachedModels} itemGeosets={equipment.itemGeosets} modelFacingOffset={Math.PI} active={active && !!worldmapMpqPath} /> : <span className="creature-model-preview-status">Loading local Display DBC data…</span>}</div>
   </div>;
 }
 

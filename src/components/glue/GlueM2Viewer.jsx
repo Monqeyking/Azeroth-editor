@@ -1,9 +1,11 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Canvas, useThree } from '@react-three/fiber';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import * as THREE from 'three';
 import { Loader2 } from 'lucide-react';
 import { useConnection } from '../../lib/ConnectionContext';
+import { configureWowRenderer } from '../editor3d/wowRenderConfig';
+import { makeAnimator, ParticlePreview } from '../editor3d/GameObjectPreview';
 import '../../pages/CharCustomizationPage.css';
 import './GlueM2Viewer.css';
 
@@ -12,9 +14,13 @@ function toF32(arr) {
   return new Float32Array(arr.buffer, arr.byteOffset, arr.byteLength / 4);
 }
 
-function toU32(arr) {
-  if (arr instanceof Uint32Array) return arr;
-  return new Uint32Array(arr.buffer, arr.byteOffset, arr.byteLength / 4);
+function toIndexArray(arr) {
+  const source = arr instanceof Uint16Array || arr instanceof Uint32Array
+    ? arr
+    : new Uint32Array(arr.buffer, arr.byteOffset, arr.byteLength / 4);
+  let max = 0;
+  for (let index = 0; index < source.length; index++) max = Math.max(max, source[index]);
+  return max <= 65535 ? new Uint16Array(source) : (source instanceof Uint32Array ? source : new Uint32Array(source));
 }
 
 function disposeMaterial(mat) {
@@ -25,17 +31,30 @@ function disposeMaterial(mat) {
 
 function makeTextureMaterial(texture, pass = {}) {
   const blend = Number(pass.blend || 0);
-  return new THREE.MeshBasicMaterial({
+  const renderFlags = Number(pass.renderFlags || 0);
+  const transparent = blend >= 2;
+  const lit = !(renderFlags & 1) && blend < 3;
+  const Material = lit ? THREE.MeshLambertMaterial : THREE.MeshBasicMaterial;
+  const material = new Material({
     map: texture || null,
     color: '#ffffff',
     side: THREE.DoubleSide,
-    transparent: blend !== 0,
+    transparent,
     opacity: texture ? 1 : 0,
-    alphaTest: blend === 1 ? 0.5 : 0.01,
-    blending: blend === 3 ? THREE.AdditiveBlending : THREE.NormalBlending,
-    depthWrite: blend === 0 && !pass.noDepthWrite,
+    alphaTest: blend === 1 ? 224 / 255 : blend > 0 ? 1 / 255 : 0,
+    depthWrite: !pass.noDepthWrite,
+    depthTest: !(renderFlags & 8),
     toneMapped: false,
   });
+  material.fog = !(renderFlags & 2);
+  material.blending = blend === 3 || blend === 4
+    ? THREE.AdditiveBlending
+    : blend >= 5 ? THREE.CustomBlending : THREE.NormalBlending;
+  if (blend >= 5) {
+    material.blendSrc = THREE.DstColorFactor;
+    material.blendDst = THREE.SrcColorFactor;
+  }
+  return material;
 }
 
 function makeDataTexture(payload) {
@@ -47,22 +66,50 @@ function makeDataTexture(payload) {
   return texture;
 }
 
-function formatVec3(vec) {
-  if (!vec) return 'n/a';
-  return '[' + vec.x.toFixed(1) + ', ' + vec.y.toFixed(1) + ', ' + vec.z.toFixed(1) + ']';
+function m2ToThree([x, y, z]) {
+  return [-y, z, -x];
 }
 
-function makeDebugState(stage, lines = [], extra = null) {
-  const nextLines = [...lines];
-  if (extra?.debugSteps?.length) {
-    nextLines.push('--- loader steps ---');
-    nextLines.push(...extra.debugSteps.slice(0, 18));
-  }
-  return { stage, lines: nextLines };
+function lightColor(light) {
+  const color = light?.diffuseColor || [1, 1, 1];
+  const intensity = Number(light?.diffuseIntensity) || 0;
+  return new THREE.Color(
+    Math.max(0, Math.min(1, color[0] * intensity)),
+    Math.max(0, Math.min(1, color[1] * intensity)),
+    Math.max(0, Math.min(1, color[2] * intensity)),
+  );
 }
 
-function Scene({ geoRef, textureRef, materialsRef, frameRef, showHelpers }) {
-  const fallbackMat = useRef(new THREE.MeshBasicMaterial({
+function GlueLighting({ lights = [] }) {
+  const pointLights = lights.filter(light => light?.visible !== false && Number(light.type) === 1);
+  return (
+    <>
+      <ambientLight color="#6b4854" intensity={0.7} />
+      <directionalLight color="#ff9a58" intensity={1.15} position={[-4, 7, 6]} />
+      <directionalLight color="#5268b5" intensity={0.3} position={[5, 3, -7]} />
+      {pointLights.slice(0, 4).map((light, index) => (
+        <pointLight
+          key={`m2-light:${index}`}
+          color={lightColor(light)}
+          intensity={1}
+          distance={Math.max(0, Number(light.attenuationEnd) || 0) || 1000}
+          decay={1.5}
+          position={m2ToThree(light.position || [0, 0, 0])}
+        />
+      ))}
+    </>
+  );
+}
+
+function m2CameraFovDegrees(cameraOrRadians, aspect = 4 / 3) {
+  const fovRadians = Number(typeof cameraOrRadians === 'number' ? cameraOrRadians : cameraOrRadians?.fov);
+  if (!Number.isFinite(fovRadians) || fovRadians <= 0) return 38;
+  const safeAspect = Number.isFinite(aspect) && aspect > 0 ? aspect : 4 / 3;
+  return THREE.MathUtils.radToDeg(fovRadians / Math.sqrt(safeAspect * safeAspect + 1));
+}
+
+function Scene({ geoRef, textureRef, materialsRef, particleTexturesRef, frameRef, animationData, animationSequence = 0, particleEmitters, glueModel, showHelpers, modelScale = 1 }) {
+  const fallbackMat = useRef(new THREE.MeshLambertMaterial({
     side: THREE.DoubleSide,
     transparent: true,
     opacity: 0.18,
@@ -93,16 +140,31 @@ function Scene({ geoRef, textureRef, materialsRef, frameRef, showHelpers }) {
   const geo = geoRef.current;
   const frame = frameRef.current;
   const materials = materialsRef.current;
+  const particleTextures = particleTexturesRef.current;
+  const animator = useMemo(() => makeAnimator(animationData, animationSequence), [animationData, animationSequence]);
+  useFrame(state => {
+    if (animator?.update && geo) animator.update(state.clock.getElapsedTime() * 1000, geo);
+  });
   if (!geo) return null;
 
   const layered = Array.isArray(materials) && materials.length > 0;
   const geometryReady = !!geo?.attributes?.position?.count;
   const helperSize = Math.max(8, (frame?.radius || 8) * 0.35);
+  const particleSize = Math.min(Math.max(frame?.radius || 1, 1) * 0.003, 6);
   const center = frame?.center || { x: 0, y: 0, z: 0 };
 
   return (
-    <group>
+    <group scale={[modelScale, modelScale, modelScale]}>
       <mesh geometry={geo} material={layered ? materials : fallbackMat.current} />
+      {particleEmitters?.map(emitter => (
+        <ParticlePreview
+          key={`particle:${emitter.index}`}
+          emitter={emitter}
+          texture={particleTextures.get(emitter.index)}
+          size={particleSize}
+          animator={animator}
+        />
+      ))}
       {showHelpers && geometryReady && (
         <mesh geometry={geo} material={wireMat.current} renderOrder={999} />
       )}
@@ -123,20 +185,26 @@ function Scene({ geoRef, textureRef, materialsRef, frameRef, showHelpers }) {
   );
 }
 function CameraRig({ state }) {
-  const { camera } = useThree();
+  const { camera, size } = useThree();
   useEffect(() => {
     camera.position.set(...state.position);
-    camera.fov = state.fov;
+    const aspect = size.width > 0 && size.height > 0 ? size.width / size.height : 4 / 3;
+    camera.fov = Number.isFinite(state.fovRadians) ? m2CameraFovDegrees(state.fovRadians, aspect) : state.fov;
     camera.near = state.near;
     camera.far = state.far;
+    camera.up.set(0, 1, 0);
+    if (Number.isFinite(state.roll) && state.roll !== 0) {
+      const forward = new THREE.Vector3(...state.target).sub(camera.position).normalize();
+      camera.up.applyQuaternion(new THREE.Quaternion().setFromAxisAngle(forward, state.roll));
+    }
     camera.lookAt(...state.target);
     camera.updateProjectionMatrix();
-  }, [camera, state]);
+  }, [camera, size.width, size.height, state]);
   return null;
 }
 
-
-export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue Model', interactive = true, debug = false, showLabel = true, showHelpers = false }) {
+export default function GlueM2Viewer({ modelPath, glueModel = null, active = true, title = 'Glue Model', interactive = true, showLabel = true, showHelpers = false, loadParticles = false }) {
+  const modelScale = 1;
   const [mounted, setMounted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -144,10 +212,13 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
   const [textureMissing, setTextureMissing] = useState(false);
   const [frame, setFrame] = useState(null);
   const [embeddedCamera, setEmbeddedCamera] = useState(null);
-  const [debugState, setDebugState] = useState({ stage: "idle", lines: [] });
+  const [lights, setLights] = useState([]);
   const geoRef = useRef(null);
   const textureRef = useRef(null);
   const materialsRef = useRef([]);
+  const particleTexturesRef = useRef(new Map());
+  const particleEmittersRef = useRef([]);
+  const animationDataRef = useRef(null);
   const frameRef = useRef(null);
   const modelKey = useRef(null);
   const textureKey = useRef(null);
@@ -155,10 +226,13 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
   const cameraState = useMemo(() => {
     if (embeddedCamera?.position?.length === 3 && embeddedCamera?.target?.length === 3) {
       return {
-        ...embeddedCamera,
-        fov: embeddedCamera.fov || 38,
+        position: embeddedCamera.position,
+        target: embeddedCamera.target,
+        fov: m2CameraFovDegrees(embeddedCamera),
+        fovRadians: Number(embeddedCamera.fov),
+        roll: Number(embeddedCamera.roll) || 0,
         near: embeddedCamera.near || 0.1,
-        far: embeddedCamera.far || 50000,
+        far: Math.max(embeddedCamera.far || 50000, glueModel?.modelConfig?.fogFar || 0, 1000),
         minDistance: 0.01,
         maxDistance: embeddedCamera.far || 50000,
       };
@@ -174,26 +248,29 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
     return {
       position: [center.x, center.y + radius * 0.04, center.z + dist],
       target: [center.x, center.y, center.z],
+      fov: 38,
+      fovRadians: null,
+      roll: 0,
+      near: 0.1,
+      far: Math.max(1000, glueModel?.modelConfig?.fogFar || 0),
       minDistance: Math.max(0.8, radius * 0.25),
       maxDistance: Math.max(dist * 4, radius * 8),
     };
-  }, [frame, embeddedCamera]);
+  }, [frame, embeddedCamera, modelPath, glueModel, modelScale]);
 
   useEffect(() => {
     if (!active || !modelPath) return;
     const key = modelPath;
-    if (modelKey.current === key) return;
     modelKey.current = key;
     setMounted(true);
     setLoading(true);
     setError(null);
     setTextureMissing(false);
     setFrame(null);
-    setDebugState(makeDebugState("requesting model", [modelPath]));
     setEmbeddedCamera(null);
+    setLights([]);
 
     let cancelled = false;
-    let progressTimer = null;
     const disposeCurrent = () => {
       if (geoRef.current) {
         geoRef.current.dispose();
@@ -207,53 +284,71 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
         materialsRef.current.forEach(disposeMaterial);
       }
       materialsRef.current = [];
+      new Set(particleTexturesRef.current.values()).forEach(texture => texture.dispose());
+      particleTexturesRef.current.clear();
+      particleEmittersRef.current = [];
+      animationDataRef.current = null;
     };
 
     disposeCurrent();
 
-    progressTimer = setTimeout(() => {
-      if (!cancelled) setDebugState(prev => prev.stage === "requesting model" ? makeDebugState("waiting on IPC", [modelPath, "still waiting for model payload"]) : prev);
-    }, 500);
-
-    window.azeroth.m2.loadModelByPath({ modelPath })
+    let requestTimeout = null;
+    const modelConfig = glueModel?.modelConfig || {};
+    const cameraIndex = Number.isInteger(modelConfig.cameraIndex) ? modelConfig.cameraIndex : 0;
+    const sequence = Number.isInteger(modelConfig.sequence) ? modelConfig.sequence : 0;
+    const renderOptions = {
+      modelPath,
+      cameraIndex,
+      sequence,
+      renderProfile: 'glue',
+      renderAllSubmeshes: true,
+      loadParticles,
+    };
+    const modelRequest = Promise.race([
+      window.azeroth.m2.loadModelByPath(renderOptions),
+      new Promise((_, reject) => {
+        requestTimeout = setTimeout(() => reject(new Error('M2 IPC timeout after 30 seconds')), 30000);
+      }),
+    ]);
+    modelRequest
       .then(async res => {
-        if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
+        if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
         if (cancelled || modelKey.current !== key) return;
-        setDebugState(makeDebugState("response received", [
-          "success=" + !!res?.success,
-          "hasData=" + !!res?.data,
-          "hasError=" + (res?.error || "none"),
-          "dataKeys=" + (res?.data ? Object.keys(res.data).slice(0, 12).join(", ") : "none"),
-        ]));
 
         if (!res?.success || !res.data) {
           setError(res?.error || "Failed to load model");
-          setDebugState(makeDebugState("error", [res?.error || "Failed to load model"]));
           setLoading(false);
           return;
         }
 
         const data = res.data;
+        particleEmittersRef.current = data.particleEmitters || [];
+        animationDataRef.current = data.animationData || null;
+        setLights(data.lights || []);
+        const particleTextureByPath = new Map();
+        particleTexturesRef.current = new Map((data.particleTextures || []).flatMap(entry => {
+          const key = String(entry.texturePath || entry.path || entry.textureIndex || entry.emitterIndex).toLowerCase();
+          let texture = particleTextureByPath.get(key);
+          if (!texture) {
+            texture = makeDataTexture(entry);
+            if (texture) {
+              texture.flipY = true;
+              texture.needsUpdate = true;
+              particleTextureByPath.set(key, texture);
+            }
+          }
+          return texture ? [[entry.emitterIndex, texture]] : [];
+        }));
         setEmbeddedCamera(data.camera || null);
-        setDebugState({
-          stage: "model loaded",
-          lines: [
-            `positions=${data.positions?.length ?? 0}`,
-            `indices=${data.indices?.length ?? 0}`,
-            `textures=${Array.isArray(data.texturePaths) ? data.texturePaths.length : 0}`,
-            `submeshes=${Array.isArray(data.submeshes) ? data.submeshes.length : 0}`,
-          ],
-        });
         const geo = new THREE.BufferGeometry();
         geo.setAttribute('position', new THREE.BufferAttribute(toF32(data.positions), 3));
         geo.setAttribute('normal', new THREE.BufferAttribute(toF32(data.normals), 3));
         geo.setAttribute('uv', new THREE.BufferAttribute(toF32(data.uvs), 2));
-        geo.setIndex(new THREE.BufferAttribute(toU32(data.indices), 1));
+        geo.setAttribute('uv2', new THREE.BufferAttribute(toF32(data.uvs2 || data.uvs), 2));
+        geo.setIndex(new THREE.BufferAttribute(toIndexArray(data.indices), 1));
         geo.clearGroups();
 
         const texturePaths = Array.isArray(data.texturePaths) ? data.texturePaths.filter(Boolean) : [];
-        const isLoginBackdrop = /UI_MainMenu_Northrend/i.test(modelPath);
-
         geo.computeBoundingBox();
         geo.computeBoundingSphere();
         geoRef.current = geo;
@@ -268,6 +363,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
             z: (box.min.z + box.max.z) / 2,
           },
           radius: sphere.radius || Math.max(box.getSize(new THREE.Vector3()).length() / 2, 1),
+          bounds: { min: box.min.toArray(), max: box.max.toArray() },
         } : null;
 
         if (nextFrame) {
@@ -275,26 +371,7 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           setFrame(nextFrame);
         }
 
-        setDebugState(makeDebugState("model loaded", [
-          'positions=' + (data.positions?.length ?? 0),
-          'indices=' + (data.indices?.length ?? 0),
-          'textures=' + (Array.isArray(data.texturePaths) ? data.texturePaths.length : 0),
-          'submeshes=' + (Array.isArray(data.submeshes) ? data.submeshes.length : 0),
-          'texturePath=' + (data.texturePath || 'none'),
-          'bounds min=' + (box ? formatVec3(box.min) : 'n/a'),
-          'bounds max=' + (box ? formatVec3(box.max) : 'n/a'),
-          'center=' + (nextFrame ? formatVec3(nextFrame.center) : 'n/a'),
-          'radius=' + (nextFrame ? nextFrame.radius.toFixed(2) : 'n/a'),
-          'camera target=' + (nextFrame ? formatVec3(nextFrame.center) : 'n/a'),
-          'camera position=' + (nextFrame ? formatVec3({
-            x: nextFrame.center.x,
-            y: nextFrame.center.y + nextFrame.radius * 0.04,
-            z: nextFrame.center.z + Math.max(1, nextFrame.radius) * 1.25,
-          }) : 'n/a'),
-          'texture candidates=' + (Array.isArray(data.debug?.textureCandidates) ? data.debug.textureCandidates.length : 0),
-        ], data.debug));
-
-        if (isLoginBackdrop && Array.isArray(data.renderPasses) && data.renderPasses.length) {
+        if (Array.isArray(data.renderPasses) && data.renderPasses.length) {
           const passTextures = new Map((data.passTextures || []).map(texture => [texture.passIndex, texture]));
           const mats = data.renderPasses.map((pass, materialIndex) => {
             const texture = makeDataTexture(passTextures.get(pass.index));
@@ -303,7 +380,6 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           });
           materialsRef.current = mats;
           setTextureMissing(![...passTextures.values()].some(texture => texture.rgba));
-          setDebugState(makeDebugState("render passes ready", ['passes=' + mats.length, 'textures=' + [...passTextures.values()].filter(texture => texture.rgba).length], data.debug));
         } else {
           materialsRef.current = [];
           if (data.textureRgba && data.textureW > 0 && data.textureH > 0) {
@@ -321,25 +397,22 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           } else {
             textureRef.current = null;
             setTextureMissing(true);
-            setDebugState(makeDebugState("no texture found", ["fallback diffuse path used", 'texturePath=' + (data.texturePath || "none")], data.debug));
           }
         }
 
         setLoading(false);
       })
       .catch(e => {
-        if (progressTimer) { clearTimeout(progressTimer); progressTimer = null; }
+        if (requestTimeout) { clearTimeout(requestTimeout); requestTimeout = null; }
         if (cancelled || modelKey.current !== key) return;
         setError(e.message);
-        setDebugState(makeDebugState("error", [e.message]));
         setLoading(false);
       });
 
     return () => {
       cancelled = true;
-      if (progressTimer) clearTimeout(progressTimer);
     };
-  }, [active, modelPath, worldmapMpqPath]);
+  }, [active, modelPath, worldmapMpqPath, glueModel?.modelConfig?.cameraIndex, glueModel?.modelConfig?.sequence, loadParticles]);
 
   if (!active) return null;
 
@@ -359,33 +432,40 @@ export default function GlueM2Viewer({ modelPath, active = true, title = 'Glue M
           Texture niet gevonden
         </div>
       )}
-      {debug && debugState.stage !== "idle" && (
-        <div className="glue-m2-debug">
-          <div className="glue-m2-debug-title">{debugState.stage}</div>
-          {(debugState.lines || []).map((line, idx) => (
-            <div key={idx} className="glue-m2-debug-line">{line}</div>
-          ))}
-        </div>
-      )}
       {mounted && (
         <Canvas
+          className="glue-m2-canvas"
           style={{ width: '100%', height: '100%' }}
-          key={embeddedCamera ? 'embedded-camera' : 'preview-camera'}
           camera={{ position: cameraState.position, fov: cameraState.fov, near: cameraState.near, far: cameraState.far }}
           gl={{ antialias: true, alpha: true }}
+          onCreated={({ gl }) => {
+            configureWowRenderer(gl);
+            gl.domElement.addEventListener('webglcontextlost', event => event.preventDefault(), false);
+          }}
         >
           <color attach="background" args={['#11131a']} />
+          {glueModel?.modelConfig?.fogFar > 0 && <fog attach="fog" args={['#11131a', Math.max(0, glueModel.modelConfig.fogNear), glueModel.modelConfig.fogFar]} />}
           <CameraRig state={cameraState} />
-          <ambientLight intensity={0.7} />
-          <directionalLight position={[4, 8, 5]} intensity={1.2} />
-          <directionalLight position={[-3, 3, -4]} intensity={0.25} />
+          <GlueLighting lights={lights} />
           {interactive && <OrbitControls
             enablePan={false}
             minDistance={cameraState.minDistance}
             maxDistance={cameraState.maxDistance}
             target={cameraState.target}
           />}
-          <Scene geoRef={geoRef} textureRef={textureRef} materialsRef={materialsRef} frameRef={frameRef} showHelpers={showHelpers} />
+          <Scene
+            geoRef={geoRef}
+            textureRef={textureRef}
+            materialsRef={materialsRef}
+            particleTexturesRef={particleTexturesRef}
+            frameRef={frameRef}
+            animationData={animationDataRef.current}
+            animationSequence={Number.isInteger(glueModel?.modelConfig?.sequence) ? glueModel.modelConfig.sequence : 0}
+            particleEmitters={particleEmittersRef.current}
+            glueModel={glueModel}
+            showHelpers={showHelpers}
+            modelScale={modelScale}
+          />
         </Canvas>
       )}
       {showLabel && title && <div className="glue-m2-label">{title}</div>}

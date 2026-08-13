@@ -88,6 +88,14 @@ function resolvedTextureFile(element, templates) {
   return child ? inheritedAttr(child, 'file', templates) || inheritedAttr(child, 'bgFile', templates) : '';
 }
 
+function resolvedTextureCoords(element, templates) {
+  const child = inheritedChild(element, TEXTURE_TAGS, templates);
+  const coords = child ? inheritedChild(child, ['TexCoords'], templates) : null;
+  if (!coords) return null;
+  const values = ['left', 'right', 'top', 'bottom'].map(name => Number(coords.getAttribute(name)));
+  return values.every(Number.isFinite) ? { left: values[0], right: values[1], top: values[2], bottom: values[3] } : null;
+}
+
 function resolvedText(element, templates, strings) {
   const raw = inheritedAttr(element, 'text', templates);
   if (!raw) return '';
@@ -167,6 +175,32 @@ export function parseGlueStrings(sources) {
   return strings;
 }
 
+function parseGlueModelPaths(sources) {
+  const paths = {};
+  for (const source of sources || []) {
+    if (!/\.lua$/i.test(source.path || '')) continue;
+    for (const match of String(source.text || '').matchAll(/([A-Za-z_$][\w$]*):SetModel\(\s*["']([^"']+)["']\s*\)/g)) {
+      paths[match[1]] = match[2].replace(/\//g, '\\');
+    }
+  }
+  return paths;
+}
+
+function parseGlueModelSettings(sources) {
+  const settings = {};
+  for (const source of sources || []) {
+    if (!/\.lua$/i.test(source.path || '')) continue;
+    const text = String(source.text || '');
+    for (const match of text.matchAll(/([A-Za-z_$][\w$]*):SetCamera\(\s*(\d+)\s*\)/g)) {
+      settings[match[1]] = { ...(settings[match[1]] || {}), cameraIndex: Number(match[2]) };
+    }
+    for (const match of text.matchAll(/([A-Za-z_$][\w$]*):SetSequence\(\s*(\d+)\s*\)/g)) {
+      settings[match[1]] = { ...(settings[match[1]] || {}), sequence: Number(match[2]) };
+    }
+  }
+  return settings;
+}
+
 export function normalizeBlpPath(value) {
   const path = String(value || '').trim().replace(/\//g, '\\');
   if (!path || path.includes('$') || path.includes('%')) return '';
@@ -176,6 +210,8 @@ export function normalizeBlpPath(value) {
 
 export function buildGlueScene(sources, entryPaths) {
   const strings = parseGlueStrings(sources);
+  const modelPaths = parseGlueModelPaths(sources);
+  const modelSettings = parseGlueModelSettings(sources);
   const documents = new Map();
   for (const source of sources || []) {
     if (!/\.xml$/i.test(source.path || '')) continue;
@@ -228,12 +264,21 @@ export function buildGlueScene(sources, entryPaths) {
           action,
           actionTargets: actionTargets(action),
           texturePath: normalizeBlpPath(resolvedTextureFile(element, templates)),
+          textureCoords: resolvedTextureCoords(element, templates),
           color: resolvedColor(element, templates),
           width: measured.width || fallback.width,
           height: measured.height || fallback.height,
           explicitWidth: measured.width > 0,
           explicitHeight: measured.height > 0,
           anchors: elementAnchors(element, templates, parentName),
+          modelConfig: ['Model', 'ModelFFX'].includes(element.tagName) ? {
+            modelPath: modelPaths[name] || modelPaths[rawName] || inheritedAttr(element, 'model', templates) || '',
+            ...(modelSettings[name] || modelSettings[rawName] || {}),
+            setAllPoints,
+            fogNear: Number(inheritedAttr(element, 'fogNear', templates) || 0),
+            fogFar: Number(inheritedAttr(element, 'fogFar', templates) || 0),
+            glow: Number(inheritedAttr(element, 'glow', templates) || 0),
+          } : null,
         };
         nodes.push(node);
         currentParent = node;

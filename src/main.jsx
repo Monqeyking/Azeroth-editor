@@ -5,7 +5,5 @@ import './styles/global.css';
 import './styles/editors.css';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>
+  <App />
 );
