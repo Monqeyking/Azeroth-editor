@@ -634,14 +634,17 @@ function parseSkin(buf) {
   return indices;
 }
 
-async function loadSkinData(reader, dataPath, modelPath) {
-  if (m2SkinCache.has(modelPath)) return m2SkinCache.get(modelPath);
+async function loadSkinData(reader, dataPath, modelPath, source = null) {
+  const cacheKey = source?.archivePath ? `${source.archivePath}|${modelPath}` : modelPath;
+  if (m2SkinCache.has(cacheKey)) return m2SkinCache.get(cacheKey);
   const stem = modelPath.replace(/\.m2$/i, '');
   for (const skinPath of [`${stem}00.skin`, `${stem}01.skin`, `${stem}00.SKIN`]) {
-    const skinBuf = reader.readM2Companion ? await reader.readM2Companion(dataPath, modelPath, skinPath) : await reader.readFileFromMpqs(dataPath, skinPath);
+    const skinBuf = source?.archivePath && reader.readFileFromMpqEntry
+      ? await reader.readFileFromMpqEntry(dataPath, source.archivePath, source.skinPath || skinPath)
+      : reader.readM2Companion ? await reader.readM2Companion(dataPath, modelPath, skinPath) : await reader.readFileFromMpqs(dataPath, skinPath);
     const skin = skinBuf ? parseSkinFile(skinBuf) : null;
     if (skin?.submeshes?.length) {
-      m2SkinCache.set(modelPath, skin);
+      m2SkinCache.set(cacheKey, skin);
       return skin;
     }
   }
@@ -740,21 +743,24 @@ function m2VariantKey(displayId) {
   return `display:${displayId}`;
 }
 
-async function getOrLoadM2Geometry(reader, dataPath, modelPath, log) {
+async function getOrLoadM2Geometry(reader, dataPath, modelPath, log, source = null) {
  // WotLK DBCs commonly retain .mdx names although the client archives store .m2 files.
   modelPath = modelPath.replace(/\.mdx$/i, '.m2');
-  if (m2GeometryCache.has(modelPath)) {
+  const cacheKey = source?.archivePath ? `${source.archivePath}|${modelPath}` : modelPath;
+  if (m2GeometryCache.has(cacheKey)) {
     log('geometrie cache hit:', modelPath);
-    return m2GeometryCache.get(modelPath);
+    return m2GeometryCache.get(cacheKey);
   }
 
-  const m2Buf = reader.readM2FromMpqs ? await reader.readM2FromMpqs(dataPath, modelPath) : await reader.readFileFromMpqs(dataPath, modelPath);
+  const m2Buf = source?.archivePath && reader.readFileFromMpqEntry
+    ? await reader.readFileFromMpqEntry(dataPath, source.archivePath, modelPath)
+    : reader.readM2FromMpqs ? await reader.readM2FromMpqs(dataPath, modelPath) : await reader.readFileFromMpqs(dataPath, modelPath);
   if (!m2Buf) return null;
 
   const m2 = parseM2(m2Buf);
   if (!m2) return null;
 
-  const skin = await loadSkinData(reader, dataPath, modelPath);
+  const skin = await loadSkinData(reader, dataPath, modelPath, source);
   if (!skin) return null;
 
   const geo = {
@@ -781,7 +787,7 @@ async function getOrLoadM2Geometry(reader, dataPath, modelPath, log) {
     } : null,
     skin,
   };
-  m2GeometryCache.set(modelPath, geo);
+  m2GeometryCache.set(cacheKey, geo);
   log('geometrie gecached:', modelPath);
   return geo;
 }
@@ -1039,11 +1045,85 @@ const CHAR_M2_PATHS = {
   12: ['Character\\Worgen\\Male\\WorgenMale.m2',      'Character\\Worgen\\Female\\WorgenFemale.m2'],
 };
 
-const WORGEN_HIDDEN_SUBMESHES = new Map([[3, 0], [4, 0], [73, 401], [82, 401]]);
+const WORGEN_MODEL_PROFILES = [
+  {
+    id: 'worgen-alpha', label: 'Alpha', race: 12,
+    match: signature => signature.submeshCount === 57 && signature.ids[41] === 0 && signature.ids[48] === 0,
+    hiddenSubmeshes: [
+      { index: 41, id: 0 }, { index: 48, id: 0 },
+      { index: 42, id: 401 }, { index: 52, id: 401 },
+    ],
+    excludeCharSectionFlags: 0x04,
+    excludeCharSectionColorIndices: [8],
+  },
+  {
+    id: 'worgen-release', label: 'Release', race: 12,
+    match: signature => (signature.submeshCount === 86 && signature.ids[3] === 0 && signature.ids[4] === 0) || signature.submeshCount === 76,
+    hiddenSubmeshes: [{ index: 3, id: 0 }, { index: 4, id: 0 }, { index: 73, id: 401 }, { index: 82, id: 401 }],
+    excludeCharSectionFlags: 0,
+  },
+];
 
-function applyCharacterSubmeshOverrides(race, submeshes, visible) {
+const WORGEN_HIDDEN_SUBMESHES = [{ index: 3, id: 0 }, { index: 4, id: 0 }, { index: 73, id: 401 }, { index: 82, id: 401 }];
+
+function skinSignature(skin) {
+  return {
+    submeshCount: skin?.submeshes?.length || 0,
+    ids: (skin?.submeshes || []).map(submesh => submesh.id),
+  };
+}
+
+function profileForSkin(race, skin) {
+  if (race !== 12) return null;
+  const signature = skinSignature(skin);
+  return WORGEN_MODEL_PROFILES.find(profile => profile.match(signature)) || null;
+}
+
+function publicModelProfile(profile) {
+  if (!profile) return null;
+  return {
+    id: profile.id,
+    label: profile.label,
+    excludeCharSectionFlags: profile.excludeCharSectionFlags,
+    excludeCharSectionColorIndices: profile.excludeCharSectionColorIndices || [],
+  };
+}
+
+async function findCharacterModelVariants(dataPath, modelPath, race) {
+  const reader = getMpqReader();
+  if (!reader?.findMpqFiles || !reader.readFileFromMpqEntry) return [];
+  const stem = modelPath.replace(/\.m2$/i, '');
+  const variants = [];
+  for (const archivePath of reader.findMpqFiles(dataPath)) {
+    const m2Buf = await reader.readFileFromMpqEntry(dataPath, archivePath, modelPath);
+    if (!m2Buf) continue;
+    let source = null;
+    for (const skinPath of [`${stem}00.skin`, `${stem}01.skin`, `${stem}00.SKIN`]) {
+      const skinBuf = await reader.readFileFromMpqEntry(dataPath, archivePath, skinPath);
+      const skin = skinBuf ? parseSkinFile(skinBuf) : null;
+      if (!skin?.submeshes?.length) continue;
+      const profile = profileForSkin(race, skin);
+      if (!profile) continue;
+      source = { archivePath, skinPath, profile, signature: skinSignature(skin) };
+      break;
+    }
+    if (!source || variants.some(variant => variant.id === source.profile.id)) continue;
+    variants.push({
+      id: source.profile.id,
+      label: source.profile.label,
+      profile: publicModelProfile(source.profile),
+      signature: source.signature,
+      source,
+    });
+  }
+  return variants;
+}
+
+function applyCharacterSubmeshOverrides(race, submeshes, visible, profile = null) {
   if (race !== 12) return visible;
-  return new Set([...visible].filter(index => WORGEN_HIDDEN_SUBMESHES.get(index) !== submeshes[index]?.id));
+  const hidden = profile?.hiddenSubmeshes || WORGEN_HIDDEN_SUBMESHES;
+  const hiddenKeys = new Set(hidden.map(item => `${item.index}:${item.id}`));
+  return new Set([...visible].filter(index => !hiddenKeys.has(`${index}:${submeshes[index]?.id}`)));
 }
 
 function candidateModelTextures(modelPath, geo, discovered = []) {
@@ -1229,7 +1309,20 @@ async function handleM2LoadModelByPath({
 }
 
 
-async function handleM2LoadCharModel({ race, gender, skinBlp, appearance = {}, enabledSubmeshIndices = null } = {}) {
+async function handleM2ListCharModelVariants({ race, gender } = {}) {
+  try {
+    const dataPath = getM2DataPath();
+    if (!dataPath) return { success: false, error: 'Geen MPQ pad ingesteld' };
+    const m2Path = CHAR_M2_PATHS[race]?.[gender];
+    if (!m2Path) return { success: false, error: `Onbekende race/gender: ${race}/${gender}` };
+    const variants = await findCharacterModelVariants(dataPath, m2Path, race);
+    return { success: true, data: variants.map(({ source, ...variant }) => ({ ...variant, archivePath: source.archivePath })) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+async function handleM2LoadCharModel({ race, gender, skinBlp, appearance = {}, enabledSubmeshIndices = null, modelVariantId = '' } = {}) {
   const log = () => {};
   try {
     const dataPath = getM2DataPath();
@@ -1240,13 +1333,17 @@ async function handleM2LoadCharModel({ race, gender, skinBlp, appearance = {}, e
     if (!m2Path) return { success: false, error: `Onbekende race/gender: ${race}/${gender}` };
 
     const reader = getMpqReader();
-    const geo = await getOrLoadM2Geometry(reader, dataPath, m2Path, log);
+    const variants = race === 12 ? await findCharacterModelVariants(dataPath, m2Path, race) : [];
+    const selectedVariant = variants.find(variant => variant.id === modelVariantId) || variants[0] || null;
+    const profile = selectedVariant?.source?.profile || null;
+    const geo = await getOrLoadM2Geometry(reader, dataPath, m2Path, log, selectedVariant?.source || null);
     if (!geo?.skin) return { success: false, error: `Model niet gevonden: ${m2Path}` };
     const extra = { race, sex: gender, skin: Number(appearance.skin) || 0, face: Number(appearance.face) || 0, hairStyle: Number(appearance.hairStyle) || 0, hairColor: Number(appearance.hairColor) || 0, facialHair: Number(appearance.facialHair) || 0 };
     const visible = applyCharacterSubmeshOverrides(
       race,
       geo.skin.submeshes,
       resolveVisibleGeosets(geo.skin.submeshes, null, extra, dbcData.charHair, dbcData.facialHair),
+      profile,
     );
     for (const [groupText, variant] of Object.entries(appearance.itemGeosets || {})) {
       const group = Number(groupText), targetId = group * 100 + 1 + Number(variant || 0);
@@ -1323,6 +1420,8 @@ async function handleM2LoadCharModel({ race, gender, skinBlp, appearance = {}, e
         textureW,
         textureH,
         modelPath:    m2Path,
+        modelVariantId: selectedVariant?.id || null,
+        modelVariant: publicModelProfile(profile),
         texturePath,
         submeshes,
         activeSubmeshIndices,
@@ -1336,6 +1435,7 @@ async function handleM2LoadCharModel({ race, gender, skinBlp, appearance = {}, e
           submeshes: geo.skin.submeshes,
         },        debug: {
           race, gender, skinBlp, appearance: extra,
+          modelVariantId: selectedVariant?.id || null,
           triangleCount: Math.floor(indexList.length / 3),
           textureLoaded: !!textureRgba,
           visibleSubmeshIndices: [...visible].sort((a, b) => a - b),
@@ -1413,6 +1513,7 @@ function registerM2Ipc(ipcMain, deps = {}) {
   ipcMain.handle('m2:loadModel', (_, payload) => handleM2LoadModel(payload));
   ipcMain.handle('m2:prefetch', (_, payload) => handleM2Prefetch(payload));
   ipcMain.handle('m2:loadModelByPath', (_, payload) => handleM2LoadModelByPath(payload));
+  ipcMain.handle('m2:listCharModelVariants', (_, payload) => handleM2ListCharModelVariants(payload));
   ipcMain.handle('m2:loadCharModel', (_, payload) => handleM2LoadCharModel(payload));
   ipcMain.handle('m2:pickModelPath', (_, payload) => handleM2PickModelPath(payload));
   ipcMain.handle('m2:searchAssets', (_, payload) => handleM2SearchAssets(payload));
@@ -1421,4 +1522,3 @@ function registerM2Ipc(ipcMain, deps = {}) {
 }
 
 module.exports = { registerM2Ipc };
-

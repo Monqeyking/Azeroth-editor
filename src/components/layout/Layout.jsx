@@ -6,10 +6,25 @@ import {
   Settings, Unplug, Terminal, ChevronDown, ChevronRight,
   BookOpen, Sparkles, GitBranch, Users, Palette, PackageOpen,
   Layers, ShoppingBag, Database, Globe, Hammer, Skull, LayoutGrid,
-  Trophy, Footprints, ScanFace, Box, Castle, FileSearch
+  Trophy, Footprints, ScanFace, Box, Castle, FileSearch, Activity, Server, Coins, ArrowRightLeft
 } from 'lucide-react';
 import ollieLogo from '../../assets/Ollie.png';
 import './Layout.css';
+
+const DASHBOARD_SECTION = {
+  id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, defaultPath: '/dashboard',
+  groups: [
+    {
+      id: 'dashboard-monitoring', label: 'Monitoring', icon: Activity,
+      items: [
+        { to: '/dashboard', icon: Server, label: 'Server Overview' },
+        { to: '/online-players', icon: Users, label: 'Online Players' },
+        { to: '/economy', icon: Coins, label: 'Economy Overview' },
+        { to: '/gold-flow', icon: ArrowRightLeft, label: 'Gold Flow' },
+      ],
+    },
+  ],
+};
 
 const NAV_SECTIONS = [
   {
@@ -207,9 +222,12 @@ export default function Layout() {
     });
   };
 
-  const isDashboardRoute = location.pathname === '/dashboard' || location.pathname === '/settings';
-  const activeSection = isDashboardRoute
-    ? null
+  const isDashboardWorkspace = location.pathname === '/dashboard' || location.pathname === '/online-players' || location.pathname === '/economy' || location.pathname === '/gold-flow';
+  const isDashboardRoute = isDashboardWorkspace || location.pathname === '/settings';
+  const activeSection = isDashboardWorkspace
+    ? DASHBOARD_SECTION
+    : isDashboardRoute
+      ? null
     : NAV_SECTIONS.find(section =>
         section.groups.some(group => group.items.some(item => location.pathname.startsWith(item.to)))
       ) || NAV_SECTIONS[0];
@@ -251,7 +269,7 @@ export default function Layout() {
           </div>
         </div>
         <nav className="topbar-tabs" aria-label="Main navigation">
-          <NavLink to="/dashboard" className={`topbar-tab${isDashboardRoute ? ' active' : ''}`}>
+          <NavLink to="/dashboard" className={`topbar-tab${isDashboardWorkspace ? ' active' : ''}`}>
             <LayoutDashboard size={14} />
             <span>Dashboard</span>
           </NavLink>

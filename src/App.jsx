@@ -4,6 +4,9 @@ import { ConnectionProvider } from './lib/ConnectionContext';
 import Layout from './components/layout/Layout';
 import ConnectPage from './pages/ConnectPage';
 import DashboardPage from './pages/DashboardPage';
+import OnlinePlayersPage from './pages/OnlinePlayersPage';
+import EconomyOverviewPage from './pages/EconomyOverviewPage';
+import GoldFlowPage from './pages/GoldFlowPage';
 import CreatureEditorPage from './pages/CreatureEditorPage';
 import CreatureDisplaysPage from './pages/CreatureDisplaysPage';
 import ItemEditorPage from './pages/ItemEditorPage';
@@ -55,6 +58,9 @@ const router = createHashRouter([
     children: [
       { index: true, element: <Navigate to="/dashboard" replace /> },
       { path: 'dashboard',          element: <DashboardPage /> },
+      { path: 'online-players',     element: <OnlinePlayersPage /> },
+      { path: 'economy',            element: <EconomyOverviewPage /> },
+      { path: 'gold-flow',          element: <GoldFlowPage /> },
       { path: 'server-config',      element: <DashboardPage /> },
       { path: 'creatures',          element: <CreatureEditorPage /> },
       { path: 'creature-displays',  element: <CreatureDisplaysPage /> },

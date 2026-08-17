@@ -10,7 +10,7 @@ A desktop editor for AzerothCore (WotLK 3.3.5a) built with Electron + React.
 | Editor | Description |
 |---|---|
 | **Creature Editor** | Full `creature_template` editing with model preview (Wowhead renderer), display info, stats, loot, flags |
-| **Trainer Spell Editor** | Manage trainer spells via `trainer_spell` + `npc_trainer`, edit `Spell.dbc` level requirements and `SkillLineAbility.dbc` trainability |
+| **Trainer Spell Editor** | Manage trainer spells via `trainer_spell` + `npc_trainer`, edit `Spell.dbc` level requirements and `SkillLineAbility.dbc` trainability, auto-create missing SkillLineAbility records with SkillLine selection |
 | **Vendor Editor** | `npc_vendor` items per creature entry |
 | **Item Editor** | Item stats, quality, bonding, display, spells |
 | **Item Set Editor** | `ItemSet.dbc` editing |
@@ -24,7 +24,7 @@ A desktop editor for AzerothCore (WotLK 3.3.5a) built with Electron + React.
 ### World & Tools
 | Tool | Description |
 |---|---|
-| **3D World Editor** | ADT terrain streaming (5×5 tile window), WDL low-res overview, spawn billboards, minimap textures, M2 model preview |
+| **3D World Editor** | Static-world ADT terrain streaming, WDL low-res overview, water, WMO/M2 placements, world-transform gizmo and staging to `output/World` |
 | **Spawn Map** | 2D overhead spawn map with zone overlay |
 | **Expansion Lock** | Toggle Outland/Northrend access via `disables` table + presets (Vanilla / TBC / WotLK) |
 

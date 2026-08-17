@@ -71,7 +71,7 @@ function CategorySelector({ label, records, selectedIdx, onSelect }) {
   );
 }
 
-export default function CharCreationPreview({ allRecords, race, gender, hasDataPath, preferOutput = false, textureRefreshKey = 0 }) {
+export default function CharCreationPreview({ allRecords, race, gender, hasDataPath, preferOutput = false, textureRefreshKey = 0, modelVariantId = '', modelVariantArchivePath = '' }) {
   const bySection = useMemo(() => {
     const m = new Map();
     for (const r of allRecords) {
@@ -124,6 +124,8 @@ export default function CharCreationPreview({ allRecords, race, gender, hasDataP
           appearance={{ face: currentFace?.variationIndex || 0, hairStyle: currentHair?.variationIndex || 0, hairColor: currentHair?.colorIndex || 0 }}
           preferOutput={preferOutput}
           textureRefreshKey={textureRefreshKey}
+          modelVariantId={modelVariantId}
+          modelVariantArchivePath={modelVariantArchivePath}
           active={hasDataPath}
         />
         {!hasDataPath && (

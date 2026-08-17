@@ -1,0 +1,39 @@
+.gold-flow-page .dashboard-header-actions { display: flex; align-items: center; gap: 8px; }
+.gold-flow-page .btn-ghost { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; }
+.gold-flow-controls { display: flex; align-items: center; gap: 8px; padding: 12px; }
+.gold-flow-controls select { min-height: 32px; padding: 0 9px; border: 1px solid var(--border); background: #332619; color: #d4c29f; font: inherit; }
+.gold-flow-search { display: flex; align-items: center; gap: 8px; flex: 1; max-width: 420px; min-height: 30px; padding: 0 10px; border: 1px solid var(--border); background: #332619; color: #c1ae8b; }
+.gold-flow-search input { width: 100%; border: 0; outline: 0; background: transparent; color: #e0cda8; font: inherit; }
+.gold-flow-search input::placeholder { color: #8d8069; }
+.gold-flow-result-count { margin-left: auto; color: var(--text-muted); font-size: 11px; white-space: nowrap; }
+.gold-flow-note { color: #bca66f; }
+.gold-flow-message { margin: 0 12px 12px; padding: 12px; border: 1px solid var(--border); background: #1b1e2a; color: var(--text-muted); font-size: 12px; }
+.gold-flow-message.error { border-color: #6b3f43; background: #29191d; color: #e5a2a2; }
+.gold-flow-message code, .gold-flow-footnote code { color: #e7c77e; }
+.gold-flow-grid { display: grid; grid-template-columns: 1fr; gap: 8px; padding: 0 12px 8px; }
+.gold-flow-bottom-grid { grid-template-columns: 1.35fr .65fr; padding-bottom: 18px; }
+.gold-flow-table-wrap { max-height: 460px; overflow: auto; }
+.gold-flow-table { min-width: 780px; }
+.gold-flow-table td strong { display: block; color: #eadbbd; font-weight: 600; }
+.gold-flow-muted { display: block; margin-top: 2px; color: var(--text-muted); font: 10px Consolas, monospace; }
+.gold-flow-table .money-cell { color: #e7c77e; white-space: nowrap; }
+.gold-flow-table .money-cell.negative { color: #d99a91; }
+.gold-flow-risk { display: inline-block; padding: 3px 7px; border: 1px solid currentColor; border-radius: 3px; font-size: 10px; white-space: nowrap; }
+.gold-flow-risk.high { color: #e29b91; background: rgba(190, 76, 76, .1); }
+.gold-flow-risk.medium { color: #d6b16d; background: rgba(196, 149, 59, .1); }
+.gold-flow-risk.low { color: #8dc29c; background: rgba(72, 154, 96, .08); }
+.gold-flow-date { color: var(--text-muted); white-space: nowrap; font: 11px Consolas, monospace; }
+.gold-flow-empty { padding: 28px 16px; color: var(--text-muted); text-align: center; font-size: 12px; }
+.gold-flow-explainer p { margin: 14px 14px 8px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
+.gold-flow-rule { display: flex; justify-content: space-between; gap: 12px; padding: 10px 14px; border-top: 1px solid var(--border); font-size: 11px; }
+.gold-flow-rule strong { color: #d4c29f; font-weight: 500; }
+.gold-flow-rule span { color: var(--text-muted); text-align: right; }
+.gold-flow-footnote { margin: 12px 14px 14px; padding-top: 10px; border-top: 1px solid var(--border); color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+
+@media (max-width: 950px) { .gold-flow-bottom-grid { grid-template-columns: 1fr; } }
+@media (max-width: 700px) {
+  .gold-flow-page .dashboard-header-actions { align-items: flex-end; flex-direction: column; }
+  .gold-flow-controls { align-items: stretch; flex-direction: column; }
+  .gold-flow-controls select, .gold-flow-search { max-width: none; width: 100%; }
+  .gold-flow-result-count { margin-left: 0; }
+}

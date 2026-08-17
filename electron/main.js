@@ -21,6 +21,7 @@ const { registerSoapIpc } = require('./soap-ipc');
 const { getRuntimeResourceProfile, registerSystemIpc } = require('./system-ipc');
 const { decodeBLP, reencodeBlpDxtSelective, rgbaToPNG } = require('./blp-codec');
 const { registerTalentAssetIpc } = require('./talent-assets-ipc');
+const { registerCharSectionsIpc } = require('./char-sections-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
 const { extractAdtMapTile } = require('./adt-map-extractor');
 const { mapIdForName, mapFileName, vmapTileFileName, mmapTileFileName, resolveServerTools, inspectVmapDependencies, runTargetVmap, runTargetMmap } = require('./adt-server-extractors');
@@ -84,6 +85,7 @@ registerSystemIpc(ipcMain, {
 
 registerDialogIpc(ipcMain, dialog, () => mainWindow);
 registerGlueIpc(ipcMain, { getMpqReader, getOutputRoot: getUiOutputRoot });
+registerCharSectionsIpc(ipcMain, { getMpqReader });
 
 // DBC field offsets for Spell.dbc (WotLK 3.3.5a)
 // Offset = MySQL column index 4 (each DBC field is 4 bytes)
@@ -6171,10 +6173,10 @@ ipcMain.handle('dbc:writeCharSections', async (_, dbcPath, records, stageOnly = 
 // Decode een BLP-texture uit de WoW Data folder (MPQ) of losse file en geef terug als PNG buffer.
 // dataPath mag een WoW Data root zijn (met MPQs) of een gewone map met uitgepakte BLPs.
 // Cached zowel RGBA als PNG base64 herhaalde lookups hoeven niet opnieuw te encoden.
-async function readBlpTextureFromSource(dataPath, blpPath) {
+async function readBlpTextureFromSource(dataPath, blpPath, archivePath = '') {
   try {
     if (!dataPath || !blpPath) return { success: false, error: 'dataPath of blpPath ontbreekt' };
-    const key = blpCacheKey(blpPath);
+    const key = `${archivePath || 'auto'}|${blpCacheKey(blpPath)}`;
     const hit = blpTextureCache.get(key);
     if (hit) {
       if (hit.pngBase64) return { success: true, w: hit.textureW, h: hit.textureH, png: hit.pngBase64, path: blpPath };
@@ -6184,7 +6186,10 @@ async function readBlpTextureFromSource(dataPath, blpPath) {
 
     let buf = null;
     const mpqReader = getMpqReader();
-    if (mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
+    if (archivePath && mpqReader.readFileFromMpqEntry) {
+      buf = await mpqReader.readFileFromMpqEntry(dataPath, archivePath, blpPath);
+    }
+    if (!buf && mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
       buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
     }
     if (!buf) {
@@ -6210,8 +6215,8 @@ async function readBlpTextureFromSource(dataPath, blpPath) {
   }
 }
 
-ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath) => {
-  return readBlpTextureFromSource(dataPath, blpPath);
+ipcMain.handle('dbc:readBlpTexture', async (_, dataPath, blpPath, archivePath = '') => {
+  return readBlpTextureFromSource(dataPath, blpPath, archivePath);
 });
 
 // Explicit user-selected recovery files (for example an export that was
@@ -6250,14 +6255,17 @@ ipcMain.handle('dbc:readOutputBlpTexture', async (_, blpPath) => {
 // maskBase64: grayscale buffer (w*h, 1 byte/pixel) >0 = bewerkt (zachte brush-randen tellen ook mee).
 // outRelPath: relatief pad (t.o.v. dataPath) waar de nieuwe BLP komt, bv.
 // "Character\\Human\\Female\\HumanFemaleSkin00_00_custom1.blp".
-ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false) => {
+ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false, archivePath = '') => {
   try {
     if (!dataPath || !blpPath || !outRelPath) {
       return { success: false, error: 'dataPath, blpPath of outRelPath ontbreekt' };
     }
     let buf = null;
     const mpqReader = getMpqReader();
-    if (mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
+    if (archivePath && mpqReader.readFileFromMpqEntry) {
+      buf = await mpqReader.readFileFromMpqEntry(dataPath, archivePath, blpPath);
+    }
+    if (!buf && mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
       buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
     }
     if (!buf) {

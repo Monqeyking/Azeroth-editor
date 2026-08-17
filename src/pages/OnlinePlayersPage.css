@@ -1,0 +1,62 @@
+.online-players-page .dashboard-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.online-players-page .btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 28px;
+  padding: 0 10px;
+}
+
+.online-players-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.online-players-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 220px;
+  max-width: 520px;
+  padding: 0 10px;
+  min-height: 32px;
+  background: #332619;
+  border: 1px solid var(--border);
+  color: #c1ae8b;
+}
+
+.online-players-search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #e0cda8;
+  font: inherit;
+}
+
+.online-players-search input::placeholder { color: #8d8069; }
+.online-players-count { margin-left: auto; color: var(--text-muted); font-size: 11px; }
+
+.online-players-panel { margin: 0 12px 14px; }
+.online-players-table-wrap { overflow-x: auto; }
+.online-players-table { min-width: 760px; }
+.online-players-table td strong { display: block; color: #eadbbd; font-weight: 600; }
+.online-player-guid { display: block; margin-top: 2px; color: var(--text-muted); font: 10px Consolas, monospace; }
+.online-players-table .money-cell { color: #e7c77e; white-space: nowrap; }
+.online-players-message, .online-players-empty { padding: 28px 16px; color: var(--text-muted); text-align: center; }
+.online-players-message.error { color: #db8d8d; }
+
+@media (max-width: 800px) {
+  .online-players-page .dashboard-header-actions { align-items: flex-end; flex-direction: column; }
+  .online-players-toolbar { align-items: stretch; flex-direction: column; }
+  .online-players-search { max-width: none; }
+  .online-players-count { margin-left: 0; }
+}

@@ -957,7 +957,7 @@ async function findArchivesForPaths(dataPath, blpPaths) {
 
 module.exports = {
   isDataPath, resolveDataPath, resolveLayeredSource, findMpqFiles, listWorldmapZones, readTileBuffer, readAdtBuffer, readAdtBufferLayered, readMinimapBlp, readMinimapBlpBatch, readMinimapBlpBatchLayered, readWdlBuffer, readWdtBuffer,
-  validateDataPath, readFileFromMpqs, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
+  validateDataPath, readFileFromMpqs, readFileFromMpqEntry, readBlpFromMpqs, collectListfilePaths, discoverCreatureBlps,
   buildBlpIndex, openArchive, findArchivesForPaths,
   getArchiveCacheStats,
   getMemoryCacheStats,

@@ -62,6 +62,8 @@ contextBridge.exposeInMainWorld('azeroth', {
     writeCharBaseInfo: (dbcPath, combos) => ipcRenderer.invoke('dbc:writeCharBaseInfo', dbcPath, combos),
     appendCharStartOutfit: (dbcPath, rows) => ipcRenderer.invoke('dbc:appendCharStartOutfit', dbcPath, rows),
     readCharSections: (dbcPath) => ipcRenderer.invoke('dbc:readCharSections', dbcPath),
+    readCharSectionsFile: (filePath) => ipcRenderer.invoke('dbc:readCharSectionsFile', filePath),
+    readCharSectionsFromMpq: (dataPath, archivePath) => ipcRenderer.invoke('dbc:readCharSectionsFromMpq', dataPath, archivePath),
     readCharSectionsTestOutput: () => ipcRenderer.invoke('dbc:readCharSectionsTestOutput'),
     exportCharSectionsCsv: (rows) => ipcRenderer.invoke('dbc:exportCharSectionsCsv', rows),
     readCreatureDisplayCreator: (dbcPath) => ipcRenderer.invoke('dbc:readCreatureDisplayCreator', dbcPath),
@@ -73,12 +75,12 @@ contextBridge.exposeInMainWorld('azeroth', {
     readGameObjectDisplayInfos: (dataPath, displayIds) => ipcRenderer.invoke('dbc:readGameObjectDisplayInfos', dataPath, displayIds),
     readMapNames: (dbcPath) => ipcRenderer.invoke('dbc:readMapNames', dbcPath),
     writeCharSections: (dbcPath, records, stageOnly = false) => ipcRenderer.invoke('dbc:writeCharSections', dbcPath, records, stageOnly),
-    readBlpTexture: (dataPath, blpPath) => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath),
+    readBlpTexture: (dataPath, blpPath, archivePath = '') => ipcRenderer.invoke('dbc:readBlpTexture', dataPath, blpPath, archivePath),
     readBlpFile: (filePath) => ipcRenderer.invoke('dbc:readBlpFile', filePath),
     readOutputBlpTexture: (blpPath) => ipcRenderer.invoke('dbc:readOutputBlpTexture', blpPath),
     readBlpTextures: (dataPath, blpPaths) => ipcRenderer.invoke('dbc:readBlpTextures', dataPath, blpPaths),
-    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false) =>
-      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput, noOverwrite),
+    writeBlpTextureEdit: (dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput = false, noOverwrite = false, archivePath = '') =>
+      ipcRenderer.invoke('dbc:writeBlpTextureEdit', dataPath, blpPath, editedRgbaBase64, maskBase64, outRelPath, stageOutput, noOverwrite, archivePath),
     bakeNpcTexture: (dataPath, extraId, rgbaBase64, maskBase64) =>
       ipcRenderer.invoke('dbc:bakeNpcTexture', dataPath, extraId, rgbaBase64, maskBase64),
     readCastTimes: (dbcPath) => ipcRenderer.invoke('dbc:readCastTimes', dbcPath),
@@ -191,6 +193,7 @@ contextBridge.exposeInMainWorld('azeroth', {
     loadModel:     (opts) => ipcRenderer.invoke('m2:loadModel', opts),
     loadModelByPath: (opts) => ipcRenderer.invoke('m2:loadModelByPath', opts),
     prefetch:      (opts) => ipcRenderer.invoke('m2:prefetch', opts),
+    listCharModelVariants: (opts) => ipcRenderer.invoke('m2:listCharModelVariants', opts),
     loadCharModel: (opts) => ipcRenderer.invoke('m2:loadCharModel', opts),
     pickModelPath: () => ipcRenderer.invoke('m2:pickModelPath'),
     searchAssets: (opts) => ipcRenderer.invoke('m2:searchAssets', opts),

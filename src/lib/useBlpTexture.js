@@ -9,7 +9,7 @@ function ensureConfigured(readBlpTextures) {
   configured = true;
 }
 
-export function useBlpTexture(blpPath) {
+export function useBlpTexture(blpPath, archivePath = '') {
   const { worldmapMpqPath, readBlpTextures, readBlpTexture } = useConnection();
   ensureConfigured(readBlpTextures);
 
@@ -22,7 +22,13 @@ export function useBlpTexture(blpPath) {
     if (!blpPath) { setState({ dataUrl: null, loading: false, error: null, w: 0, h: 0 }); return; }
     let cancelled = false;
     setState({ dataUrl: null, loading: true, error: null, w: 0, h: 0 });
-    requestBlpTexture(worldmapMpqPath, blpPath)
+    const request = archivePath
+      ? readBlpTexture(worldmapMpqPath, blpPath, archivePath).then(r => {
+        if (!r?.success || !r.png) throw new Error(r?.error || 'Niet gevonden');
+        return { dataUrl: `data:image/png;base64,${r.png}`, w: r.w, h: r.h };
+      })
+      : requestBlpTexture(worldmapMpqPath, blpPath);
+    request
       .then(r => {
         if (cancelled) return;
         setState({ dataUrl: r.dataUrl, loading: false, error: null, w: r.w, h: r.h });
@@ -31,7 +37,7 @@ export function useBlpTexture(blpPath) {
         // A failed batch must never blank the workshop. Retry this one texture through
         // the established single-BLP IPC path; it also covers a stale MPQ index.
         try {
-          const single = await readBlpTexture(worldmapMpqPath, blpPath);
+          const single = await readBlpTexture(worldmapMpqPath, blpPath, archivePath);
           if (cancelled) return;
           if (single?.success && single.png) { setState({ dataUrl: `data:image/png;base64,${single.png}`, loading: false, error: null, w: single.w, h: single.h }); return; }
         } catch {}
@@ -39,7 +45,7 @@ export function useBlpTexture(blpPath) {
         setState({ dataUrl: null, loading: false, error: e.message || 'Niet gevonden', w: 0, h: 0 });
       });
     return () => { cancelled = true; };
-  }, [worldmapMpqPath, blpPath, readBlpTexture]);
+  }, [worldmapMpqPath, blpPath, archivePath, readBlpTexture]);
 
   return state;
 }

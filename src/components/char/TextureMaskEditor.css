@@ -183,6 +183,8 @@
 .tme-source-swatches button { width:16px; height:16px; padding:0; border:1px solid rgba(255,255,255,.38); border-radius:50%; cursor:pointer; box-shadow:0 0 0 1px rgba(0,0,0,.5); }
 .tme-source-swatches button:hover, .tme-source-swatches button.active { outline:2px solid #ffcf63; outline-offset:2px; }
 .tme-source-swatches span { flex-basis:100%; color:#888; font-size:10px; line-height:1.3; }
+.tme-palette-colour-picker { display:flex; align-items:center; gap:4px; color:#aaa; font-size:10px; }
+.tme-palette-colour-picker input[type="color"] { width:24px; height:20px; padding:0; border:1px solid rgba(255,255,255,.28); background:none; }
 .tme-template-ok { color:#7fd6a0; font-size:11px; line-height:1.35; }
 .tme-field input[type="range"] { width: 100%; }
 .tme-field input[type="color"] { width: 100%; height: 28px; border: none; background: none; padding: 0; }
