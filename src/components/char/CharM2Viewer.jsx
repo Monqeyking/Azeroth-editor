@@ -302,7 +302,7 @@ export default function CharM2Viewer({ race, gender, skinBlp, skinExtraBlp = nul
       textureRef.current?.dispose?.(); const tex = new THREE.DataTexture(new Uint8Array(ctx.getImageData(0, 0, canvas.width, canvas.height).data), canvas.width, canvas.height, THREE.RGBAFormat); tex.needsUpdate = true; tex.flipY = false; textureRef.current = tex; setTextureVersion(v => v + 1);
     });
     return () => { cancelled = true; };
-  }, [skinRgba, skinRgbaFinal, textureLayers, active, readPreviewBlp, isCreatureModel, componentTransfer, componentPalette]);
+  }, [skinRgba, skinRgbaFinal, textureLayers, textureRefreshKey, active, readPreviewBlp, isCreatureModel, componentTransfer, componentPalette]);
 
   useEffect(() => {
     if (isCreatureModel || skinExtraRgba?.data) { if (skinExtraRgba?.data) setSkinExtraStatus('canvas'); return; }

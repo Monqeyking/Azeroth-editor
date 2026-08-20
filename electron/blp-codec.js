@@ -423,25 +423,99 @@ function nearestPaletteIndex(palette, r, g, b, cache) {
 // Character skin BLPs in this client are usually paletted BLP2 files. Keep
 // their native layout, but derive a deterministic palette from the completed
 // texture so skin and fur gradients retain their local shading after export.
-function encodeBlp2Paletted(rgba, width, height, alphaDepth = 0) {
+function sourcePaletteFromBlp(originalBuf, width, height) {
+  if (!originalBuf || originalBuf.length < 1172 || originalBuf.toString('ascii', 0, 4) !== 'BLP2' || originalBuf.readUInt8(8) !== 1
+    || originalBuf.readUInt32LE(12) !== width || originalBuf.readUInt32LE(16) !== height) return null;
+  const offset = originalBuf.readUInt32LE(20);
+  const size = originalBuf.readUInt32LE(84);
+  if (!offset || size < width * height || offset + width * height > originalBuf.length) return null;
+  const palette = Array.from({ length: 256 }, (_, index) => [
+    originalBuf[148 + index * 4 + 2],
+    originalBuf[148 + index * 4 + 1],
+    originalBuf[148 + index * 4],
+  ]);
+  return { palette, offset, size };
+}
+
+function paletteColourDistance(r, g, b, colour) {
+  const dr = r - colour[0], dg = g - colour[1], db = b - colour[2];
+  return dr * dr + dg * dg + db * db;
+}
+
+function buildSourceIndexedPalette(source, originalBuf, width, height) {
+  const indexed = sourcePaletteFromBlp(originalBuf, width, height);
+  if (!indexed) return null;
+  const bins = Array.from({ length: 256 }, () => new Map());
+  for (let i = 0; i < width * height; i++) {
+    const sourceIndex = originalBuf[indexed.offset + i];
+    const offset = i * 4;
+    const key = (source[offset] >> 3) | ((source[offset + 1] >> 3) << 5) | ((source[offset + 2] >> 3) << 10);
+    const bin = bins[sourceIndex].get(key) || [0, 0, 0, 0];
+    bin[0] += source[offset]; bin[1] += source[offset + 1]; bin[2] += source[offset + 2]; bin[3]++;
+    bins[sourceIndex].set(key, bin);
+  }
+  const palette = indexed.palette.map((colour, index) => {
+    let selected = null;
+    for (const bin of bins[index].values()) if (!selected || bin[3] > selected[3]) selected = bin;
+    return selected
+      ? [Math.round(selected[0] / selected[3]), Math.round(selected[1] / selected[3]), Math.round(selected[2] / selected[3])]
+      : colour;
+  });
+  const paletteAlpha = Array.from({ length: 256 }, (_, index) => originalBuf[148 + index * 4 + 3]);
+  const accentSamples = Buffer.alloc(width * height * 4);
+  let accentCount = 0;
+  for (let i = 0; i < width * height; i++) {
+    const sourceIndex = originalBuf[indexed.offset + i], sourceOffset = i * 4;
+    if (paletteColourDistance(source[sourceOffset], source[sourceOffset + 1], source[sourceOffset + 2], palette[sourceIndex]) <= 2500) continue;
+    accentSamples[sourceOffset] = source[sourceOffset];
+    accentSamples[sourceOffset + 1] = source[sourceOffset + 1];
+    accentSamples[sourceOffset + 2] = source[sourceOffset + 2];
+    accentSamples[sourceOffset + 3] = 255;
+    accentCount++;
+  }
+  return { ...indexed, palette, paletteAlpha, accentSamples, accentCount };
+}
+
+function encodeBlp2Paletted(rgba, width, height, alphaDepth = 0, originalBuf = null) {
   const source = Buffer.from(rgba);
-  const colours = buildAdaptiveBlpPalette(source);
+  const indexedPalette = buildSourceIndexedPalette(source, originalBuf, width, height);
+  const colours = indexedPalette?.palette || buildAdaptiveBlpPalette(source);
+  if (indexedPalette?.accentCount) {
+    const used = new Set(originalBuf.subarray(indexedPalette.offset, indexedPalette.offset + width * height));
+    const freeIndices = [];
+    for (let index = 0; index < 256; index++) if (!used.has(index)) freeIndices.push(index);
+    const accentColours = buildAdaptiveBlpPalette(indexedPalette.accentSamples);
+    for (let index = 0; index < Math.min(freeIndices.length, accentColours.length); index++) colours[freeIndices[index]] = accentColours[index];
+  }
   const palette = Buffer.alloc(1024);
   for (let i = 0; i < 256; i++) {
     const [r, g, b] = colours[Math.min(i, colours.length - 1)];
     palette[i * 4] = b;
     palette[i * 4 + 1] = g;
     palette[i * 4 + 2] = r;
-    palette[i * 4 + 3] = 255;
+    palette[i * 4 + 3] = indexedPalette?.paletteAlpha?.[i] ?? 255;
   }
   const mipChunks = [];
   let mipRgba = source, w = width, h = height;
   for (let mip = 0; mip < 16; mip++) {
     const pixels = w * h, indices = Buffer.alloc(pixels);
     const indexCache = new Map();
+    const sourceMipOffset = indexedPalette && originalBuf.readUInt32LE(20 + mip * 4);
+    const sourceMipSize = indexedPalette && originalBuf.readUInt32LE(84 + mip * 4);
+    const sourceIndices = sourceMipOffset && sourceMipSize >= pixels
+      ? originalBuf.subarray(sourceMipOffset, sourceMipOffset + pixels)
+      : null;
     for (let i = 0; i < pixels; i++) {
       const off = i * 4;
-      indices[i] = nearestPaletteIndex(colours, mipRgba[off], mipRgba[off + 1], mipRgba[off + 2], indexCache);
+      const baseIndex = sourceIndices?.[i];
+      const baseColour = baseIndex == null ? null : colours[baseIndex];
+      const baseDistance = baseColour == null ? Infinity : paletteColourDistance(mipRgba[off], mipRgba[off + 1], mipRgba[off + 2], baseColour);
+      // Keep the original palette index whenever it still represents the
+      // edited pixel. This preserves Blizzard's fur/detail index layout;
+      // only painted accents that no longer fit are remapped by colour.
+      indices[i] = baseDistance <= 2500
+        ? baseIndex
+        : nearestPaletteIndex(colours, mipRgba[off], mipRgba[off + 1], mipRgba[off + 2], indexCache);
     }
     let alpha = Buffer.alloc(0);
     if (alphaDepth === 8) { alpha = Buffer.alloc(pixels); for (let i = 0; i < pixels; i++) alpha[i] = mipRgba[i * 4 + 3]; }
@@ -467,7 +541,7 @@ function encodeBlp2Paletted(rgba, width, height, alphaDepth = 0) {
 function reencodeBlpDxtSelective(originalBuf, editedRgba, maskBool, w, h) {
   const encoding = originalBuf.readUInt8(8);
   const alphaEncoding = originalBuf.readUInt8(10);
-  if (encoding === 1) return encodeBlp2Paletted(editedRgba, w, h, originalBuf.readUInt8(9));
+  if (encoding === 1) return encodeBlp2Paletted(editedRgba, w, h, originalBuf.readUInt8(9), originalBuf);
   if (encoding !== 2 || ![0, 1, 7].includes(alphaEncoding)) {
     throw new Error(`Recolor ondersteunt deze BLP2 encoding nog niet (encoding ${encoding}, alpha ${alphaEncoding})`);
   }
@@ -531,6 +605,39 @@ function reencodeBlpDxtSelective(originalBuf, editedRgba, maskBool, w, h) {
   }
   return out;
 }
+
+function getBlp2Format(buf) {
+  if (!buf || buf.length < 20 || buf.toString('ascii', 0, 4) !== 'BLP2') return null;
+  return {
+    encoding: buf.readUInt8(8),
+    alphaDepth: buf.readUInt8(9),
+    alphaEncoding: buf.readUInt8(10),
+    hasMips: buf.readUInt8(11),
+    width: buf.readUInt32LE(12),
+    height: buf.readUInt32LE(16),
+  };
+}
+
+function canonicalWorgenTextureTemplatePath(texturePath) {
+  const normalized = String(texturePath || '').replace(/\//g, '\\');
+  if (!/^character\\worgen\\/i.test(normalized)) return null;
+  const fileName = normalized.split('\\').pop() || '';
+  if (!/^(?:worgen(?:male|female)(?:skin|facelower|faceupper)\d*|hair\d+)_\d+(?:_extra)?\.blp$/i.test(fileName)) return null;
+  return normalized.replace(/_(\d+)(?=(?:_extra)?\.blp$)/i, match => '_'.padEnd(match.length, '0'));
+}
+
+function assertWorgenTextureTemplate(buf, texturePath, width, height) {
+  const format = getBlp2Format(buf);
+  if (!format) throw new Error(`Worgen BLP-template is ongeldig: ${texturePath}`);
+  if (format.width !== width || format.height !== height) {
+    throw new Error(`Worgen BLP-template heeft ${format.width}x${format.height}; verwacht ${width}x${height}: ${texturePath}`);
+  }
+  const expectedAlphaDepth = /(?:^|\\)hair\d+_\d+(?:_extra)?\.blp$/i.test(String(texturePath || '').replace(/\//g, '\\')) ? 8 : 0;
+  if (format.encoding !== 1 || format.alphaDepth !== expectedAlphaDepth || format.alphaEncoding !== 8) {
+    throw new Error(`Worgen BLP-template heeft verkeerd formaat (${format.encoding}/${format.alphaDepth}/${format.alphaEncoding}); verwacht paletted 1/${expectedAlphaDepth}/8: ${texturePath}`);
+  }
+  return format;
+}
 // PNG schrijven zonder externe library (DEFLATE via zlib)
 const zlib = require('zlib');
 
@@ -579,5 +686,8 @@ function rgbaToPNG(rgba, w, h) {
 module.exports = {
   decodeBLP,
   reencodeBlpDxtSelective,
+  getBlp2Format,
+  canonicalWorgenTextureTemplatePath,
+  assertWorgenTextureTemplate,
   rgbaToPNG,
 };

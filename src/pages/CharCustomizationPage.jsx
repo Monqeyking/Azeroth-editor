@@ -38,6 +38,8 @@ function getCharacterTextureFamily(texturePath) {
   return match?.[1] || null;
 }
 
+const normalizeTexturePath = value => String(value || '').replace(/\//g, '\\').toLowerCase();
+
 function findRaceTextureCollisions(records) {
   const byRace = new Map();
   for (const row of records || []) {
@@ -83,7 +85,7 @@ const componentMappingFromPath = value => {
 };
 const linkedSourcePathFor = (outputPath, row, provenance) => {
   if (!outputPath) return null;
-  const key = String(outputPath).toLowerCase();
+  const key = normalizeTexturePath(outputPath);
   const linked = provenance?.linkedTextureSources?.[key];
   if (linked) return linked;
   const sourceColor = Number(provenance?.sourceColorIndex);
@@ -109,7 +111,9 @@ const replaceColorIndexInPath = (texturePath, sourceColor, targetColor) => {
   // Most character files end in _<colour>.blp; Skin Extra is the exception:
   // WorgenMaleSkin00_02_Extra.blp still has 02 as its colour slot.
   const match = value.match(/_(\d+)(?=(?:_extra)?\.blp$)/i);
-  if (match && Number(match[1]) === source) {
+  const fileName = value.replace(/\\/g, '/').split('/').pop() || '';
+  const isHairColourPath = /^hair\d+_\d+(?:_extra)?\.blp$/i.test(fileName);
+  if (match && (Number(match[1]) === source || isHairColourPath)) {
     const digits = match[1];
     const start = match.index + 1;
     return `${value.slice(0, start)}${String(targetColor).padStart(digits.length, '0')}${value.slice(start + digits.length)}`;
@@ -233,7 +237,7 @@ function applyAtlasPasses(image, passes, sourceWidth, sourceHeight, protectedMas
   }
   return new ImageData(rgba, image.width, image.height);
 }
-async function stageLinkedTexture(dataPath, texturePath, outputPath, targetColor, strength, protectDetails, transfer = null, copyOnly = false, preferStagedSource = true, archivePath = '') {
+async function stageLinkedTexture(dataPath, texturePath, outputPath, targetColor, strength, transfer = null, copyOnly = false, preferStagedSource = true, archivePath = '') {
   if (!texturePath) return null;
   // A second custom colour set may be based on an already staged colour set.
   // Prefer that staged BLP before falling back to the untouched client asset.
@@ -329,6 +333,55 @@ async function stageLinkedTexture(dataPath, texturePath, outputPath, targetColor
   }
   const result = await window.azeroth.dbc.writeBlpTextureEdit(dataPath, texturePath, bytesToBase64(new Uint8Array(recolored.buffer)), bytesToBase64(mask), outputPath, true, false, archivePath);
   return result?.success ? result.path : null;
+}
+
+async function stageTextureParts({ items, batchExports = [], exportedBySource = new Map(), baseSection, dataPath, targetColor, strength, archivePath, copyOnly, preferStagedSource, sourceFor, outputFor, transferFor }) {
+  const staged = new Map();
+  const exports = [];
+  const exportedSlots = new Set(batchExports.filter(item => item.baseSection === baseSection && item.rowId != null).map(item => `${item.rowId}:${item.field}`));
+  const exportedPaths = new Set(batchExports.filter(item => item.baseSection === baseSection).map(item => normalizeTexturePath(item.sourcePath)));
+  const seenPaths = new Set();
+  for (const item of items) {
+    const currentPath = item.path;
+    const currentKey = normalizeTexturePath(currentPath);
+    const editedPath = exportedBySource.get(currentKey);
+    if (editedPath) {
+      staged.set(currentPath, editedPath);
+      continue;
+    }
+    if (!currentPath || exportedSlots.has(`${item.rowId}:${item.field}`) || exportedPaths.has(currentKey) || seenPaths.has(currentKey)) continue;
+    seenPaths.add(currentKey);
+    const sourcePath = sourceFor(item, currentPath, currentKey);
+    if (!sourcePath) continue;
+    const outputPath = outputFor(item, sourcePath, currentPath);
+    if (!outputPath) continue;
+    if (normalizeTexturePath(outputPath) === currentKey) {
+      staged.set(currentPath, currentPath);
+      continue;
+    }
+    const written = await stageLinkedTexture(dataPath, sourcePath, outputPath, targetColor, strength, transferFor?.(item) || null, copyOnly, preferStagedSource, archivePath);
+    if (!written) continue;
+    staged.set(currentPath, written);
+    if (item.rowId != null) exports.push({ ...item, path: written, sourcePath: currentPath, baseSection });
+  }
+  return { staged, exports };
+}
+
+function applyTextureExports(records, exports, sourceRow) {
+  return records.map(row => {
+    let updated = row;
+    for (const part of exports) {
+      if (!part?.field || !part?.path) continue;
+      const exactSlot = part.rowId != null && row.id === part.rowId;
+      const sharedSource = !!part.sourcePath
+        && row.race === sourceRow.race
+        && row.sex === sourceRow.sex
+        && row.baseSection === part.baseSection
+        && normalizeTexturePath(row[part.field]) === normalizeTexturePath(part.sourcePath);
+      if (exactSlot || sharedSource) updated = { ...updated, [part.field]: part.path };
+    }
+    return updated;
+  });
 }
 
 function TextureThumb({ blpPath, size = 56, preferOutput = false, refreshKey = 0, archivePath = '' }) {
@@ -530,7 +583,7 @@ function ColorSetWorkspace({ records, race, gender, hasDataPath, preferOutput = 
     }
     return [...unique.values()];
   }, [records, race, gender]);
-  const hair = hairRows[0] || null;
+  const hair = hairRows.find(row => row.colorIndex === skin?.colorIndex) || hairRows[0] || null;
   const layers = [
     ...(face ? [{ path: face.tex1, region: 'face-lower' }, { path: face.tex2, region: 'face-upper' }] : []),
     ...(hair?.tex1 ? [{ path: hair.tex1, region: 'hair-primary' }] : []),
@@ -757,7 +810,7 @@ export default function CharCustomizationPage() {
   const editingSourceBlpPath = useMemo(() => {
     if (!editingTexRow?.[editingTextureField] || !editingProvenance) return null;
     const currentPath = editingTexRow[editingTextureField];
-    return editingProvenance.linkedTextureSources?.[currentPath.toLowerCase()]
+    return editingProvenance.linkedTextureSources?.[normalizeTexturePath(currentPath)]
       || replaceColorIndexInPath(currentPath, editingTexRow.colorIndex, editingProvenance.sourceColorIndex);
   }, [editingTexRow, editingTextureField, editingProvenance]);
   const editorTextureParts = useMemo(() => {
@@ -765,8 +818,20 @@ export default function CharCustomizationPage() {
     const row = editingTexRow;
     const sourceColor = editingProvenance?.sourceColorIndex ?? row.colorIndex;
     const nextColor = allRecords ? nextColorIndexFor(row) : row.colorIndex + 1;
-    const sourceFor = path => editingProvenance?.linkedTextureSources?.[String(path).toLowerCase()] || (editingProvenance ? replaceColorIndexInPath(path, sourceColor, editingProvenance.sourceColorIndex) : path);
-    const outputFor = path => editorSaveMode === 'update' ? path : (hasColorIndexReplacement(path, row.colorIndex, nextColor) ? replaceColorIndexInPath(path, row.colorIndex, nextColor) : null);
+    const sourceFor = path => editingProvenance?.linkedTextureSources?.[normalizeTexturePath(path)]
+      || (editingProvenance ? replaceColorIndexInPath(path, row.colorIndex, sourceColor) : path);
+    const outputFor = path => {
+      if (editorSaveMode === 'update') {
+        // A previously created set can still have Hair00_00 in CharSections
+        // when an older save missed the Hair export. Give that derived colour
+        // its own staged filename before writing the manual Hair edit.
+        if (editingProvenance && hasColorIndexReplacement(path, sourceColor, row.colorIndex)) {
+          return replaceColorIndexInPath(path, sourceColor, row.colorIndex);
+        }
+        return path;
+      }
+      return hasColorIndexReplacement(path, row.colorIndex, nextColor) ? replaceColorIndexInPath(path, row.colorIndex, nextColor) : null;
+    };
     if (row.baseSection !== 0) return [{ label: `Texture · Color ${row.colorIndex}`, path: row[editingTextureField], type: row.baseSection === 3 ? 'hair' : null, recordId: row.id, field: editingTextureField, baseSection: row.baseSection, sourcePath: sourceFor(row[editingTextureField]), writeSourcePath: sourceFor(row[editingTextureField]), outputPath: outputFor(row[editingTextureField]) }];
     const parts = [
       { label: 'Skin atlas', path: row.tex1, type: 'skin-atlas', recordId: row.id, field: 'tex1', baseSection: 0, sourcePath: sourceFor(row.tex1), writeSourcePath: sourceFor(row.tex1), outputPath: outputFor(row.tex1) || editorOutputPath },
@@ -786,7 +851,7 @@ export default function CharCustomizationPage() {
     const hairRows = allRecords.filter(item => item.race === row.race && item.sex === row.sex && item.baseSection === 3 && item.colorIndex === row.colorIndex && item.tex1 && (row.flags === 5 ? item.flags === 5 : ![5, 8].includes(item.flags)));
     const seenHair = new Set();
     for (const hair of hairRows) {
-      const key = hair.tex1.toLowerCase();
+      const key = normalizeTexturePath(hair.tex1);
       if (seenHair.has(key)) continue;
       seenHair.add(key);
       parts.push({ label: `Hair colour ${String(hair.colorIndex).padStart(2, '0')} · style ${hair.variationIndex}`, path: hair.tex1, type: 'hair', recordId: hair.id, field: 'tex1', baseSection: 3, sourcePath: sourceFor(hair.tex1), writeSourcePath: sourceFor(hair.tex1), outputPath: outputFor(hair.tex1) });
@@ -830,7 +895,6 @@ export default function CharCustomizationPage() {
     if (!sourceRow || !allRecords) return { success: false, error: 'No source colour set is loaded.' };
     const newRelPath = exportResult?.path;
     const targetSetFlags = exportResult?.targetSetFlags === 5 ? 5 : 17;
-    const includeLinkedHairColor = !!exportResult?.includeLinkedHairColor;
     if (!newRelPath) return { success: false, error: 'The BLP export did not return an output path.' };
     const requestedSaveMode = exportResult?.saveMode || editorSaveMode;
 
@@ -842,7 +906,59 @@ export default function CharCustomizationPage() {
     };
     try {
 
-    const batchExports = Array.isArray(exportResult?.exports) ? exportResult.exports.filter(item => item?.path) : [];
+    let batchExports = Array.isArray(exportResult?.exports) ? exportResult.exports.filter(item => item?.path) : [];
+    const existingProvenance = colorSetProvenanceStore.get(sourceRow.race, sourceRow.sex, sourceRow.colorIndex);
+    if (requestedSaveMode === 'update' && sourceRow.baseSection === 0 && sourceField === 'tex1' && existingProvenance) {
+      const sourceColor = Number(existingProvenance.sourceColorIndex);
+      if (Number.isInteger(sourceColor)) {
+        const painterTransfer = {
+          painter: {
+            targetColor: exportResult.targetColor,
+            strength: exportResult.strength,
+            paletteBrush: exportResult.recoveryTransfer?.mode !== 'flat',
+            paletteColors: exportResult.recoveryTransfer?.paletteColors || [],
+            preserveShading: exportResult.recoveryTransfer?.preservePaintShading !== false,
+          },
+        };
+        const linkedRows = (baseSection, fields) => allRecords
+          .filter(row => row.race === sourceRow.race && row.sex === sourceRow.sex && row.baseSection === baseSection && row.colorIndex === sourceRow.colorIndex)
+          .flatMap(row => fields.map(field => ({ path: row[field], rowId: row.id, field, baseSection })));
+        const stagedHairExports = await stageTextureParts({
+          items: linkedRows(3, ['tex1', 'tex2', 'tex3']),
+          batchExports,
+          baseSection: 3,
+          dataPath: worldmapMpqPath,
+          targetColor: exportResult.targetColor,
+          strength: exportResult.strength,
+          archivePath: modelVariantArchivePath,
+          copyOnly: false,
+          preferStagedSource: false,
+          sourceFor: (item, currentPath, currentKey) => existingProvenance.linkedTextureSources?.[currentKey]
+            || (sourceColor !== sourceRow.colorIndex ? replaceColorIndexInPath(currentPath, sourceRow.colorIndex, sourceColor) : null),
+          outputFor: (_item, sourcePath, currentPath) => hasColorIndexReplacement(sourcePath, sourceColor, sourceRow.colorIndex)
+            ? replaceColorIndexInPath(sourcePath, sourceColor, sourceRow.colorIndex)
+            : currentPath,
+          transferFor: () => painterTransfer,
+        });
+        batchExports = [...batchExports, ...stagedHairExports.exports];
+        const stagedExtraExports = await stageTextureParts({
+          items: linkedRows(0, ['tex2', 'tex3']),
+          batchExports,
+          baseSection: 0,
+          dataPath: worldmapMpqPath,
+          targetColor: exportResult.targetColor,
+          strength: exportResult.strength,
+          archivePath: modelVariantArchivePath,
+          copyOnly: true,
+          preferStagedSource: false,
+          sourceFor: (item, currentPath, currentKey) => existingProvenance.linkedTextureSources?.[currentKey]
+            || (item.field === 'tex2' && item.rowId === sourceRow.id ? existingProvenance.sourceExtraPath : null)
+            || (sourceColor !== sourceRow.colorIndex ? replaceColorIndexInPath(currentPath, sourceRow.colorIndex, sourceColor) : null),
+          outputFor: (_item, _sourcePath, currentPath) => currentPath,
+        });
+        batchExports = [...batchExports, ...stagedExtraExports.exports];
+      }
+    }
     if (requestedSaveMode === 'update' && batchExports.length > 1) {
       let rebuilt = 0, failed = 0;
       for (const part of batchExports) {
@@ -877,18 +993,12 @@ export default function CharCustomizationPage() {
             if (batchExports.some(item => item.baseSection === 1 && String(item.sourcePath || '').toLowerCase() === String(outputPath).toLowerCase())) continue;
             const originalPath = linkedSourcePathFor(outputPath, partRow, partProvenance);
             if (!originalPath) { failed++; continue; }
-            const staged = await stageLinkedTexture(worldmapMpqPath, originalPath, outputPath, exportResult.targetColor, exportResult.strength, component.startsWith('face-'), transferFor(component), false, false, modelVariantArchivePath);
+            const staged = await stageLinkedTexture(worldmapMpqPath, originalPath, outputPath, exportResult.targetColor, exportResult.strength, transferFor(component), false, false, modelVariantArchivePath);
             if (staged) rebuilt++; else failed++;
           }
         }
       }
-      setAllRecords(prev => prev.map(row => {
-        const part = batchExports.find(item => {
-          if (item.rowId != null && row.id === item.rowId) return true;
-          return row.race === sourceRow.race && row.sex === sourceRow.sex && row.baseSection === item.baseSection && String(row[item.field] || '').toLowerCase() === String(item.sourcePath || '').toLowerCase();
-        });
-        return part ? { ...row, [part.field]: part.path } : row;
-      }));
+      setAllRecords(prev => applyTextureExports(prev, batchExports, sourceRow));
       setSelectedId(sourceRow.id);
       setDirty(true);
       setTextureRefreshKey(value => value + 1);
@@ -897,7 +1007,6 @@ export default function CharCustomizationPage() {
       return { success: true };
     }
 
-    const existingProvenance = colorSetProvenanceStore.get(sourceRow.race, sourceRow.sex, sourceRow.colorIndex);
     if (sourceRow.baseSection === 0 && requestedSaveMode === 'update' && (sourceField === 'tex1' || sourceField === 'tex2')) {
       let rebuilt = 0, failed = 0;
       if (sourceField === 'tex1' && exportResult.recoveryTransfer) {
@@ -933,7 +1042,7 @@ export default function CharCustomizationPage() {
           if (batchExports.some(item => item.baseSection === 1 && String(item.sourcePath || '').toLowerCase() === String(outputPath).toLowerCase())) continue;
           const originalPath = linkedSourcePathFor(outputPath, sourceRow, existingProvenance);
           if (!originalPath) { failed++; continue; }
-          const staged = await stageLinkedTexture(worldmapMpqPath, originalPath, outputPath, exportResult.targetColor, exportResult.strength, component.startsWith('face-'), transferFor(component), false, false, modelVariantArchivePath);
+          const staged = await stageLinkedTexture(worldmapMpqPath, originalPath, outputPath, exportResult.targetColor, exportResult.strength, transferFor(component), false, false, modelVariantArchivePath);
           if (staged) rebuilt++; else failed++;
         }
       }
@@ -973,10 +1082,16 @@ export default function CharCustomizationPage() {
       const templates = allRecords.filter(r =>
         r.race === sourceRow.race && r.sex === sourceRow.sex &&
         r.colorIndex === sourceRow.colorIndex &&
+        // Worgen DK faces are shared `_00` textures, but their CharSections
+        // rows are still required in every colour matrix for the client.
+        // Alpha hides these slots in the UI; it must not drop them on export.
+        (r.race === 12 && r.baseSection === 1 && r.flags === 5
+          ? true
+          :
         (r.race !== 12 || (
           !(excludedModelFlags && (r.flags & excludedModelFlags))
           && !excludedModelColorIndices.includes(Number(r.colorIndex))
-        )) &&
+        ))) &&
         linkedSections.has(r.baseSection) && (
           sourceSetFlags === 5
             ? (r.baseSection === 1 ? r.flags === 5 : r.flags === 5)
@@ -1003,11 +1118,12 @@ export default function CharCustomizationPage() {
         return passes.length ? { mode: 'flat', passes, width: exportResult.sourceWidth, height: exportResult.sourceHeight } : null;
       };
       const facePaths = [...new Set(templates.filter(r => r.baseSection === 1).flatMap(r => [r.tex1, r.tex2, r.tex3]).filter(Boolean))];
+      const sharedDkFacePaths = new Set(templates.filter(r => r.baseSection === 1 && r.flags === 5).flatMap(r => [r.tex1, r.tex2, r.tex3]).filter(Boolean));
       const underwearPaths = [...new Set(templates.filter(r => r.baseSection === 4).flatMap(r => [r.tex1, r.tex2, r.tex3]).filter(Boolean))];
       const skinExtraPaths = [...new Set(templates.filter(r => r.baseSection === 0).flatMap(r => [r.tex2, r.tex3]).filter(Boolean))];
       const supportPaths = [...new Set(templates.filter(r => r.baseSection === 2).flatMap(r => [r.tex1, r.tex2, r.tex3]).filter(Boolean))];
       const hairPaths = [...new Set(templates.filter(r => r.baseSection === 3).flatMap(r => [r.tex1, r.tex2, r.tex3]).filter(Boolean))];
-      const exportedBySource = new Map(batchExports.map(item => [String(item.sourcePath || '').toLowerCase(), item.path]).filter(([sourcePath]) => sourcePath));
+      const exportedBySource = new Map(batchExports.map(item => [normalizeTexturePath(item.sourcePath), item.path]).filter(([sourcePath]) => sourcePath));
       // Some CharSections links are deliberately shared/static (for example
       // Worgen underwear). They are valid in a new colour set without a
       // colour suffix and must stay linked instead of blocking registration.
@@ -1015,27 +1131,38 @@ export default function CharCustomizationPage() {
       const stagedSkinBase = new Map();
       if (!isSkinAtlasExport && sourceRow.tex1) {
         const outputPath = replaceColorIndexInPath(sourceRow.tex1, sourceRow.colorIndex, nextColor);
-        const staged = await stageLinkedTexture(worldmapMpqPath, sourceRow.tex1, outputPath, exportResult.targetColor, exportResult.strength, false, null, true, true, modelVariantArchivePath);
+        const staged = await stageLinkedTexture(worldmapMpqPath, sourceRow.tex1, outputPath, exportResult.targetColor, exportResult.strength, null, true, true, modelVariantArchivePath);
         if (staged) stagedSkinBase.set(sourceRow.tex1, staged);
       }
-      const stagedSkinExtras = new Map();
-      for (const extraPath of skinExtraPaths) {
-        const outputPath = replaceColorIndexInPath(extraPath, sourceRow.colorIndex, nextColor);
-        const staged = extraPath === sourceTexturePath
-          ? newRelPath
-          : await stageLinkedTexture(worldmapMpqPath, extraPath, outputPath, exportResult.targetColor, exportResult.strength, false, null, true, true, modelVariantArchivePath);
-        if (staged) stagedSkinExtras.set(extraPath, staged);
-      }
+      const stageNewSetParts = async (paths, baseSection, copyOnly, preferStagedSource, transfer) => (await stageTextureParts({
+        items: paths.map(path => ({ path, baseSection })),
+        exportedBySource,
+        baseSection,
+        dataPath: worldmapMpqPath,
+        targetColor: exportResult.targetColor,
+        strength: exportResult.strength,
+        archivePath: modelVariantArchivePath,
+        copyOnly,
+        preferStagedSource,
+        sourceFor: (_item, path) => path,
+        outputFor: (_item, path) => path === sourceTexturePath ? newRelPath : replaceColorIndexInPath(path, sourceRow.colorIndex, nextColor),
+        transferFor: () => transfer,
+      })).staged;
+      const stagedSkinExtras = await stageNewSetParts(skinExtraPaths, 0, true, true, null);
       const stagedFaces = new Map();
       for (const facePath of facePaths) {
-        const exportedFace = exportedBySource.get(String(facePath).toLowerCase());
+        if (sharedDkFacePaths.has(facePath)) {
+          stagedFaces.set(facePath, facePath);
+          continue;
+        }
+        const exportedFace = exportedBySource.get(normalizeTexturePath(facePath));
         if (exportedFace) {
           stagedFaces.set(facePath, exportedFace);
           continue;
         }
         const component = componentMappingFromPath(facePath);
         const outputPath = replaceColorIndexInPath(facePath, sourceRow.colorIndex, nextColor);
-        const staged = await stageLinkedTexture(worldmapMpqPath, facePath, outputPath, exportResult.targetColor, exportResult.strength, true, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport, true, modelVariantArchivePath);
+        const staged = await stageLinkedTexture(worldmapMpqPath, facePath, outputPath, exportResult.targetColor, exportResult.strength, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport, true, modelVariantArchivePath);
         if (staged) stagedFaces.set(facePath, staged);
       }
       const stagedUnderwear = new Map();
@@ -1046,7 +1173,7 @@ export default function CharCustomizationPage() {
           stagedUnderwear.set(underwearPath, underwearPath);
           continue;
         }
-        const staged = await stageLinkedTexture(worldmapMpqPath, underwearPath, outputPath, exportResult.targetColor, exportResult.strength, false, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport, true, modelVariantArchivePath);
+        const staged = await stageLinkedTexture(worldmapMpqPath, underwearPath, outputPath, exportResult.targetColor, exportResult.strength, isSkinAtlasExport ? transferFor(component) : null, !isSkinAtlasExport, true, modelVariantArchivePath);
         if (staged) stagedUnderwear.set(underwearPath, staged);
       }
       const stagedSupport = new Map();
@@ -1057,37 +1184,20 @@ export default function CharCustomizationPage() {
         if (sourceRow.race === 12) stagedSupport.set(supportPath, canonicalWorgenFeaturePath(supportPath, sourceRow.colorIndex));
         else {
           const outputPath = replaceColorIndexInPath(supportPath, sourceRow.colorIndex, nextColor);
-          const staged = await stageLinkedTexture(worldmapMpqPath, supportPath, outputPath, exportResult.targetColor, exportResult.strength, false, null, true, true, modelVariantArchivePath);
+          const staged = await stageLinkedTexture(worldmapMpqPath, supportPath, outputPath, exportResult.targetColor, exportResult.strength, null, true, true, modelVariantArchivePath);
           if (staged) stagedSupport.set(supportPath, staged);
         }
       }
-      const stagedHair = new Map();
-      if (includeLinkedHairColor || exportedBySource.size) {
-        for (const hairPath of hairPaths) {
-          const editedHairPath = exportedBySource.get(String(hairPath).toLowerCase());
-          if (editedHairPath) {
-            stagedHair.set(hairPath, editedHairPath);
-            continue;
-          }
-          if (!includeLinkedHairColor) continue;
-          const outputPath = replaceColorIndexInPath(hairPath, sourceRow.colorIndex, nextColor);
-          if (outputPath === hairPath) {
-            stagedHair.set(hairPath, null);
-            continue;
-          }
-          const staged = await stageLinkedTexture(worldmapMpqPath, hairPath, outputPath, exportResult.targetColor, exportResult.strength, false, {
-            painter: {
-              targetColor: exportResult.targetColor,
-              strength: exportResult.strength,
-              paletteBrush: exportResult.recoveryTransfer?.mode !== 'flat',
-              paletteColors: exportResult.recoveryTransfer?.paletteColors || [],
-              preserveShading: exportResult.recoveryTransfer?.preservePaintShading !== false,
-            },
-          }, false, false, modelVariantArchivePath);
-          stagedHair.set(hairPath, staged || null);
-        }
-      }
-      const stagedPathFor = texturePath => exportedBySource.get(String(texturePath || '').toLowerCase()) || (texturePath === sourceTexturePath ? newRelPath : stagedSkinBase.get(texturePath) || stagedSkinExtras.get(texturePath) || stagedFaces.get(texturePath) || stagedUnderwear.get(texturePath) || stagedSupport.get(texturePath) || (stagedHair.has(texturePath) ? stagedHair.get(texturePath) : texturePath));
+      const stagedHair = await stageNewSetParts(hairPaths, 3, false, false, {
+          painter: {
+            targetColor: exportResult.targetColor,
+            strength: exportResult.strength,
+            paletteBrush: exportResult.recoveryTransfer?.mode !== 'flat',
+            paletteColors: exportResult.recoveryTransfer?.paletteColors || [],
+            preserveShading: exportResult.recoveryTransfer?.preservePaintShading !== false,
+          },
+        });
+      const stagedPathFor = texturePath => exportedBySource.get(normalizeTexturePath(texturePath)) || (texturePath === sourceTexturePath ? newRelPath : stagedSkinBase.get(texturePath) || stagedSkinExtras.get(texturePath) || stagedFaces.get(texturePath) || stagedUnderwear.get(texturePath) || stagedSupport.get(texturePath) || (stagedHair.has(texturePath) ? stagedHair.get(texturePath) : texturePath));
       const clones = templates.map(r => ({
         ...r,
         id: nextId++,
@@ -1098,8 +1208,10 @@ export default function CharCustomizationPage() {
         tex3: stagedPathFor(r.tex3),
       }));
       const linkedTextureSources = {};
-      for (const [sourcePath, outputPath] of stagedHair) {
-        if (sourcePath && outputPath && sourcePath.toLowerCase() !== outputPath.toLowerCase()) linkedTextureSources[outputPath.toLowerCase()] = sourcePath;
+      for (const stagedParts of [stagedSkinExtras, stagedHair]) for (const [sourcePath, outputPath] of stagedParts) {
+        if (sourcePath && outputPath && normalizeTexturePath(sourcePath) !== normalizeTexturePath(outputPath)) {
+          linkedTextureSources[normalizeTexturePath(outputPath)] = sourcePath;
+        }
       }
       colorSetProvenanceStore.save({
         race: sourceRow.race,
@@ -1119,8 +1231,9 @@ export default function CharCustomizationPage() {
       setTextureRefreshKey(value => value + 1);
       if (selected) setSelectedId(selected.id);
       if (facePaths.length && stagedFaces.size !== facePaths.length) setSaveMsg(`Created Color ${nextColor}, but ${facePaths.length - stagedFaces.size} linked face texture(s) could not be staged.`);
-      else if (includeLinkedHairColor && hairPaths.length && stagedHair.size !== hairPaths.length) setSaveMsg(`Created Color ${nextColor}, but ${hairPaths.length - stagedHair.size} linked hair texture(s) could not be staged.`);
-      else setSaveMsg(`Created Color ${nextColor}${includeLinkedHairColor && stagedHair.size ? ` with ${stagedHair.size} linked hair texture(s)` : ''}. The texture and ${clones.length - 1} linked appearance records are staged; press Save to write the test DBC.`);
+      else if (skinExtraPaths.length && stagedSkinExtras.size !== skinExtraPaths.length) setSaveMsg(`Created Color ${nextColor}, but ${skinExtraPaths.length - stagedSkinExtras.size} linked Skin Extra texture(s) could not be staged.`);
+      else if (hairPaths.length && stagedHair.size !== hairPaths.length) setSaveMsg(`Created Color ${nextColor}, but ${hairPaths.length - stagedHair.size} linked hair texture(s) could not be staged.`);
+      else setSaveMsg(`Created Color ${nextColor}. The texture and ${clones.length - 1} linked appearance records are staged; press Save to write the test DBC.`);
     } else {
       const sameColorRows = groupRows.filter(r => r.colorIndex === sourceRow.colorIndex);
       const nextVariation = sameColorRows.reduce((m, r) => Math.max(m, r.variationIndex), -1) + 1;
@@ -1212,7 +1325,7 @@ export default function CharCustomizationPage() {
             : replaceColorIndexInPath(materialSource, sourceColorIndex, skinRow.colorIndex);
           const existing = allRecords.find(row => row.race === skinRow.race && row.sex === skinRow.sex && row.baseSection === sourceFace.baseSection && String(row[field] || '').toLowerCase() === outputPath.toLowerCase());
           const component = componentMappingFromPath(materialSource);
-          const written = reuseWorgenSupport || existing ? outputPath : await stageLinkedTexture(worldmapMpqPath, materialSource, outputPath, '#000000', 1, isFace, isFace ? { recovery, rect: mappings[component] } : null, !isFace, false, modelVariantArchivePath);
+          const written = reuseWorgenSupport || existing ? outputPath : await stageLinkedTexture(worldmapMpqPath, materialSource, outputPath, '#000000', 1, isFace ? { recovery, rect: mappings[component] } : null, !isFace, false, modelVariantArchivePath);
           staged[field] = written || null;
           if (!staged[field]) throw new Error(`could not stage ${sourcePath}`);
         }

@@ -19,7 +19,14 @@ let m2Services = null;
 const { registerServerIpc } = require('./server-ipc');
 const { registerSoapIpc } = require('./soap-ipc');
 const { getRuntimeResourceProfile, registerSystemIpc } = require('./system-ipc');
-const { decodeBLP, reencodeBlpDxtSelective, rgbaToPNG } = require('./blp-codec');
+const {
+  decodeBLP,
+  reencodeBlpDxtSelective,
+  getBlp2Format,
+  canonicalWorgenTextureTemplatePath,
+  assertWorgenTextureTemplate,
+  rgbaToPNG,
+} = require('./blp-codec');
 const { registerTalentAssetIpc } = require('./talent-assets-ipc');
 const { registerCharSectionsIpc } = require('./char-sections-ipc');
 const { resolveHeroicPortalTransform } = require('./dungeon-portal-resolver');
@@ -6250,6 +6257,21 @@ ipcMain.handle('dbc:readOutputBlpTexture', async (_, blpPath) => {
   }
 });
 
+async function readBlpWriteSource(mpqReader, dataPath, blpPath, archivePath = '') {
+  let buf = null;
+  if (archivePath && mpqReader.readFileFromMpqEntry) {
+    buf = await mpqReader.readFileFromMpqEntry(dataPath, archivePath, blpPath);
+  }
+  if (!buf && mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
+    buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
+  }
+  if (!buf) {
+    const direct = path.join(dataPath, blpPath.replace(/\\/g, path.sep));
+    if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
+  }
+  return buf;
+}
+
 // Schrijft een bewerkt deel van een BLP terug als nieuwe loose-file BLP.
 // editedRgbaBase64: volledige RGBA buffer (w*h*4) van de texture NA recolor.
 // maskBase64: grayscale buffer (w*h, 1 byte/pixel) >0 = bewerkt (zachte brush-randen tellen ook mee).
@@ -6260,26 +6282,34 @@ ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgb
     if (!dataPath || !blpPath || !outRelPath) {
       return { success: false, error: 'dataPath, blpPath of outRelPath ontbreekt' };
     }
-    let buf = null;
     const mpqReader = getMpqReader();
-    if (archivePath && mpqReader.readFileFromMpqEntry) {
-      buf = await mpqReader.readFileFromMpqEntry(dataPath, archivePath, blpPath);
-    }
-    if (!buf && mpqReader.isDataPath(dataPath) && mpqReader.readBlpFromMpqs) {
-      buf = await mpqReader.readBlpFromMpqs(dataPath, blpPath);
-    }
-    if (!buf) {
-      const direct = path.join(dataPath, blpPath.replace(/\\/g, path.sep));
-      if (fs.existsSync(direct)) buf = fs.readFileSync(direct);
-    }
+    let buf = await readBlpWriteSource(mpqReader, dataPath, blpPath, archivePath);
     if (!buf || buf.length < 4 || buf.toString('ascii', 0, 4) !== 'BLP2') {
       return { success: false, error: 'Bron-BLP niet gevonden of geen BLP2' };
     }
 
-    const w = buf.readUInt32LE(12);
-    const h = buf.readUInt32LE(16);
     const editedRgba = Buffer.from(editedRgbaBase64, 'base64');
     const maskBytes  = Buffer.from(maskBase64, 'base64');
+    const pixelCount = editedRgba.length / 4;
+    const requestedFormat = getBlp2Format(buf);
+    if (!requestedFormat || !Number.isInteger(pixelCount)) return { success: false, error: 'Bron-BLP of RGBA-data is ongeldig' };
+    let w = requestedFormat.width;
+    let h = requestedFormat.height;
+    const canonicalTemplatePath = canonicalWorgenTextureTemplatePath(outRelPath);
+    if (canonicalTemplatePath) {
+      const canonicalTemplate = await readBlpWriteSource(mpqReader, dataPath, canonicalTemplatePath, archivePath);
+      const editedWidth = requestedFormat.width;
+      const editedHeight = pixelCount / editedWidth;
+      if (!Number.isInteger(editedHeight)) return { success: false, error: `RGBA grootte past niet bij bronbreedte ${editedWidth}` };
+      try {
+        assertWorgenTextureTemplate(canonicalTemplate, canonicalTemplatePath, editedWidth, editedHeight);
+      } catch (error) {
+        return { success: false, error: error.message };
+      }
+      buf = canonicalTemplate;
+      w = editedWidth;
+      h = editedHeight;
+    }
     if (editedRgba.length !== w * h * 4) {
       return { success: false, error: `RGBA grootte klopt niet (verwacht ${w*h*4}, kreeg ${editedRgba.length})` };
     }
@@ -6291,6 +6321,13 @@ ipcMain.handle('dbc:writeBlpTextureEdit', async (_, dataPath, blpPath, editedRgb
     for (let i = 0; i < w * h; i++) maskBool[i] = maskBytes[i] > 0; // elke aanraking, ook zachte brush-randen, telt mee
 
     const newBlp = reencodeBlpDxtSelective(buf, editedRgba, maskBool, w, h);
+    if (canonicalTemplatePath) {
+      try {
+        assertWorgenTextureTemplate(newBlp, outRelPath, w, h);
+      } catch (error) {
+        return { success: false, error: `Outputvalidatie mislukt: ${error.message}` };
+      }
+    }
 
     const safeRelPath = outRelPath.replace(/\\/g, path.sep);
     if (path.isAbsolute(safeRelPath) || safeRelPath.split(path.sep).includes('..')) return { success: false, error: 'Ongeldig uitvoerpad' };

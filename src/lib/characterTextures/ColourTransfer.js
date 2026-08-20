@@ -62,7 +62,7 @@ export function buildChangedProtection(original, edited, protectedMask = null, t
   return out;
 }
 
-export function applyColourMap(image, colourMap, protectedMask = null, brightnessMatch = .38, paletteSmoothness = .7) {
+export function applyColourMap(image, colourMap, protectedMask = null, brightnessMatch = .38, paletteSmoothness = .7, applyMask = null) {
   const out = new Uint8ClampedArray(image.data);
   const entries = colourMap.map(entry => ({
     ...entry,
@@ -72,7 +72,7 @@ export function applyColourMap(image, colourMap, protectedMask = null, brightnes
   const spread = .012 + Math.max(0, Math.min(1, paletteSmoothness)) * .105;
   for (let i = 0; i < image.width * image.height; i++) {
     const offset = i * 4;
-    if (image.data[offset + 3] <= 12 || protectedMask?.[i]) continue;
+    if (image.data[offset + 3] <= 12 || protectedMask?.[i] || (applyMask && !applyMask[i])) continue;
     const sourceHsl = rgbToHsl(image.data[offset], image.data[offset + 1], image.data[offset + 2]);
     const nearest = entries.map(entry => {
       const hue = hueDistance(sourceHsl[0], entry.sourceHsl[0]) / 180;
@@ -95,8 +95,12 @@ export function applyColourMap(image, colourMap, protectedMask = null, brightnes
     targetSaturation /= weightTotal;
     targetLightness /= weightTotal;
     sourceLightness /= weightTotal;
-    const lightnessDelta = (targetLightness - sourceLightness) * Math.max(0, Math.min(1, brightnessMatch));
-    const [r, g, b] = hslToRgb(targetHue, targetSaturation, Math.max(.012, Math.min(.95, sourceHsl[2] + lightnessDelta)));
+    const outputLightness = targetLightness <= .02
+      // A black transfer still needs the source luminance/detail. Mapping it
+      // directly to targetLightness would flatten the Face to RGB 0,0,0.
+      ? Math.max(.012, Math.min(.32, .018 + Math.pow(sourceHsl[2], .85) * .38))
+      : Math.max(.012, Math.min(.95, sourceHsl[2] + (targetLightness - sourceLightness) * Math.max(0, Math.min(1, brightnessMatch))));
+    const [r, g, b] = hslToRgb(targetHue, targetLightness <= .02 ? 0 : targetSaturation, outputLightness);
     out[offset] = r; out[offset + 1] = g; out[offset + 2] = b;
   }
   return new ImageData(out, image.width, image.height);

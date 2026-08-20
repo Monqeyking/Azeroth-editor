@@ -9,7 +9,21 @@ export function hexToHsl(hex) { const value = parseInt(hex.slice(1), 16); return
 export class TextureRecolorEngine {
   recolor(rgba, mask, targetHex, strength = 1, { preserveShading = true, paletteBrush = false } = {}) {
     const out = new Uint8ClampedArray(rgba), [h, s, targetLightness] = hexToHsl(targetHex);
-    for (let i = 0; i < mask.length; i++) { const amount = (mask[i] / 255) * strength; if (!amount) continue; const o=i*4, [, , lightness] = rgbToHsl(out[o],out[o+1],out[o+2]); const outputLightness = paletteBrush ? Math.max(.015, Math.min(.95, targetLightness + (lightness - .5) * .68)) : (preserveShading ? lightness : targetLightness); const [r,g,b] = hslToRgb(h, paletteBrush ? s : (targetLightness <= .02 ? 0 : s), outputLightness); out[o] += (r - out[o]) * amount; out[o+1] += (g - out[o+1]) * amount; out[o+2] += (b - out[o+2]) * amount; }
+    for (let i = 0; i < mask.length; i++) {
+      const amount = (mask[i] / 255) * strength;
+      if (!amount) continue;
+      const o = i * 4;
+      const [, , lightness] = rgbToHsl(out[o], out[o + 1], out[o + 2]);
+      const outputLightness = paletteBrush
+        ? Math.max(.015, Math.min(.95, targetLightness + (lightness - .5) * .68))
+        : targetLightness <= .02 && preserveShading
+          ? Math.max(.012, Math.min(.32, .018 + Math.pow(lightness, .85) * .38))
+          : preserveShading ? lightness : targetLightness;
+      const [r, g, b] = hslToRgb(h, paletteBrush ? s : (targetLightness <= .02 ? 0 : s), outputLightness);
+      out[o] += (r - out[o]) * amount;
+      out[o + 1] += (g - out[o + 1]) * amount;
+      out[o + 2] += (b - out[o + 2]) * amount;
+    }
     return out;
   }
 }
